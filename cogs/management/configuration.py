@@ -1,0 +1,139 @@
+from __future__ import annotations
+
+import discord
+from discord import app_commands
+from discord.ext import commands
+
+from database.repositories.settings import SettingsRepository
+from helpers.embeds import EmbedFactory
+
+
+class Setup(commands.GroupCog, group_name="setup", group_description="Configure Raspberry-Bot for this server"):
+    def __init__(self, bot: commands.Bot) -> None:
+        self.bot = bot
+        self.repo = SettingsRepository(bot.database, bot.cache)
+
+    @app_commands.command(name="tickets", description="Configure the category and log channel for the ticket system.")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_guild=True)
+    async def tickets(
+        self,
+        interaction: discord.Interaction,
+        category: discord.CategoryChannel,
+        log_channel: discord.TextChannel,
+    ) -> None:
+        if interaction.guild_id is None:
+            return
+        await self.repo.update_guild_settings(
+            interaction.guild_id,
+            ticket_category_id=category.id,
+            ticket_log_channel_id=log_channel.id,
+        )
+        await self.bot.cache.get_cache("guild_settings").delete(interaction.guild_id)
+        await interaction.response.send_message(
+            embed=EmbedFactory.success(
+                title="Ticket system configured",
+                description=f"Category: **{category.name}**\nLogs: {log_channel.mention}",
+            ),
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="staff-add", description="Add a role that may claim and manage tickets.")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_guild=True)
+    async def staff_add(
+        self,
+        interaction: discord.Interaction,
+        role: discord.Role,
+        permission_level: app_commands.Range[int, 1, 100] = 10,
+    ) -> None:
+        if interaction.guild_id is None:
+            return
+        await self.repo.add_ticket_staff_role(interaction.guild_id, role.id, int(permission_level))
+        await self.bot.cache.get_cache("permissions").clear()
+        await interaction.response.send_message(
+            embed=EmbedFactory.success(title="Ticket staff role added", description=f"{role.mention} • level {permission_level}"),
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="staff-remove", description="Remove a ticket staff role.")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_guild=True)
+    async def staff_remove(self, interaction: discord.Interaction, role: discord.Role) -> None:
+        if interaction.guild_id is None:
+            return
+        await self.repo.remove_ticket_staff_role(interaction.guild_id, role.id)
+        await self.bot.cache.get_cache("permissions").clear()
+        await interaction.response.send_message(
+            embed=EmbedFactory.success(title="Ticket staff role removed", description=role.mention),
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="welcome", description="Set or disable the welcome channel.")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_guild=True)
+    async def welcome(self, interaction: discord.Interaction, channel: discord.TextChannel | None = None) -> None:
+        if interaction.guild_id is None:
+            return
+        await self.repo.update_guild_settings(interaction.guild_id, welcome_channel_id=channel.id if channel else None)
+        await interaction.response.send_message(
+            embed=EmbedFactory.success(
+                title="Welcome configuration updated",
+                description=f"Welcome channel: {channel.mention if channel else '**Disabled**'}",
+            ),
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="suggestions", description="Set or disable the suggestions channel.")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_guild=True)
+    async def suggestions(self, interaction: discord.Interaction, channel: discord.TextChannel | None = None) -> None:
+        if interaction.guild_id is None:
+            return
+        await self.repo.update_guild_settings(interaction.guild_id, suggestion_channel_id=channel.id if channel else None)
+        await interaction.response.send_message(
+            embed=EmbedFactory.success(
+                title="Suggestion configuration updated",
+                description=f"Suggestion channel: {channel.mention if channel else '**Disabled**'}",
+            ),
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="logs", description="Set or disable the general audit log channel.")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_guild=True)
+    async def logs(self, interaction: discord.Interaction, channel: discord.TextChannel | None = None) -> None:
+        if interaction.guild_id is None:
+            return
+        await self.repo.update_guild_settings(interaction.guild_id, general_log_channel_id=channel.id if channel else None)
+        await interaction.response.send_message(
+            embed=EmbedFactory.success(
+                title="Audit logging updated",
+                description=f"Log channel: {channel.mention if channel else '**Disabled**'}",
+            ),
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="show", description="Show the current server configuration.")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_guild=True)
+    async def show(self, interaction: discord.Interaction) -> None:
+        if interaction.guild_id is None:
+            return
+        data = await self.repo.get_guild_settings(interaction.guild_id)
+        roles = await self.repo.list_ticket_staff_roles(interaction.guild_id)
+        embed = EmbedFactory.info(title="Server Configuration")
+        embed.add_field(name="Ticket category", value=f"<#{data['ticket_category_id']}>" if data.get("ticket_category_id") else "—", inline=True)
+        embed.add_field(name="Ticket logs", value=f"<#{data['ticket_log_channel_id']}>" if data.get("ticket_log_channel_id") else "—", inline=True)
+        embed.add_field(name="Welcome", value=f"<#{data['welcome_channel_id']}>" if data.get("welcome_channel_id") else "Disabled", inline=True)
+        embed.add_field(name="Suggestions", value=f"<#{data['suggestion_channel_id']}>" if data.get("suggestion_channel_id") else "Disabled", inline=True)
+        embed.add_field(name="Audit logs", value=f"<#{data['general_log_channel_id']}>" if data.get("general_log_channel_id") else "Disabled", inline=True)
+        role_text = "\n".join(f"<@&{role_id}>" for role_id in roles[:20]) or "—"
+        if len(roles) > 20:
+            role_text += f"\n…and {len(roles) - 20} more"
+        embed.add_field(name="Ticket staff roles", value=role_text, inline=False)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+async def setup(bot: commands.Bot) -> None:
+    await bot.add_cog(Setup(bot))

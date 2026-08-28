@@ -1,0 +1,24 @@
+[Unit]
+Description=Raspberry-Bot Discord Bot
+After=network-online.target pihole-FTL.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=stefano
+Group=stefano
+WorkingDirectory=/home/stefano/services/Raspberry-Bot
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/stefano/services/Raspberry-Bot/.venv/bin/python /home/stefano/services/Raspberry-Bot/bot.py
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=false
+ReadWritePaths=/home/stefano/services/Raspberry-Bot/data /home/stefano/services/Raspberry-Bot/logs
+
+[Install]
+WantedBy=multi-user.target
