@@ -1,5 +1,5 @@
 [Unit]
-Description=HomePi Raspberry-Bot Dashboard
+Description=HomePi Raspberry-Bot Dashboard v3
 After=network-online.target raspberry-bot.service
 Wants=network-online.target
 
