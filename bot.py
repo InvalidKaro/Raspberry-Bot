@@ -58,7 +58,7 @@ class RaspberryBot(commands.Bot):
                 users=True,
                 replied_user=False,
             ),
-            activity=discord.Game(name="/help • Raspberry-Bot"),
+            activity=discord.Game(name="/help • by invalidkaro"),
         )
 
         self.settings = settings
