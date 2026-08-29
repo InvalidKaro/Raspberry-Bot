@@ -1,0 +1,2 @@
+# Verify systemctl path with: command -v systemctl
+stefano ALL=(root) NOPASSWD: /usr/bin/systemctl start raspberry-bot, /usr/bin/systemctl stop raspberry-bot, /usr/bin/systemctl restart raspberry-bot
