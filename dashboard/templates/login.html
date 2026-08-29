@@ -1,1 +1,24 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>HomePi Control</title><link rel="stylesheet" href="/static/style.css"></head><body class="login-body"><main class="login-card"><div class="brand-mark">HP</div><p class="eyebrow">HOMEPI CONTROL</p><h1>Dashboard login</h1><p class="muted">Sign in with the private dashboard password stored only on your Pi.</p><!--ERROR--><form method="post" action="/login" class="login-form"><label for="token">Dashboard password</label><input id="token" name="token" type="password" autocomplete="current-password" required minlength="12"><button type="submit" class="primary">Sign in</button></form></main></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>HomePi Control</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="login-body">
+  <main class="login-card">
+    <div class="brand-mark">HP</div>
+    <p class="eyebrow">HOMEPI CONTROL</p>
+    <h1>Welcome back</h1>
+    <p class="muted">Private control plane for your Raspberry-Bot.</p>
+    <!--ERROR-->
+    <form method="post" action="/login" class="login-form">
+      <label for="token">Dashboard password</label>
+      <input id="token" name="token" type="password" autocomplete="current-password" required minlength="12">
+      <button type="submit" class="primary">Sign in</button>
+    </form>
+  </main>
+</body>
+</html>

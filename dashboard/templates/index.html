@@ -1,30 +1,96 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><meta name="dashboard-csrf" content="__DASHBOARD_CSRF__"><meta name="bot-service" content="__BOT_SERVICE__"><title>HomePi Control</title><link rel="stylesheet" href="/static/style.css"></head>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>HomePi Control</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
 <body>
-<div class="app-shell">
-<aside class="sidebar"><div><p class="eyebrow">HOMEPI</p><h1>Control</h1></div><nav><button class="nav-item active" type="button" data-section="overview">Overview</button><button class="nav-item" type="button" data-section="logs">Bot logs</button><button class="nav-item" type="button" data-section="git">Git</button></nav><form action="/logout" method="post" id="logout-form"><button class="nav-item danger-soft" type="submit">Log out</button></form></aside>
-<main class="content">
-<header class="topbar"><div><p class="eyebrow">RASPBERRY PI</p><h2 id="page-title">System overview</h2></div><div class="top-actions"><span class="status-pill" id="bot-pill"><span class="dot"></span><span>Loading</span></span><button type="button" id="refresh-button">Refresh</button></div></header>
-<section id="overview" class="section active">
-<div class="hero-grid">
-<article class="hero-card"><div><p class="card-label">BOT SERVICE</p><strong id="bot-status">Checking…</strong><p class="muted" id="bot-service-name"></p></div><div class="button-row"><button type="button" class="primary" data-bot-action="restart">Restart</button><button type="button" data-bot-action="start">Start</button><button type="button" data-bot-action="stop">Stop</button></div></article>
-<article class="hero-card"><div><p class="card-label">PI-HOLE</p><strong id="pihole-status">Checking…</strong><p class="muted" id="pihole-detail">DNS status</p></div></article>
-</div>
-<div class="metric-grid">
-<article class="metric"><span>CPU</span><strong id="cpu">—</strong><div class="bar"><i id="cpu-bar"></i></div></article>
-<article class="metric"><span>Temperature</span><strong id="temp">—</strong><div class="bar"><i id="temp-bar"></i></div></article>
-<article class="metric"><span>RAM</span><strong id="ram">—</strong><small id="ram-detail">—</small><div class="bar"><i id="ram-bar"></i></div></article>
-<article class="metric"><span>Storage</span><strong id="disk">—</strong><small id="disk-detail">—</small><div class="bar"><i id="disk-bar"></i></div></article>
-</div>
-<div class="detail-grid">
-<article class="panel"><div class="panel-head"><div><p class="card-label">SYSTEM</p><h3>Runtime</h3></div></div><dl class="facts"><div><dt>Uptime</dt><dd id="uptime">—</dd></div><div><dt>Load</dt><dd id="load">—</dd></div><div><dt>Network received</dt><dd id="net-rx">—</dd></div><div><dt>Network sent</dt><dd id="net-tx">—</dd></div></dl></article>
-<article class="panel"><div class="panel-head"><div><p class="card-label">GIT</p><h3>Repository</h3></div><span class="branch" id="branch">—</span></div><p class="commit" id="last-commit">Loading repository…</p><p class="muted" id="git-summary">—</p></article>
-</div>
-</section>
-<section id="logs" class="section"><article class="panel"><div class="panel-head"><div><p class="card-label">JOURNALCTL</p><h3>Bot logs</h3></div><button type="button" id="logs-refresh">Reload logs</button></div><pre id="log-output">Select “Reload logs” to read the latest service logs.</pre></article></section>
-<section id="git" class="section"><div class="detail-grid"><article class="panel"><p class="card-label">REPOSITORY</p><h3 id="git-branch-title">Branch —</h3><p class="commit" id="git-commit-detail">—</p><div class="button-row"><button type="button" class="primary" data-git-action="pull">Pull (ff-only)</button><button type="button" data-git-action="push">Push</button></div><p class="muted small-note">Push uses the Git credentials already configured on this Raspberry Pi.</p></article><article class="panel"><div class="panel-head"><div><p class="card-label">WORKTREE</p><h3>Changed files</h3></div><span class="branch" id="change-count">0</span></div><pre id="git-changes">Clean working tree.</pre></article></div><article class="panel action-output-panel"><div class="panel-head"><div><p class="card-label">OUTPUT</p><h3>Git action result</h3></div></div><pre id="git-output">No Git action run yet.</pre></article></section>
-<div id="toast" role="status" aria-live="polite"></div>
-</main></div>
-<script src="/static/app.js"></script>
-</body></html>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand"><div class="brand-mark small">HP</div><div><p class="eyebrow">HOMEPI</p><strong>Control</strong></div></div>
+      <nav>
+        <button class="nav-item active" type="button" data-section="overview">Overview</button>
+        <button class="nav-item" type="button" data-section="botconfig">Bot config</button>
+        <button class="nav-item" type="button" data-section="code">Code</button>
+        <button class="nav-item" type="button" data-section="git">Git & deploy</button>
+        <button class="nav-item" type="button" data-section="logs">Logs</button>
+      </nav>
+      <button id="logout-button" class="nav-item danger-soft" type="button">Log out</button>
+    </aside>
+
+    <main class="content">
+      <header class="topbar">
+        <div><p class="eyebrow">RASPBERRY PI</p><h1 id="page-title">System overview</h1></div>
+        <div class="top-actions">
+          <span class="status-pill" id="bot-pill"><span class="dot"></span><span>Loading</span></span>
+          <button type="button" id="refresh-button">Refresh</button>
+        </div>
+      </header>
+
+      <section id="overview" class="section active">
+        <div class="hero-grid">
+          <article class="hero-card accent-card"><div><p class="card-label">RASPBERRY-BOT</p><strong id="bot-status">Checking…</strong><p class="muted" id="bot-service-name">—</p></div><div class="button-row"><button class="primary" data-bot-action="restart">Restart</button><button data-bot-action="start">Start</button><button data-bot-action="stop">Stop</button></div></article>
+          <article class="hero-card"><div><p class="card-label">PI-HOLE</p><strong id="pihole-status">Checking…</strong><p class="muted" id="pihole-detail">DNS status</p></div></article>
+        </div>
+        <div class="metric-grid">
+          <article class="metric"><span>CPU</span><strong id="cpu">—</strong><div class="bar"><i id="cpu-bar"></i></div></article>
+          <article class="metric"><span>Temperature</span><strong id="temp">—</strong><div class="bar"><i id="temp-bar"></i></div></article>
+          <article class="metric"><span>RAM</span><strong id="ram">—</strong><small id="ram-detail">—</small><div class="bar"><i id="ram-bar"></i></div></article>
+          <article class="metric"><span>Storage</span><strong id="disk">—</strong><small id="disk-detail">—</small><div class="bar"><i id="disk-bar"></i></div></article>
+        </div>
+        <div class="detail-grid">
+          <article class="panel"><div class="panel-head"><div><p class="card-label">SYSTEM</p><h2>Runtime</h2></div></div><dl class="facts"><div><dt>Uptime</dt><dd id="uptime">—</dd></div><div><dt>Load</dt><dd id="load">—</dd></div><div><dt>Network RX</dt><dd id="net-rx">—</dd></div><div><dt>Network TX</dt><dd id="net-tx">—</dd></div></dl></article>
+          <article class="panel"><div class="panel-head"><div><p class="card-label">REPOSITORY</p><h2 id="overview-branch">Git</h2></div><span class="branch" id="overview-change-count">—</span></div><p id="overview-commit" class="commit">Loading…</p><p id="overview-git-summary" class="muted">—</p></article>
+        </div>
+      </section>
+
+      <section id="botconfig" class="section">
+        <div class="section-intro"><div><p class="card-label">DISCORD</p><h2>Server configuration</h2><p class="muted">Edit the same SQLite settings used by the slash-command setup flow.</p></div></div>
+        <article class="panel">
+          <div class="form-grid two"><label>Discord server<select id="guild-select"><option value="">Loading servers…</option></select></label><label>Embed color<input id="embed-color" type="text" placeholder="#5865F2" maxlength="7"></label></div>
+          <div class="form-grid two">
+            <label>Ticket category<select id="ticket-category"><option value="">Disabled / not set</option></select></label>
+            <label>Ticket log channel<select id="ticket-log"><option value="">Disabled / not set</option></select></label>
+            <label>Welcome channel<select id="welcome-channel"><option value="">Disabled</option></select></label>
+            <label>Suggestions channel<select id="suggestion-channel"><option value="">Disabled</option></select></label>
+            <label>Audit log channel<select id="audit-channel"><option value="">Disabled</option></select></label>
+            <label>Ticket staff roles<select id="staff-roles" multiple size="6"></select></label>
+          </div>
+          <div class="button-row end"><span id="config-status" class="muted">Choose a server.</span><button id="save-config" class="primary" type="button" disabled>Save & apply</button></div>
+        </article>
+      </section>
+
+      <section id="code" class="section">
+        <div class="editor-layout">
+          <aside class="file-panel">
+            <div class="file-panel-head"><div><p class="card-label">REPOSITORY</p><h2>Files</h2></div><button id="reload-files" type="button">↻</button></div>
+            <input id="file-filter" type="search" placeholder="Filter files…">
+            <div id="file-list" class="file-list"><p class="muted pad">Loading files…</p></div>
+          </aside>
+          <article class="editor-panel">
+            <div class="editor-toolbar"><div><p class="card-label">EDITOR</p><strong id="editor-path">Select a file</strong></div><div class="button-row"><button id="validate-code" type="button" disabled>Validate</button><button id="save-code" class="primary" type="button" disabled>Save</button></div></div>
+            <textarea id="code-editor" spellcheck="false" disabled placeholder="Select an editable repository file from the left."></textarea>
+            <div class="editor-status"><span id="editor-message">No file selected.</span><span id="editor-position">—</span></div>
+          </article>
+        </div>
+      </section>
+
+      <section id="git" class="section">
+        <div class="detail-grid">
+          <article class="panel"><div class="panel-head"><div><p class="card-label">VERSION CONTROL</p><h2 id="git-branch-title">Branch —</h2></div><span id="change-count" class="branch">0 changes</span></div><p id="git-commit-detail" class="commit">—</p><div class="button-row"><button data-git-action="pull">Pull</button><button data-git-action="push">Push</button><button id="refresh-diff">Refresh diff</button></div></article>
+          <article class="panel"><p class="card-label">COMMIT</p><h2>Selected changes</h2><input id="commit-message" type="text" maxlength="120" placeholder="Commit message"><div id="commit-files" class="check-list"></div><button id="commit-button" class="primary full" type="button">Commit selected</button></article>
+        </div>
+        <article class="panel action-output-panel"><div class="panel-head"><div><p class="card-label">DIFF</p><h2>Working tree</h2></div></div><pre id="git-diff">Loading diff…</pre></article>
+        <article class="panel action-output-panel"><div class="panel-head"><div><p class="card-label">DEPLOY</p><h2>Validate → restart → health check</h2></div></div><div class="button-row"><button id="deploy-button" class="primary" type="button">Deploy current code</button><button id="rollback-button" class="danger" type="button">Rollback last deploy</button></div><pre id="deploy-output">No deployment action run yet.</pre></article>
+      </section>
+
+      <section id="logs" class="section"><article class="panel"><div class="panel-head"><div><p class="card-label">JOURNALCTL</p><h2>Bot logs</h2></div><button id="logs-refresh" type="button">Reload logs</button></div><pre id="log-output">Open this page to load logs.</pre></article></section>
+      <div id="toast" role="status" aria-live="polite"></div>
+    </main>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
