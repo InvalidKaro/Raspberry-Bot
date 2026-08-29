@@ -29,6 +29,21 @@ class DeployService:
         )
         return {"ok": result.ok, "message": result.stderr or result.stdout or "Python compile check passed."}
 
+    async def install_requirements(self) -> dict:
+        python = self.repo_path / ".venv" / "bin" / "python"
+        requirements = self.repo_path / "requirements.txt"
+        if not python.is_file():
+            return {"ok": False, "message": f"Python venv not found: {python}"}
+        if not requirements.is_file():
+            return {"ok": False, "message": "requirements.txt was not found."}
+        result = await run_command(
+            [str(python), "-m", "pip", "install", "-r", str(requirements)],
+            cwd=str(self.repo_path),
+            timeout=180,
+        )
+        output = result.stdout or result.stderr or "requirements installation finished."
+        return {"ok": result.ok, "message": output[-12000:]}
+
     async def deploy(self) -> dict:
         status = await self.git.status()
         if status.get("dirty"):
