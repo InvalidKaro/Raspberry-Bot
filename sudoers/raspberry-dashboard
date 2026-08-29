@@ -1,2 +1,2 @@
-# Verify systemctl path with: command -v systemctl
+# HomePi dashboard may only control Raspberry-Bot through systemd.
 stefano ALL=(root) NOPASSWD: /usr/bin/systemctl start raspberry-bot, /usr/bin/systemctl stop raspberry-bot, /usr/bin/systemctl restart raspberry-bot
