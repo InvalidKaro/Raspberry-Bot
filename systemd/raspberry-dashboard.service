@@ -1,0 +1,19 @@
+[Unit]
+Description=HomePi Raspberry-Bot Dashboard
+After=network-online.target raspberry-bot.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=stefano
+Group=stefano
+WorkingDirectory=/home/stefano/services/Raspberry-Bot
+EnvironmentFile=/home/stefano/services/Raspberry-Bot/.env.dashboard
+ExecStart=/home/stefano/services/Raspberry-Bot/.venv/bin/python -m dashboard.app
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
