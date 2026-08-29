@@ -14,9 +14,12 @@
       <nav>
         <button class="nav-item active" type="button" data-section="overview">Overview</button>
         <button class="nav-item" type="button" data-section="botconfig">Bot config</button>
-        <button class="nav-item" type="button" data-section="code">Code</button>
+        <button class="nav-item" type="button" data-section="botdata">Bot data</button>
+        <button class="nav-item" type="button" data-section="code">Code & files</button>
         <button class="nav-item" type="button" data-section="git">Git & deploy</button>
-        <button class="nav-item" type="button" data-section="logs">Logs</button>
+        <button class="nav-item" type="button" data-section="system">System</button>
+        <button class="nav-item" type="button" data-section="backups">Backups</button>
+        <button class="nav-item" type="button" data-section="logs">Logs & audit</button>
       </nav>
       <button id="logout-button" class="nav-item danger-soft" type="button">Log out</button>
     </aside>
@@ -24,70 +27,63 @@
     <main class="content">
       <header class="topbar">
         <div><p class="eyebrow">RASPBERRY PI</p><h1 id="page-title">System overview</h1></div>
-        <div class="top-actions">
-          <span class="status-pill" id="bot-pill"><span class="dot"></span><span>Loading</span></span>
-          <button type="button" id="refresh-button">Refresh</button>
-        </div>
+        <div class="top-actions"><span class="status-pill" id="bot-pill"><span class="dot"></span><span>Loading</span></span><button type="button" id="refresh-button">Refresh</button></div>
       </header>
 
       <section id="overview" class="section active">
         <div class="hero-grid">
           <article class="hero-card accent-card"><div><p class="card-label">RASPBERRY-BOT</p><strong id="bot-status">Checking…</strong><p class="muted" id="bot-service-name">—</p></div><div class="button-row"><button class="primary" data-bot-action="restart">Restart</button><button data-bot-action="start">Start</button><button data-bot-action="stop">Stop</button></div></article>
-          <article class="hero-card"><div><p class="card-label">PI-HOLE</p><strong id="pihole-status">Checking…</strong><p class="muted" id="pihole-detail">DNS status</p></div></article>
+          <article class="hero-card"><div><p class="card-label">REMOTE ACCESS</p><strong id="tailscale-status">Checking…</strong><p class="muted" id="tailscale-detail">Tailscale</p></div></article>
         </div>
-        <div class="metric-grid">
-          <article class="metric"><span>CPU</span><strong id="cpu">—</strong><div class="bar"><i id="cpu-bar"></i></div></article>
-          <article class="metric"><span>Temperature</span><strong id="temp">—</strong><div class="bar"><i id="temp-bar"></i></div></article>
-          <article class="metric"><span>RAM</span><strong id="ram">—</strong><small id="ram-detail">—</small><div class="bar"><i id="ram-bar"></i></div></article>
-          <article class="metric"><span>Storage</span><strong id="disk">—</strong><small id="disk-detail">—</small><div class="bar"><i id="disk-bar"></i></div></article>
-        </div>
+        <div class="metric-grid"><article class="metric"><span>CPU</span><strong id="cpu">—</strong><div class="bar"><i id="cpu-bar"></i></div></article><article class="metric"><span>Temperature</span><strong id="temp">—</strong><div class="bar"><i id="temp-bar"></i></div></article><article class="metric"><span>RAM</span><strong id="ram">—</strong><small id="ram-detail">—</small><div class="bar"><i id="ram-bar"></i></div></article><article class="metric"><span>Storage</span><strong id="disk">—</strong><small id="disk-detail">—</small><div class="bar"><i id="disk-bar"></i></div></article></div>
+        <div class="quick-actions"><button data-bot-action="restart" class="primary">Restart bot</button><button data-nav="logs">View errors</button><button data-nav="code">Edit code</button><button data-git-action="pull">Git pull</button><button data-nav="git">Deploy</button><button data-nav="system">System</button></div>
         <div class="detail-grid">
           <article class="panel"><div class="panel-head"><div><p class="card-label">SYSTEM</p><h2>Runtime</h2></div></div><dl class="facts"><div><dt>Uptime</dt><dd id="uptime">—</dd></div><div><dt>Load</dt><dd id="load">—</dd></div><div><dt>Network RX</dt><dd id="net-rx">—</dd></div><div><dt>Network TX</dt><dd id="net-tx">—</dd></div></dl></article>
           <article class="panel"><div class="panel-head"><div><p class="card-label">REPOSITORY</p><h2 id="overview-branch">Git</h2></div><span class="branch" id="overview-change-count">—</span></div><p id="overview-commit" class="commit">Loading…</p><p id="overview-git-summary" class="muted">—</p></article>
         </div>
+        <div class="detail-grid top-gap">
+          <article class="panel"><div class="panel-head"><div><p class="card-label">PI-HOLE</p><h2 id="pihole-status">Checking…</h2></div></div><p class="muted" id="pihole-detail">DNS status</p></article>
+          <article class="panel"><div class="panel-head"><div><p class="card-label">BOT DATABASE</p><h2>Activity</h2></div></div><dl class="facts"><div><dt>Open tickets</dt><dd id="ov-tickets">—</dd></div><div><dt>Commands / 24h</dt><dd id="ov-commands">—</dd></div><div><dt>Moderation cases</dt><dd id="ov-cases">—</dd></div></dl></article>
+        </div>
       </section>
 
       <section id="botconfig" class="section">
-        <div class="section-intro"><div><p class="card-label">DISCORD</p><h2>Server configuration</h2><p class="muted">Edit the same SQLite settings used by the slash-command setup flow.</p></div></div>
-        <article class="panel">
-          <div class="form-grid two"><label>Discord server<select id="guild-select"><option value="">Loading servers…</option></select></label><label>Embed color<input id="embed-color" type="text" placeholder="#5865F2" maxlength="7"></label></div>
-          <div class="form-grid two">
-            <label>Ticket category<select id="ticket-category"><option value="">Disabled / not set</option></select></label>
-            <label>Ticket log channel<select id="ticket-log"><option value="">Disabled / not set</option></select></label>
-            <label>Welcome channel<select id="welcome-channel"><option value="">Disabled</option></select></label>
-            <label>Suggestions channel<select id="suggestion-channel"><option value="">Disabled</option></select></label>
-            <label>Audit log channel<select id="audit-channel"><option value="">Disabled</option></select></label>
-            <label>Ticket staff roles<select id="staff-roles" multiple size="6"></select></label>
-          </div>
-          <div class="button-row end"><span id="config-status" class="muted">Choose a server.</span><button id="save-config" class="primary" type="button" disabled>Save & apply</button></div>
-        </article>
+        <div class="section-intro"><div><p class="card-label">DISCORD</p><h2>Server configuration</h2><p class="muted">Edit the SQLite settings used by Raspberry-Bot.</p></div></div>
+        <article class="panel"><div class="form-grid two"><label>Discord server<select id="guild-select"><option value="">Loading servers…</option></select></label><label>Embed color<input id="embed-color" type="text" placeholder="#5865F2" maxlength="7"></label></div><div class="form-grid two"><label>Ticket category<select id="ticket-category"><option value="">Disabled / not set</option></select></label><label>Ticket log channel<select id="ticket-log"><option value="">Disabled / not set</option></select></label><label>Welcome channel<select id="welcome-channel"><option value="">Disabled</option></select></label><label>Suggestions channel<select id="suggestion-channel"><option value="">Disabled</option></select></label><label>Audit log channel<select id="audit-channel"><option value="">Disabled</option></select></label><label>Ticket staff roles<select id="staff-roles" multiple size="7"></select></label></div><div class="button-row end"><span id="config-status" class="muted">Choose a server.</span><button id="save-config" class="primary" type="button" disabled>Save & apply</button></div></article>
+      </section>
+
+      <section id="botdata" class="section">
+        <div class="metric-grid compact"><article class="metric"><span>Open tickets</span><strong id="data-open-tickets">—</strong></article><article class="metric"><span>Total tickets</span><strong id="data-total-tickets">—</strong></article><article class="metric"><span>Mod cases</span><strong id="data-mod-cases">—</strong></article><article class="metric"><span>Commands / 24h</span><strong id="data-commands">—</strong></article></div>
+        <div class="detail-grid"><article class="panel"><div class="panel-head"><div><p class="card-label">BOT PROJECT</p><h2>Extensions & commands</h2></div><span class="branch" id="project-command-count">—</span></div><div id="project-summary" class="stack-list"></div></article><article class="panel"><div class="panel-head"><div><p class="card-label">COMMAND USAGE</p><h2>Top commands</h2></div></div><div id="top-commands" class="stack-list"></div></article></div>
+        <div class="detail-grid top-gap"><article class="panel"><div class="panel-head"><div><p class="card-label">TICKETS</p><h2>Recent tickets</h2></div></div><div class="table-wrap"><table><thead><tr><th>ID</th><th>Subject</th><th>Priority</th><th>Status</th></tr></thead><tbody id="tickets-table"></tbody></table></div></article><article class="panel"><div class="panel-head"><div><p class="card-label">MODERATION</p><h2>Recent cases</h2></div></div><div class="table-wrap"><table><thead><tr><th>ID</th><th>Action</th><th>User</th><th>Reason</th></tr></thead><tbody id="cases-table"></tbody></table></div></article></div>
       </section>
 
       <section id="code" class="section">
         <div class="editor-layout">
-          <aside class="file-panel">
-            <div class="file-panel-head"><div><p class="card-label">REPOSITORY</p><h2>Files</h2></div><button id="reload-files" type="button">↻</button></div>
-            <input id="file-filter" type="search" placeholder="Filter files…">
-            <div id="file-list" class="file-list"><p class="muted pad">Loading files…</p></div>
-          </aside>
-          <article class="editor-panel">
-            <div class="editor-toolbar"><div><p class="card-label">EDITOR</p><strong id="editor-path">Select a file</strong></div><div class="button-row"><button id="validate-code" type="button" disabled>Validate</button><button id="save-code" class="primary" type="button" disabled>Save</button></div></div>
-            <textarea id="code-editor" spellcheck="false" disabled placeholder="Select an editable repository file from the left."></textarea>
-            <div class="editor-status"><span id="editor-message">No file selected.</span><span id="editor-position">—</span></div>
-          </article>
+          <aside class="file-panel"><div class="file-panel-head"><div><p class="card-label">REPOSITORY</p><h2>Files</h2></div><div class="button-row"><button id="new-file" type="button">+ File</button><button id="new-folder" type="button">+ Dir</button><button id="reload-files" type="button">↻</button></div></div><input id="file-filter" type="search" placeholder="Filter paths…"><div class="search-row"><input id="code-search" type="search" placeholder="Search inside files…"><button id="code-search-button" type="button">Search</button></div><div id="search-results" class="search-results"></div><div id="file-list" class="file-list"><p class="muted pad">Loading files…</p></div></aside>
+          <article class="editor-panel"><div id="editor-tabs" class="editor-tabs"></div><div class="editor-toolbar"><div><p class="card-label">EDITOR</p><strong id="editor-path">Select a file</strong></div><div class="button-row"><button id="rename-path" type="button" disabled>Rename</button><button id="delete-path" class="danger" type="button" disabled>Delete</button><button id="validate-code" type="button" disabled>Validate</button><button id="save-code" class="primary" type="button" disabled>Save</button></div></div><textarea id="code-editor" spellcheck="false" disabled placeholder="Select an editable repository file from the left."></textarea><div class="editor-status"><span id="editor-message">No file selected.</span><span id="editor-position">—</span></div></article>
         </div>
       </section>
 
       <section id="git" class="section">
-        <div class="detail-grid">
-          <article class="panel"><div class="panel-head"><div><p class="card-label">VERSION CONTROL</p><h2 id="git-branch-title">Branch —</h2></div><span id="change-count" class="branch">0 changes</span></div><p id="git-commit-detail" class="commit">—</p><div class="button-row"><button data-git-action="pull">Pull</button><button data-git-action="push">Push</button><button id="refresh-diff">Refresh diff</button></div></article>
-          <article class="panel"><p class="card-label">COMMIT</p><h2>Selected changes</h2><input id="commit-message" type="text" maxlength="120" placeholder="Commit message"><div id="commit-files" class="check-list"></div><button id="commit-button" class="primary full" type="button">Commit selected</button></article>
-        </div>
-        <article class="panel action-output-panel"><div class="panel-head"><div><p class="card-label">DIFF</p><h2>Working tree</h2></div></div><pre id="git-diff">Loading diff…</pre></article>
-        <article class="panel action-output-panel"><div class="panel-head"><div><p class="card-label">DEPLOY</p><h2>Validate → restart → health check</h2></div></div><div class="button-row"><button id="deploy-button" class="primary" type="button">Deploy current code</button><button id="rollback-button" class="danger" type="button">Rollback last deploy</button></div><pre id="deploy-output">No deployment action run yet.</pre></article>
+        <div class="detail-grid"><article class="panel"><div class="panel-head"><div><p class="card-label">VERSION CONTROL</p><h2 id="git-branch-title">Branch —</h2></div><span id="change-count" class="branch">0 changes</span></div><p id="git-commit-detail" class="commit">—</p><div class="form-grid branch-grid"><label>Branch<select id="branch-select"></select></label><button id="switch-branch" type="button">Switch</button><button id="new-branch" type="button">New branch</button></div><div class="button-row"><button data-git-action="pull">Pull</button><button data-git-action="push">Push</button><button id="refresh-diff">Refresh diff</button></div></article><article class="panel"><p class="card-label">CHANGES</p><h2>Stage & commit</h2><div id="git-change-list" class="check-list"></div><div class="button-row"><button id="stage-selected" type="button">Stage</button><button id="unstage-selected" type="button">Unstage</button><button id="discard-selected" class="danger" type="button">Discard</button></div><input id="commit-message" type="text" maxlength="120" placeholder="Commit message"><button id="commit-button" class="primary full" type="button">Commit staged</button></article></div>
+        <div class="detail-grid top-gap"><article class="panel"><div class="panel-head"><div><p class="card-label">DIFF</p><h2>Working tree</h2></div></div><pre id="git-diff">Loading diff…</pre></article><article class="panel"><div class="panel-head"><div><p class="card-label">HISTORY</p><h2>Recent commits</h2></div></div><div id="git-history" class="history-list"></div></article></div>
+        <article class="panel action-output-panel"><div class="panel-head"><div><p class="card-label">DEPLOY</p><h2>Preflight → restart → health check</h2></div></div><div class="button-row"><button id="requirements-button" type="button">Install requirements</button><button id="deploy-button" class="primary" type="button">Deploy current commit</button><button id="rollback-button" class="danger" type="button">Rollback last deploy</button></div><pre id="deploy-output">No deployment action run yet.</pre></article>
       </section>
 
-      <section id="logs" class="section"><article class="panel"><div class="panel-head"><div><p class="card-label">JOURNALCTL</p><h2>Bot logs</h2></div><button id="logs-refresh" type="button">Reload logs</button></div><pre id="log-output">Open this page to load logs.</pre></article></section>
+      <section id="system" class="section">
+        <div class="detail-grid"><article class="panel"><div class="panel-head"><div><p class="card-label">SERVICES</p><h2>HomePi services</h2></div></div><div id="service-list" class="stack-list"></div></article><article class="panel"><div class="panel-head"><div><p class="card-label">TAILSCALE</p><h2 id="system-tail-name">Remote access</h2></div><span class="branch" id="system-tail-ip">—</span></div><div id="tailscale-peers" class="stack-list"></div></article></div>
+        <div class="detail-grid top-gap"><article class="panel"><div class="panel-head"><div><p class="card-label">PROCESSES</p><h2>Highest RAM use</h2></div></div><div class="table-wrap"><table><thead><tr><th>PID</th><th>Process</th><th>RAM</th><th>CPU</th></tr></thead><tbody id="process-table"></tbody></table></div></article><article class="panel danger-zone"><p class="card-label">POWER</p><h2>System power</h2><p class="muted">These actions affect Pi-hole, the bot, dashboard and Tailscale. Typed confirmation is required.</p><div class="button-row"><button id="reboot-pi" class="danger" type="button">Reboot Pi</button><button id="shutdown-pi" class="danger" type="button">Shut down Pi</button></div></article></div>
+      </section>
+
+      <section id="backups" class="section">
+        <article class="panel"><div class="panel-head"><div><p class="card-label">SQLITE</p><h2>Bot database backups</h2></div><button id="create-backup" class="primary" type="button">Create backup</button></div><p class="muted">Backups are stored outside the Git repository. Secrets from .env are not included.</p><div id="backup-list" class="stack-list"></div></article>
+      </section>
+
+      <section id="logs" class="section">
+        <div class="detail-grid"><article class="panel"><div class="panel-head"><div><p class="card-label">JOURNALCTL</p><h2>Service logs</h2></div><div class="button-row"><select id="log-service"><option value="raspberry-bot">Raspberry-Bot</option><option value="raspberry-dashboard">Dashboard</option><option value="pihole-FTL">Pi-hole FTL</option><option value="tailscaled">Tailscale</option></select><button id="logs-refresh" type="button">Reload</button></div></div><pre id="log-output">Open this page to load logs.</pre></article><article class="panel"><div class="panel-head"><div><p class="card-label">AUDIT</p><h2>Dashboard actions</h2></div><button id="audit-refresh" type="button">Reload</button></div><div id="audit-list" class="audit-list"></div></article></div>
+      </section>
+
       <div id="toast" role="status" aria-live="polite"></div>
     </main>
   </div>
