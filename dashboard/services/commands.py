@@ -16,7 +16,12 @@ class CommandResult:
         return self.returncode == 0
 
 
-async def run_command(args: Sequence[str], *, cwd: str | None = None, timeout: float = 20.0) -> CommandResult:
+async def run_command(
+    args: Sequence[str],
+    *,
+    cwd: str | None = None,
+    timeout: float = 20.0,
+) -> CommandResult:
     proc = await asyncio.create_subprocess_exec(
         *args,
         cwd=cwd,
