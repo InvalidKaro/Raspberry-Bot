@@ -15,6 +15,7 @@
         <button class="nav-item active" type="button" data-section="overview">Overview</button>
         <button class="nav-item" type="button" data-section="botconfig">Bot config</button>
         <button class="nav-item" type="button" data-section="botdata">Bot data</button>
+        <button class="nav-item" type="button" data-section="database">Database</button>
         <button class="nav-item" type="button" data-section="code">Code & files</button>
         <button class="nav-item" type="button" data-section="git">Git & deploy</button>
         <button class="nav-item" type="button" data-section="system">System</button>
@@ -35,8 +36,8 @@
           <article class="hero-card accent-card"><div><p class="card-label">RASPBERRY-BOT</p><strong id="bot-status">Checking…</strong><p class="muted" id="bot-service-name">—</p></div><div class="button-row"><button class="primary" data-bot-action="restart">Restart</button><button data-bot-action="start">Start</button><button data-bot-action="stop">Stop</button></div></article>
           <article class="hero-card"><div><p class="card-label">REMOTE ACCESS</p><strong id="tailscale-status">Checking…</strong><p class="muted" id="tailscale-detail">Tailscale</p></div></article>
         </div>
-        <div class="metric-grid"><article class="metric"><span>CPU</span><strong id="cpu">—</strong><div class="bar"><i id="cpu-bar"></i></div></article><article class="metric"><span>Temperature</span><strong id="temp">—</strong><div class="bar"><i id="temp-bar"></i></div></article><article class="metric"><span>RAM</span><strong id="ram">—</strong><small id="ram-detail">—</small><div class="bar"><i id="ram-bar"></i></div></article><article class="metric"><span>Storage</span><strong id="disk">—</strong><small id="disk-detail">—</small><div class="bar"><i id="disk-bar"></i></div></article></div>
-        <div class="quick-actions"><button data-bot-action="restart" class="primary">Restart bot</button><button data-nav="logs">View errors</button><button data-nav="code">Edit code</button><button data-git-action="pull">Git pull</button><button data-nav="git">Deploy</button><button data-nav="system">System</button></div>
+        <div class="metric-grid"><article class="metric"><span>CPU</span><strong id="cpu">—</strong><small id="cpu-detail">Waiting for sampler…</small><div class="bar"><i id="cpu-bar"></i></div></article><article class="metric"><span>Temperature</span><strong id="temp">—</strong><div class="bar"><i id="temp-bar"></i></div></article><article class="metric"><span>RAM</span><strong id="ram">—</strong><small id="ram-detail">—</small><div class="bar"><i id="ram-bar"></i></div></article><article class="metric"><span>Storage</span><strong id="disk">—</strong><small id="disk-detail">—</small><div class="bar"><i id="disk-bar"></i></div></article></div>
+        <div class="quick-actions"><button data-bot-action="restart" class="primary">Restart bot</button><button data-nav="logs">View errors</button><button data-nav="code">Edit code</button><button data-git-action="pull">Git pull</button><button data-nav="git">Deploy</button><button data-nav="database">Database</button><button data-nav="system">System</button></div>
         <div class="detail-grid">
           <article class="panel"><div class="panel-head"><div><p class="card-label">SYSTEM</p><h2>Runtime</h2></div></div><dl class="facts"><div><dt>Uptime</dt><dd id="uptime">—</dd></div><div><dt>Load</dt><dd id="load">—</dd></div><div><dt>Network RX</dt><dd id="net-rx">—</dd></div><div><dt>Network TX</dt><dd id="net-tx">—</dd></div></dl></article>
           <article class="panel"><div class="panel-head"><div><p class="card-label">REPOSITORY</p><h2 id="overview-branch">Git</h2></div><span class="branch" id="overview-change-count">—</span></div><p id="overview-commit" class="commit">Loading…</p><p id="overview-git-summary" class="muted">—</p></article>
@@ -48,14 +49,56 @@
       </section>
 
       <section id="botconfig" class="section">
-        <div class="section-intro"><div><p class="card-label">DISCORD</p><h2>Server configuration</h2><p class="muted">Edit the SQLite settings used by Raspberry-Bot.</p></div></div>
-        <article class="panel"><div class="form-grid two"><label>Discord server<select id="guild-select"><option value="">Loading servers…</option></select></label><label>Embed color<input id="embed-color" type="text" placeholder="#5865F2" maxlength="7"></label></div><div class="form-grid two"><label>Ticket category<select id="ticket-category"><option value="">Disabled / not set</option></select></label><label>Ticket log channel<select id="ticket-log"><option value="">Disabled / not set</option></select></label><label>Welcome channel<select id="welcome-channel"><option value="">Disabled</option></select></label><label>Suggestions channel<select id="suggestion-channel"><option value="">Disabled</option></select></label><label>Audit log channel<select id="audit-channel"><option value="">Disabled</option></select></label><label>Ticket staff roles<select id="staff-roles" multiple size="7"></select></label></div><div class="button-row end"><span id="config-status" class="muted">Choose a server.</span><button id="save-config" class="primary" type="button" disabled>Save & apply</button></div></article>
+        <div class="section-intro"><div><p class="card-label">DISCORD</p><h2>Server configuration</h2><p class="muted">Live configuration backed by the same SQLite database used by Raspberry-Bot.</p></div></div>
+        <div class="detail-grid config-top">
+          <article class="panel">
+            <div class="form-grid two">
+              <label>Discord server<select id="guild-select"><option value="">Loading servers…</option></select></label>
+              <label>Embed color<div class="color-row"><input id="embed-color-picker" type="color" value="#5865F2"><input id="embed-color" type="text" placeholder="Default / #5865F2" maxlength="7"><button id="embed-default" type="button">Default</button></div></label>
+            </div>
+            <div class="form-grid two">
+              <label>Ticket category<select id="ticket-category"><option value="">Disabled / not set</option></select></label>
+              <label>Ticket log channel<select id="ticket-log"><option value="">Disabled / not set</option></select></label>
+              <label>Welcome channel<select id="welcome-channel"><option value="">Disabled</option></select></label>
+              <label>Auto role<select id="auto-role"><option value="">Disabled</option></select></label>
+              <label>Suggestions channel<select id="suggestion-channel"><option value="">Disabled</option></select></label>
+              <label>Audit log channel<select id="audit-channel"><option value="">Disabled</option></select></label>
+              <label class="wide">Welcome message<textarea id="welcome-message" rows="4" maxlength="1000" placeholder="Welcome {user}! You are member #{member_count}."></textarea><small>Placeholders: {user}, {username}, {display_name}, {server}, {member_count}</small></label>
+              <label class="wide">Ticket staff roles<select id="staff-roles" multiple size="8"></select><small>Saved roles that Discord cannot resolve remain visible as ⚠ missing entries.</small></label>
+            </div>
+            <div class="button-row end"><button id="reload-config" type="button">Reload from DB</button><span id="config-status" class="muted">Choose a server.</span><button id="save-config" class="primary" type="button" disabled>Save & apply</button></div>
+          </article>
+          <article class="panel config-health">
+            <p class="card-label">CONFIG SYNC</p><h2>Database & bot</h2>
+            <dl class="facts"><div><dt>Database</dt><dd id="config-db-status">—</dd></div><div><dt>DB path</dt><dd id="config-db-path" class="mono-small">—</dd></div><div><dt>Last DB update</dt><dd id="config-updated-at">—</dd></div><div><dt>Database saved</dt><dd id="config-saved-state">—</dd></div><div><dt>Bot restarted</dt><dd id="config-restart-state">—</dd></div><div><dt>Reload verified</dt><dd id="config-reload-state">—</dd></div></dl>
+            <div id="config-resource-warnings" class="warning-list"></div>
+          </article>
+        </div>
       </section>
 
       <section id="botdata" class="section">
-        <div class="metric-grid compact"><article class="metric"><span>Open tickets</span><strong id="data-open-tickets">—</strong></article><article class="metric"><span>Total tickets</span><strong id="data-total-tickets">—</strong></article><article class="metric"><span>Mod cases</span><strong id="data-mod-cases">—</strong></article><article class="metric"><span>Commands / 24h</span><strong id="data-commands">—</strong></article></div>
+        <div class="metric-grid compact"><article class="metric"><span>Open tickets</span><strong id="data-open-tickets">—</strong></article><article class="metric"><span>Total tickets</span><strong id="data-total-tickets">—</strong></article><article class="metric"><span>Mod cases</span><strong id="data-mod-cases">—</strong></article><article class="metric"><span>Commands / 24h</span><strong id="data-commands">—</strong></article><article class="metric"><span>Pending reminders</span><strong id="data-reminders">—</strong></article></div>
         <div class="detail-grid"><article class="panel"><div class="panel-head"><div><p class="card-label">BOT PROJECT</p><h2>Extensions & commands</h2></div><span class="branch" id="project-command-count">—</span></div><div id="project-summary" class="stack-list"></div></article><article class="panel"><div class="panel-head"><div><p class="card-label">COMMAND USAGE</p><h2>Top commands</h2></div></div><div id="top-commands" class="stack-list"></div></article></div>
         <div class="detail-grid top-gap"><article class="panel"><div class="panel-head"><div><p class="card-label">TICKETS</p><h2>Recent tickets</h2></div></div><div class="table-wrap"><table><thead><tr><th>ID</th><th>Subject</th><th>Priority</th><th>Status</th></tr></thead><tbody id="tickets-table"></tbody></table></div></article><article class="panel"><div class="panel-head"><div><p class="card-label">MODERATION</p><h2>Recent cases</h2></div></div><div class="table-wrap"><table><thead><tr><th>ID</th><th>Action</th><th>User</th><th>Reason</th></tr></thead><tbody id="cases-table"></tbody></table></div></article></div>
+      </section>
+
+
+      <section id="database" class="section">
+        <div class="section-intro"><div><p class="card-label">SQLITE</p><h2>Database browser</h2><p class="muted">Read-only viewer. No raw SQL and no row editing from this page.</p></div></div>
+        <div class="database-layout">
+          <aside class="panel db-sidebar">
+            <div class="panel-head"><div><p class="card-label">DATABASE</p><h2>Tables</h2></div><button id="db-refresh-tables" type="button">↻</button></div>
+            <div class="db-meta"><div><span>Path</span><code id="db-path">—</code></div><div><span>Size</span><strong id="db-size">—</strong></div><div><span>Journal</span><strong id="db-journal">—</strong></div></div>
+            <div id="db-table-list" class="db-table-list"><p class="muted">Open this page to load tables.</p></div>
+          </aside>
+          <article class="panel db-main">
+            <div class="panel-head"><div><p class="card-label">TABLE</p><h2 id="db-table-title">Choose a table</h2></div><span class="branch" id="db-row-count">—</span></div>
+            <div class="db-toolbar"><input id="db-search" type="search" placeholder="Search rows…"><button id="db-search-button" type="button">Search</button><button id="db-schema-button" type="button" disabled>Schema</button></div>
+            <div class="table-wrap db-table-wrap"><table><thead id="db-table-head"></thead><tbody id="db-table-body"><tr><td class="muted">Select a table on the left.</td></tr></tbody></table></div>
+            <div class="db-pager"><button id="db-prev" type="button" disabled>Previous</button><span id="db-page-info" class="muted">—</span><button id="db-next" type="button" disabled>Next</button></div>
+            <pre id="db-schema" class="hidden">Schema not loaded.</pre>
+          </article>
+        </div>
       </section>
 
       <section id="code" class="section">
@@ -72,6 +115,7 @@
       </section>
 
       <section id="system" class="section">
+        <div class="metric-grid compact"><article class="metric"><span>System CPU</span><strong id="system-cpu-current">—</strong><small id="system-cpu-averages">—</small></article><article class="metric"><span>Bot CPU</span><strong id="system-bot-cpu">—</strong><small id="system-bot-ram">—</small></article><article class="metric"><span>Dashboard CPU</span><strong id="system-dashboard-cpu">—</strong><small id="system-dashboard-ram">—</small></article><article class="metric"><span>Sampler</span><strong id="system-sample-interval">—</strong><small id="system-sample-age">—</small></article><article class="metric"><span>Available RAM</span><strong id="system-ram-available">—</strong><small id="system-swap">—</small></article></div>
         <div class="detail-grid"><article class="panel"><div class="panel-head"><div><p class="card-label">SERVICES</p><h2>HomePi services</h2></div></div><div id="service-list" class="stack-list"></div></article><article class="panel"><div class="panel-head"><div><p class="card-label">TAILSCALE</p><h2 id="system-tail-name">Remote access</h2></div><span class="branch" id="system-tail-ip">—</span></div><div id="tailscale-peers" class="stack-list"></div></article></div>
         <div class="detail-grid top-gap"><article class="panel"><div class="panel-head"><div><p class="card-label">PROCESSES</p><h2>Highest RAM use</h2></div></div><div class="table-wrap"><table><thead><tr><th>PID</th><th>Process</th><th>RAM</th><th>CPU</th></tr></thead><tbody id="process-table"></tbody></table></div></article><article class="panel danger-zone"><p class="card-label">POWER</p><h2>System power</h2><p class="muted">These actions affect Pi-hole, the bot, dashboard and Tailscale. Typed confirmation is required.</p><div class="button-row"><button id="reboot-pi" class="danger" type="button">Reboot Pi</button><button id="shutdown-pi" class="danger" type="button">Shut down Pi</button></div></article></div>
       </section>
