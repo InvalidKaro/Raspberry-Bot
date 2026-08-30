@@ -1,16 +1,63 @@
-# Commands
+# Raspberry-Bot Commands — Phase 3.2
 
-## Core
+## Core / information
 
-- `/help` — interactive help menu
-- `/ping` — gateway latency
-- `/status` — immediate Raspberry Pi status
-- `/userinfo [member]`
-- `/serverinfo`
-- `/avatar [user]`
-- `/roleinfo <role>`
-- `/channelinfo [channel]`
-- `/profile [member]` — Pillow profile card
+- `/help` — interactive help center with expanded categories
+- `/ping` — gateway latency, bot uptime, guild count and runtime versions
+- `/status` — full HomePi status with 15-second cached CPU sampling and action buttons
+- `/botinfo` — bot uptime, guilds, members, commands, extensions and environment
+- `/userinfo [member]` — detailed account/server membership, roles and key permissions
+- `/serverinfo` — owner, member split, channel split, boosts, verification and server features
+- `/avatar [user]` — full-resolution avatar plus direct links
+- `/roleinfo <role>` — members, color, position, creation time, flags and key permissions
+- `/channelinfo [channel]` — category, creation time, slowmode, NSFW, sync and thread information
+- `/permissions` — checks Raspberry-Bot permissions in the current channel
+- `/commandinfo <command_name>` — description and parameters for a slash command
+- `/invite` — private bot invite link with reviewed permissions
+- `/timestamp`
+- `/snowflake`
+- `/membercount`
+- `/servericon`
+- `/profile [member]`
+
+## Raspberry Pi / HomePi
+
+- `/system now` — detailed system, process, Pi-hole and network status
+- `/system health` — concise health checks and thresholds
+- `/system memory` — RAM, available memory, swap, bot and dashboard RSS
+- `/system storage` — root filesystem plus SQLite DB size/path
+- `/system pihole` — detailed Pi-hole queries, blocking rate, clients, gravity and versions
+- `/system graph [hours]` — Pillow history graph from 1 to 168 hours
+- `/system setup <status_channel> [alert_channel] [interval_seconds]` — live status message; 15–300 seconds
+- `/system config` — current monitor configuration and intervals
+- `/system thresholds`
+- `/system disable`
+
+### Owner-only system tools
+
+- `/system dashboard` — ephemeral LAN + Tailscale dashboard links
+- `/system network` — traffic rates, interfaces and Tailscale IP
+- `/system processes` — busiest host processes
+
+## Developer / owner
+
+Requires the Discord user ID in `OWNER_IDS`.
+
+- `/dev dashboard` — ephemeral private dashboard links
+- `/dev diagnostics` — DB, sampler, gateway and Pi-hole checks
+- `/dev memory` — detailed Python process memory
+- `/dev extensions` — configured/loaded extensions
+- `/dev reload <extension>`
+- `/dev load <extension>`
+- `/dev unload <extension>`
+- `/dev logs [lines]`
+- `/dev command-stats`
+- `/dev database-stats`
+- `/dev database-optimize`
+- `/dev cache-stats`
+- `/dev cache-clear [cache_name]`
+- `/dev gc`
+- `/dev sync`
 
 ## Tickets
 
@@ -25,59 +72,55 @@
 - `/ticket notes`
 - `/ticket rename <name>`
 - `/ticket transfer <staff-member>`
+- `/ticket transcript`
 - `/ticket reopen`
 - `/ticket delete`
 
-The persistent ticket message also contains Claim, Unclaim, Priority, Internal Note and Close controls.
-
 ## Moderation
 
-- `/mod warn <member> <reason>`
-- `/mod warnings <member>`
-- `/mod case <case_id>`
-- `/mod unwarn <case_id>`
-- `/mod timeout <member> <minutes> [reason]`
-- `/mod untimeout <member> [reason]`
-- `/mod kick <member> [reason]`
-- `/mod ban <member> [reason] [delete_message_hours]`
-- `/mod unban <user_id> [reason]`
-- `/mod clear <amount>`
+- `/mod warn`
+- `/mod warnings`
+- `/mod case`
+- `/mod unwarn`
+- `/mod timeout`
+- `/mod untimeout`
+- `/mod kick`
+- `/mod ban`
+- `/mod unban`
+- `/mod clear`
 - `/mod lock`
 - `/mod unlock`
-- `/mod slowmode <seconds>`
+- `/mod slowmode`
 
 ## Community
 
-- `/suggest` — opens a suggestion modal
-- `/poll` — opens a poll modal with up to four options
-- Welcome messages are configured through `/setup welcome`.
+- `/suggest`
+- `/poll`
+- `/reminder create`
+- `/reminder list`
+- `/reminder cancel`
+
+## Server management
+
+- `/manage role-add`
+- `/manage role-remove`
+- `/manage nickname`
+- `/manage announce`
 
 ## Configuration
 
-- `/setup tickets <category> <log_channel>`
-- `/setup staff-add <role> [permission_level]`
-- `/setup staff-remove <role>`
-- `/setup welcome [channel]`
-- `/setup suggestions [channel]`
-- `/setup logs [channel]`
+- `/setup tickets`
+- `/setup staff-add`
+- `/setup staff-remove`
+- `/setup welcome`
+- `/setup welcome-message`
+- `/setup autorole`
+- `/setup suggestions`
+- `/setup logs`
 - `/setup show`
 
-## Raspberry Pi monitoring
+## Monitoring behavior
 
-- `/system now`
-- `/system setup <status_channel> [alert_channel] [interval_minutes]`
-- `/system thresholds [temperature_warning] [temperature_critical] [ram_warning] [disk_warning]`
-- `/system disable`
-- `/system graph`
+The CPU value is no longer measured inside the command/dashboard request. Raspberry-Bot and the web dashboard each keep a lightweight background sampler. Default sampling is every **15 seconds**, configurable between **10 and 30 seconds**.
 
-The monitor records CPU, temperature, RAM, disk, load, network traffic, bot memory and throttling flags. It also checks `pihole-FTL.service`.
-
-## Developer / owner
-
-Requires the Discord user ID in `OWNER_IDS`.
-
-- `/dev cache-stats`
-- `/dev cache-clear [cache_name]`
-- `/dev gc`
-- `/dev database-optimize`
-- `/dev sync`
+This prevents the dashboard request itself from creating misleading 60–90% CPU spikes.
