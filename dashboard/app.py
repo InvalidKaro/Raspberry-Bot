@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import mimetypes
@@ -14,12 +15,13 @@ from .services.audit_service import AuditService
 from .services.backup_service import BackupService
 from .services.config_service import BotConfigService
 from .services.data_service import BotDataService
+from .services.database_service import DatabaseBrowserService
 from .services.deploy_service import DeployService
 from .services.discord_service import DiscordService, DiscordServiceError
 from .services.editor_service import EditorError, EditorService
 from .services.git_service import GitService
 from .services.project_service import ProjectService
-from .services.system_service import bot_action, bot_logs, get_status, service_logs, system_power_action
+from .services.system_service import DashboardSystemSampler, bot_action, bot_logs, get_status, service_logs, system_power_action
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
@@ -100,7 +102,7 @@ async def auth_middleware(request: web.Request, handler):
 
 
 async def health(_: web.Request) -> web.Response:
-    return web.json_response({"ok": True, "version": 3})
+    return web.json_response({"ok": True, "version": "3.2"})
 
 
 async def login_page(request: web.Request) -> web.Response:
@@ -134,7 +136,7 @@ async def logout(_: web.Request) -> web.Response:
 
 
 async def index(_: web.Request) -> web.Response:
-    return web.Response(text=(TEMPLATE_DIR / "index.html").read_text(encoding="utf-8"), content_type="text/html")
+    return web.Response(text=(TEMPLATE_DIR / "index.html").read_text(encoding="utf-8"), content_type="text/html", headers={"Cache-Control": "no-store"})
 
 
 async def static_file(request: web.Request) -> web.Response:
@@ -145,7 +147,7 @@ async def static_file(request: web.Request) -> web.Response:
     if not path.is_file():
         raise web.HTTPNotFound()
     content_type, _ = mimetypes.guess_type(path.name)
-    return web.FileResponse(path, headers={"Content-Type": content_type or "application/octet-stream"})
+    return web.FileResponse(path, headers={"Content-Type": content_type or "application/octet-stream", "Cache-Control": "no-cache, max-age=0"})
 
 
 def _json_result(result: dict, fail_status: int = 409) -> web.Response:
@@ -158,12 +160,12 @@ def _audit(request: web.Request, action: str, result: dict) -> None:
 
 async def api_bootstrap(request: web.Request) -> web.Response:
     config: DashboardConfig = request.app["config"]
-    return web.json_response({"ok": True, "csrf": _csrf_value(config), "bot_service": config.bot_service, "version": 3})
+    return web.json_response({"ok": True, "csrf": _csrf_value(config), "bot_service": config.bot_service, "version": "3.2"})
 
 
 async def api_status(request: web.Request) -> web.Response:
     config: DashboardConfig = request.app["config"]
-    system = await get_status(config.bot_service)
+    system = await get_status(config.bot_service, request.app["system_sampler"])
     git = await request.app["git"].status()
     return web.json_response({"ok": True, "system": system, "git": git})
 
@@ -329,8 +331,22 @@ async def api_discord_resources(request: web.Request) -> web.Response:
 
 
 async def api_bot_config_get(request: web.Request) -> web.Response:
-    try: return web.json_response({"ok": True, "config": await request.app["bot_config"].get(int(request.match_info["guild_id"]))})
-    except (ValueError, OSError) as exc: return web.json_response({"ok": False, "message": str(exc)}, status=400)
+    try:
+        config: DashboardConfig = request.app["config"]
+        data = await request.app["bot_config"].get(int(request.match_info["guild_id"]))
+        stat = config.database_path.stat() if config.database_path.is_file() else None
+        return web.json_response({
+            "ok": True,
+            "config": data,
+            "database": {
+                "path": str(config.database_path),
+                "exists": bool(stat),
+                "size_bytes": stat.st_size if stat else 0,
+                "modified_at": stat.st_mtime if stat else None,
+            },
+        })
+    except (ValueError, OSError) as exc:
+        return web.json_response({"ok": False, "message": str(exc)}, status=400)
 
 
 async def api_bot_config_save(request: web.Request) -> web.Response:
@@ -338,12 +354,56 @@ async def api_bot_config_save(request: web.Request) -> web.Response:
         guild_id = int(request.match_info["guild_id"])
         updated = await request.app["bot_config"].update(guild_id, await request.json())
         restart = await bot_action(request.app["config"].bot_service, "restart")
-        ok = bool(restart["ok"])
-        result = {"ok": ok, "config": updated, "message": "Configuration saved and bot restarted." if ok else "Configuration saved, but bot restart failed: " + restart["message"]}
+        bot_online = False
+        if restart["ok"]:
+            await asyncio.sleep(1.0)
+            bot_online = bool((await get_status(request.app["config"].bot_service, request.app["system_sampler"])).get("bot_active"))
+        reread = await request.app["bot_config"].get(guild_id)
+        ok = bool(restart["ok"] and bot_online)
+        result = {
+            "ok": ok,
+            "config": reread,
+            "database_saved": True,
+            "bot_restarted": bool(restart["ok"]),
+            "bot_online": bot_online,
+            "configuration_reloaded": reread == updated,
+            "database_path": str(request.app["config"].database_path),
+            "message": (
+                "Database saved, bot restarted and configuration reloaded."
+                if ok
+                else "Database was saved, but the bot did not return online cleanly. Check Logs & audit."
+            ),
+        }
     except (ValueError, OSError) as exc:
-        result = {"ok": False, "message": str(exc)}
+        result = {"ok": False, "database_saved": False, "message": str(exc)}
     _audit(request, "bot.config.save", result)
     return _json_result(result, 500)
+
+
+async def api_database_tables(request: web.Request) -> web.Response:
+    return _json_result(await request.app["database_browser"].tables(), 404)
+
+
+async def api_database_table(request: web.Request) -> web.Response:
+    try:
+        limit = int(request.query.get("limit", "50"))
+        offset = int(request.query.get("offset", "0"))
+        result = await request.app["database_browser"].table(
+            request.match_info["table"],
+            limit=limit,
+            offset=offset,
+            query=request.query.get("q", ""),
+        )
+        return _json_result(result, 400)
+    except (ValueError, OSError) as exc:
+        return web.json_response({"ok": False, "message": str(exc)}, status=400)
+
+
+async def api_database_schema(request: web.Request) -> web.Response:
+    try:
+        return _json_result(await request.app["database_browser"].schema(request.match_info["table"]), 400)
+    except (ValueError, OSError) as exc:
+        return web.json_response({"ok": False, "message": str(exc)}, status=400)
 
 
 async def api_deploy(request: web.Request) -> web.Response:
@@ -412,10 +472,21 @@ def create_app(config: DashboardConfig | None = None) -> web.Application:
     app["bot_config"] = BotConfigService(config.database_path)
     app["deploy"] = DeployService(config.repo_path, config.bot_service)
     app["data"] = BotDataService(config.database_path)
+    app["database_browser"] = DatabaseBrowserService(config.database_path)
     app["project"] = ProjectService(config.repo_path)
     app["audit"] = AuditService(state_dir)
     app["backups"] = BackupService(config.database_path, config.bot_service, state_dir)
     app["login_limiter"] = LoginLimiter()
+    app["system_sampler"] = DashboardSystemSampler(config.bot_service, config.sample_interval_seconds)
+
+    async def _start_sampler(application: web.Application) -> None:
+        await application["system_sampler"].start()
+
+    async def _stop_sampler(application: web.Application) -> None:
+        await application["system_sampler"].stop()
+
+    app.on_startup.append(_start_sampler)
+    app.on_cleanup.append(_stop_sampler)
 
     app.router.add_get("/health", health)
     app.router.add_get("/login", login_page); app.router.add_post("/login", login); app.router.add_post("/logout", logout)
@@ -431,6 +502,7 @@ def create_app(config: DashboardConfig | None = None) -> web.Application:
     app.router.add_post("/api/editor/validate", api_editor_validate); app.router.add_post("/api/editor/save", api_editor_save); app.router.add_post("/api/editor/create", api_editor_create); app.router.add_post("/api/editor/rename", api_editor_rename); app.router.add_post("/api/editor/delete", api_editor_delete)
     app.router.add_get("/api/discord/guilds", api_discord_guilds); app.router.add_get("/api/discord/guilds/{guild_id}", api_discord_resources)
     app.router.add_get("/api/config/{guild_id}", api_bot_config_get); app.router.add_post("/api/config/{guild_id}", api_bot_config_save)
+    app.router.add_get("/api/database/tables", api_database_tables); app.router.add_get("/api/database/table/{table}", api_database_table); app.router.add_get("/api/database/schema/{table}", api_database_schema)
     app.router.add_post("/api/deploy", api_deploy); app.router.add_post("/api/rollback", api_rollback); app.router.add_post("/api/requirements/install", api_requirements)
     app.router.add_get("/api/data", api_data); app.router.add_get("/api/data/metrics", api_metrics); app.router.add_get("/api/project", api_project)
     app.router.add_get("/api/backups", api_backups); app.router.add_post("/api/backups/create", api_backup_create); app.router.add_post("/api/backups/restore", api_backup_restore); app.router.add_post("/api/backups/delete", api_backup_delete); app.router.add_get("/api/backups/download/{name}", api_backup_download)
