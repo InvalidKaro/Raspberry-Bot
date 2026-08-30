@@ -7,12 +7,41 @@ from discord.ext import commands
 from helpers.embeds import EmbedFactory
 
 HELP_CATEGORIES = {
-    "core": ("Core", "🏠", ["/ping", "/status", "/userinfo", "/serverinfo", "/avatar", "/help"]),
-    "tickets": ("Tickets", "🎫", ["/ticket panel", "/ticket info", "/ticket queue", "/ticket add", "/ticket remove", "/ticket reopen", "/ticket delete"]),
-    "moderation": ("Moderation", "🛡️", ["/mod warn", "/mod warnings", "/mod timeout", "/mod kick", "/mod ban", "/mod clear", "/mod lock", "/mod slowmode"]),
-    "community": ("Community", "💬", ["/suggest", "/poll", "Welcome messages"]),
-    "system": ("System", "🖥️", ["/system now", "/system setup", "/system graph", "/dev cache-stats", "/dev gc"]),
-    "setup": ("Configuration", "⚙️", ["/setup tickets", "/setup staff-add", "/setup staff-remove", "/setup welcome", "/setup suggestions", "/setup show"]),
+    "core": ("Core", "🏠", [
+        "/ping", "/status", "/botinfo", "/userinfo", "/serverinfo", "/avatar",
+        "/roleinfo", "/channelinfo", "/permissions", "/commandinfo", "/timestamp",
+        "/snowflake", "/membercount", "/servericon", "/invite", "/help",
+    ]),
+    "tickets": ("Tickets", "🎫", [
+        "/ticket panel", "/ticket info", "/ticket queue", "/ticket claim", "/ticket unclaim",
+        "/ticket priority", "/ticket add", "/ticket remove", "/ticket notes", "/ticket rename",
+        "/ticket transfer", "/ticket transcript", "/ticket reopen", "/ticket delete",
+    ]),
+    "moderation": ("Moderation", "🛡️", [
+        "/mod warn", "/mod warnings", "/mod case", "/mod unwarn", "/mod timeout",
+        "/mod untimeout", "/mod kick", "/mod ban", "/mod unban", "/mod clear",
+        "/mod lock", "/mod unlock", "/mod slowmode",
+    ]),
+    "community": ("Community", "💬", [
+        "/suggest", "/poll", "/reminder create", "/reminder list", "/reminder cancel",
+        "Welcome messages and auto roles",
+    ]),
+    "system": ("System", "🖥️", [
+        "/system now", "/system health", "/system memory", "/system storage",
+        "/system pihole", "/system graph", "/system setup", "/system config",
+        "/system thresholds", "/system disable",
+    ]),
+    "management": ("Management", "🔧", [
+        "/manage role-add", "/manage role-remove", "/manage nickname", "/manage announce",
+        "/setup tickets", "/setup staff-add", "/setup staff-remove", "/setup welcome",
+        "/setup autorole", "/setup welcome-message", "/setup suggestions", "/setup logs", "/setup show",
+    ]),
+    "owner": ("Bot Owner", "🔐", [
+        "/system dashboard", "/system network", "/system processes", "/dev dashboard",
+        "/dev diagnostics", "/dev memory", "/dev extensions", "/dev reload", "/dev load",
+        "/dev unload", "/dev logs", "/dev command-stats", "/dev database-stats",
+        "/dev database-optimize", "/dev cache-stats", "/dev cache-clear", "/dev gc", "/dev sync",
+    ]),
 }
 
 
