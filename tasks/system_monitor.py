@@ -44,7 +44,7 @@ class SystemMonitorTask(commands.Cog):
         except discord.HTTPException:
             logger.exception("Could not send system alert in guild %s", guild_id)
 
-    @tasks.loop(seconds=60)
+    @tasks.loop(seconds=5)
     async def monitor_loop(self) -> None:
         rows = await self.bot.database.fetchall("SELECT * FROM system_monitor_config WHERE enabled = 1")
         if not rows:
@@ -54,12 +54,12 @@ class SystemMonitorTask(commands.Cog):
         for row in rows:
             config = dict(row)
             guild_id = int(config["guild_id"])
-            interval = max(int(config["interval_seconds"]), 60)
+            interval = max(int(config["interval_seconds"]), 15)
             if now - self._last_run.get(guild_id, 0) < interval:
                 continue
             self._last_run[guild_id] = now
             if metrics is None:
-                metrics = await collect_system_metrics()
+                metrics = await collect_system_metrics(self.bot)
             await self.bot.database.execute(
                 "INSERT INTO system_metrics (guild_id, cpu_percent, temperature, ram_percent, disk_percent, load_1m, network_rx, network_tx, bot_memory, throttled_flags) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
