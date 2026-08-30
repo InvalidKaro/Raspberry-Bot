@@ -17,6 +17,7 @@ from helpers.embeds import EmbedFactory
 from helpers.logging import setup_logging
 from services.cache import CacheManager
 from services.tickets import TicketService
+from services.system_metrics import SystemMetricsSampler
 
 logger = logging.getLogger(__name__)
 
@@ -24,14 +25,18 @@ EXTENSIONS: tuple[str, ...] = (
     "cogs.core.info",
     "cogs.core.help",
     "cogs.core.utility",
+    "cogs.core.tools",
+    "cogs.core.bot_tools",
     "cogs.core.profile",
     "cogs.tickets.tickets",
     "cogs.moderation.moderation",
     "cogs.community.suggestions",
     "cogs.community.polls",
     "cogs.community.welcome",
+    "cogs.community.reminders",
     "cogs.community.audit_logging",
     "cogs.management.configuration",
+    "cogs.management.server_tools",
     "cogs.management.system_monitor",
     "cogs.management.developer",
     "tasks.cache_cleanup",
@@ -58,7 +63,7 @@ class RaspberryBot(commands.Bot):
                 users=True,
                 replied_user=False,
             ),
-            activity=discord.Game(name="/help • by invalidkaro"),
+            activity=discord.Game(name="/help • Raspberry-Bot"),
         )
 
         self.settings = settings
@@ -66,10 +71,12 @@ class RaspberryBot(commands.Bot):
         self.cache = CacheManager()
         self.settings_repo = SettingsRepository(self.database, self.cache)
         self.ticket_service = TicketService(self)
+        self.system_metrics = SystemMetricsSampler(settings.system_metrics_sample_interval)
         self.started_at = datetime.now(UTC)
 
     async def setup_hook(self) -> None:
         await self.database.connect()
+        await self.system_metrics.start()
 
         from views.suggestions import SuggestionView
         from views.tickets.controls import TicketControlsView
@@ -128,6 +135,7 @@ class RaspberryBot(commands.Bot):
             logger.exception("Failed to persist command usage for %s", command.qualified_name)
 
     async def close(self) -> None:
+        await self.system_metrics.stop()
         await self.database.close()
         await super().close()
 
