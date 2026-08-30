@@ -36,6 +36,7 @@ class BotDataService:
                 "suggestions_open": await self._scalar(db, "SELECT COUNT(*) FROM suggestions WHERE status='open'"),
                 "commands_24h": await self._scalar(db, "SELECT COUNT(*) FROM command_usage WHERE created_at >= datetime('now','-1 day')"),
                 "commands_total": await self._scalar(db, "SELECT COUNT(*) FROM command_usage"),
+                "reminders_pending": await self._scalar(db, "SELECT COUNT(*) FROM reminders WHERE delivered = 0"),
             }
             recent_tickets = await self._rows(db, "SELECT id,guild_id,channel_id,opener_id,subject,priority,status,claimed_by,created_at FROM tickets ORDER BY id DESC LIMIT 15")
             recent_cases = await self._rows(db, "SELECT id,guild_id,user_id,moderator_id,action,reason,active,created_at FROM moderation_cases ORDER BY id DESC LIMIT 15")
