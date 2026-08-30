@@ -43,6 +43,8 @@ class Database:
             welcome_channel_id INTEGER,
             suggestion_channel_id INTEGER,
             general_log_channel_id INTEGER,
+            auto_role_id INTEGER,
+            welcome_message TEXT,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
@@ -171,7 +173,7 @@ class Database:
             status_channel_id INTEGER,
             status_message_id INTEGER,
             alert_channel_id INTEGER,
-            interval_seconds INTEGER NOT NULL DEFAULT 300,
+            interval_seconds INTEGER NOT NULL DEFAULT 30,
             temp_warning REAL NOT NULL DEFAULT 70,
             temp_critical REAL NOT NULL DEFAULT 80,
             ram_warning REAL NOT NULL DEFAULT 80,
@@ -197,6 +199,21 @@ class Database:
         CREATE INDEX IF NOT EXISTS idx_metrics_guild_time
             ON system_metrics(guild_id, recorded_at);
 
+        CREATE TABLE IF NOT EXISTS reminders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            channel_id INTEGER,
+            user_id INTEGER NOT NULL,
+            message TEXT NOT NULL,
+            due_at TEXT NOT NULL,
+            delivered INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            delivered_at TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_reminders_due
+            ON reminders(delivered, due_at);
+
         CREATE TABLE IF NOT EXISTS command_usage (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             guild_id INTEGER,
@@ -208,6 +225,8 @@ class Database:
         async with self._write_lock:
             await self.connection.executescript(schema)
             await self._ensure_column("guild_settings", "general_log_channel_id", "INTEGER")
+            await self._ensure_column("guild_settings", "auto_role_id", "INTEGER")
+            await self._ensure_column("guild_settings", "welcome_message", "TEXT")
             await self.connection.commit()
         logger.info("Database schema initialized.")
 
