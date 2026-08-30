@@ -35,6 +35,8 @@ class SettingsRepository:
             "welcome_channel_id",
             "suggestion_channel_id",
             "general_log_channel_id",
+            "auto_role_id",
+            "welcome_message",
         }
         clean = {key: value for key, value in values.items() if key in allowed}
         if not clean:
