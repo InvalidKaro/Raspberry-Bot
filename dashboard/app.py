@@ -102,7 +102,7 @@ async def auth_middleware(request: web.Request, handler):
 
 
 async def health(_: web.Request) -> web.Response:
-    return web.json_response({"ok": True, "version": "3.2"})
+    return web.json_response({"ok": True, "version": "3.3.1"})
 
 
 async def login_page(request: web.Request) -> web.Response:
@@ -160,7 +160,7 @@ def _audit(request: web.Request, action: str, result: dict) -> None:
 
 async def api_bootstrap(request: web.Request) -> web.Response:
     config: DashboardConfig = request.app["config"]
-    return web.json_response({"ok": True, "csrf": _csrf_value(config), "bot_service": config.bot_service, "version": "3.2"})
+    return web.json_response({"ok": True, "csrf": _csrf_value(config), "bot_service": config.bot_service, "version": "3.3.1"})
 
 
 async def api_status(request: web.Request) -> web.Response:
