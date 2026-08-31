@@ -4,6 +4,7 @@ import discord
 from discord.ext import commands
 
 from helpers.embeds import EmbedFactory
+from services.welcome_templates import render_welcome_template
 
 
 DEFAULT_WELCOME = "Welcome {user}! You are member #{member_count}."
@@ -12,20 +13,6 @@ DEFAULT_WELCOME = "Welcome {user}! You are member #{member_count}."
 class Welcome(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
-
-    @staticmethod
-    def _render(template: str, member: discord.Member) -> str:
-        values = {
-            "user": member.mention,
-            "username": member.name,
-            "display_name": member.display_name,
-            "server": member.guild.name,
-            "member_count": str(member.guild.member_count or 0),
-        }
-        result = template
-        for key, value in values.items():
-            result = result.replace("{" + key + "}", value)
-        return result[:4000]
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member) -> None:
@@ -51,7 +38,7 @@ class Welcome(commands.Cog):
         template = str(settings.get("welcome_message") or DEFAULT_WELCOME)
         embed = EmbedFactory.success(
             title=f"Welcome to {member.guild.name}",
-            description=self._render(template, member),
+            description=render_welcome_template(template, member, channel),
         )
         embed.set_thumbnail(url=member.display_avatar.url)
         try:
