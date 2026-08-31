@@ -19,7 +19,8 @@ The project is built around `discord.py`, async SQLite, persistent Discord UI co
 - Pillow profile cards with a render semaphore to protect low-memory hosts
 - Suggestions with persistent voting and approve/deny controls
 - Interactive polls
-- Welcome messages
+- Welcome messages with Dyno-style placeholders and preview tools
+- MD Personalabteilung statistics with Pillow bar/line graphs and saved datasets
 - Per-guild configuration stored in SQLite
 - TTL cache manager with manual clearing and automatic expiry
 - Rotating logs and SQLite WAL mode
@@ -138,7 +139,17 @@ The update script pulls with fast-forward only, updates dependencies and restart
 
 ## Pi-hole integration
 
-Raspberry-Bot does not change Pi-hole configuration. The system monitor only checks whether `pihole-FTL.service` is active. This keeps the bot isolated from your DNS configuration and means a bot error cannot alter Pi-hole settings.
+Raspberry-Bot never changes Pi-hole DNS configuration. When the local Pi-hole v6 CLI is readable, `/system pihole` also retrieves summary statistics. If the bot user cannot read `/etc/pihole/pihole.toml`, Phase 3.3+ automatically falls back to the `pihole-FTL` systemd status and skips repeated CLI calls to avoid permission-error journal spam.
+
+## MD personnel statistics
+
+Use `/perso weekly` for the ready-made MD Personalabteilung weekly report. Enter calendar weeks, applications and inductions, for example `KW35;KW36;KW37`, `12;17;14` and `5;8;6`. The command renders both series in one graph and adds weekly KPIs.
+
+Use `/perso graph` for fully custom bar/line charts with your own axis labels and an optional second series. Set a save name to reuse the dataset later with `/perso render`.
+
+## Welcome template arguments
+
+Use `/setup welcome-message` with placeholders such as `{user}`, `{username}`, `{display_name}`, `{server}`, `{member_count}`, `{user.avatar}` and `{channel}`. `/setup welcome-preview` renders the current template without posting it publicly.
 
 ## Data and logs
 
