@@ -32,8 +32,6 @@ class PersonnelService:
         return await self.get_by_name(guild_id, name)
 
     async def get_by_name(self, guild_id: int, name: str):
-        # Perso is intentionally global. guild_id is retained only for backwards
-        # compatibility with the existing schema and is not used to scope lookups.
         return await self.bot.database.fetchone(
             """SELECT * FROM personnel_members
                WHERE lower(display_name)=lower(?)
@@ -60,9 +58,6 @@ class PersonnelService:
         )
 
     async def totals(self, guild_id: int, *, period_like: str | None = None):
-        # Global personnel totals: records are linked by personnel_id. guild_id is
-        # deliberately ignored so entries remain visible regardless of where they
-        # were created or whether an old dashboard edit damaged a guild snowflake.
         record_filter = ""
         params: list[object] = []
         if period_like:
@@ -127,14 +122,17 @@ class PersonnelService:
     @staticmethod
     def png_bytes(title: str, rows) -> bytes:
         rows = list(rows)
-        width = 900
-        margin = 34
-        header_h = 360
-        footer_h = 64
-        gap = 18
-        card_h = 230
-        columns = 2
-        card_w = (width - margin * 2 - gap) // columns
+
+        # Wide landscape export: Discord can show this as a broad preview while
+        # keeping each staff card large enough to read on phones after tapping.
+        width = 1600
+        margin = 48
+        header_h = 300
+        footer_h = 72
+        gap = 20
+        card_h = 220
+        columns = 3
+        card_w = (width - margin * 2 - gap * (columns - 1)) // columns
         grid_rows = max(1, (len(rows) + columns - 1) // columns)
         height = header_h + grid_rows * (card_h + gap) + footer_h
 
@@ -151,27 +149,27 @@ class PersonnelService:
         image = Image.new("RGB", (width, height), bg)
         draw = ImageDraw.Draw(image)
 
-        title_font = PersonnelService._font(52, bold=True)
+        title_font = PersonnelService._font(58, bold=True)
         subtitle_font = PersonnelService._font(27)
-        kpi_label_font = PersonnelService._font(22, bold=True)
-        kpi_value_font = PersonnelService._font(42, bold=True)
+        kpi_label_font = PersonnelService._font(23, bold=True)
+        kpi_value_font = PersonnelService._font(40, bold=True)
         name_font = PersonnelService._font(34, bold=True)
-        meta_font = PersonnelService._font(23)
-        bar_font = PersonnelService._font(25, bold=True)
-        total_font = PersonnelService._font(28, bold=True)
-        footer_font = PersonnelService._font(18)
+        meta_font = PersonnelService._font(22)
+        bar_font = PersonnelService._font(24, bold=True)
+        total_font = PersonnelService._font(27, bold=True)
+        footer_font = PersonnelService._font(19)
 
         total_e = sum(int(r["inductions"]) for r in rows)
         total_b = sum(int(r["bwg"]) for r in rows)
         total_activity = total_e + total_b
         top = rows[0] if rows else None
 
-        draw.text((margin, 24), title, font=title_font, fill=text)
-        draw.text((margin, 88), f"{len(rows)} Mitarbeitende • gespeicherte Perso-Daten", font=subtitle_font, fill=muted)
+        draw.text((margin, 28), title, font=title_font, fill=text)
+        draw.text((margin, 100), f"{len(rows)} Mitarbeitende • gespeicherte Perso-Daten", font=subtitle_font, fill=muted)
 
-        kpi_y = 138
-        kpi_gap = 14
-        kpi_w = (width - margin * 2 - kpi_gap) // 2
+        kpi_y = 156
+        kpi_gap = 16
+        kpi_w = (width - margin * 2 - kpi_gap * 3) // 4
         kpis = [
             ("EINWEISUNGEN", str(total_e), accent_e),
             ("BWG", str(total_b), accent_b),
@@ -179,17 +177,14 @@ class PersonnelService:
             ("TOP ACTIVITY", str(top["display_name"]) if top else "—", text),
         ]
         for i, (label, value, accent) in enumerate(kpis):
-            col = i % 2
-            row_i = i // 2
-            x = margin + col * (kpi_w + kpi_gap)
-            y = kpi_y + row_i * 100
-            draw.rounded_rectangle((x, y, x + kpi_w, y + 86), radius=16, fill=panel)
-            draw.rounded_rectangle((x, y, x + 6, y + 86), radius=3, fill=accent)
-            draw.text((x + 18, y + 10), label, font=kpi_label_font, fill=muted)
+            x = margin + i * (kpi_w + kpi_gap)
+            draw.rounded_rectangle((x, kpi_y, x + kpi_w, kpi_y + 104), radius=18, fill=panel)
+            draw.rounded_rectangle((x, kpi_y, x + 7, kpi_y + 104), radius=3, fill=accent)
+            draw.text((x + 20, kpi_y + 12), label, font=kpi_label_font, fill=muted)
             display = value
-            while draw.textbbox((0, 0), display, font=kpi_value_font)[2] > kpi_w - 36 and len(display) > 4:
+            while draw.textbbox((0, 0), display, font=kpi_value_font)[2] > kpi_w - 40 and len(display) > 4:
                 display = display[:-2] + "…"
-            draw.text((x + 18, y + 38), display, font=kpi_value_font, fill=accent)
+            draw.text((x + 20, kpi_y + 49), display, font=kpi_value_font, fill=accent)
 
         max_value = max([max(int(r["inductions"]), int(r["bwg"])) for r in rows] or [1])
         max_value = max(1, max_value)
@@ -197,7 +192,7 @@ class PersonnelService:
         if not rows:
             y = header_h + 8
             draw.rounded_rectangle((margin, y, width - margin, y + card_h), radius=20, fill=panel)
-            draw.text((margin + 28, y + 72), "Noch keine Daten für diesen Zeitraum.", font=name_font, fill=muted)
+            draw.text((margin + 30, y + 78), "Noch keine Daten für diesen Zeitraum.", font=name_font, fill=muted)
 
         for index, r in enumerate(rows):
             col = index % columns
@@ -208,44 +203,47 @@ class PersonnelService:
             draw.rounded_rectangle((x, y, x + card_w, y + card_h), radius=20, fill=fill)
 
             name = str(r["display_name"])
-            if len(name) > 18:
-                name = name[:17] + "…"
+            if len(name) > 20:
+                name = name[:19] + "…"
             rank = str(r["rank_name"] or "")
             department = str(r["department"] or "")
             meta = " • ".join(part for part in (rank, department) if part)
-            if len(meta) > 30:
-                meta = meta[:29] + "…"
+            if len(meta) > 36:
+                meta = meta[:35] + "…"
 
             e = int(r["inductions"])
             b = int(r["bwg"])
             activity = int(r["activity"])
 
-            draw.text((x + 20, y + 18), f"{index + 1:02d}  {name}", font=name_font, fill=text)
+            draw.text((x + 22, y + 18), f"{index + 1:02d}  {name}", font=name_font, fill=text)
             if meta:
-                draw.text((x + 20, y + 61), meta, font=meta_font, fill=muted)
+                draw.text((x + 22, y + 60), meta, font=meta_font, fill=muted)
 
             total_text = f"Gesamt {activity}"
             box = draw.textbbox((0, 0), total_text, font=total_font)
-            draw.text((x + card_w - 20 - (box[2] - box[0]), y + 88), total_text, font=total_font, fill=accent_total)
+            draw.text((x + card_w - 22 - (box[2] - box[0]), y + 88), total_text, font=total_font, fill=accent_total)
 
-            bar_left = x + 20
-            bar_right = x + card_w - 20
+            bar_left = x + 22
+            bar_right = x + card_w - 22
             bar_width = bar_right - bar_left
             e_w = int(bar_width * e / max_value)
             b_w = int(bar_width * b / max_value)
-            e_y = y + 126
-            b_y = y + 178
-            bar_h = 38
+            e_y = y + 122
+            b_y = y + 170
+            bar_h = 34
 
-            draw.rounded_rectangle((bar_left, e_y, bar_right, e_y + bar_h), radius=15, fill=track)
-            draw.rounded_rectangle((bar_left, b_y, bar_right, b_y + bar_h), radius=15, fill=track)
-            PersonnelService._rounded_bar(draw, (bar_left, e_y, bar_left + e_w, e_y + bar_h), accent_e, 15)
-            PersonnelService._rounded_bar(draw, (bar_left, b_y, bar_left + b_w, b_y + bar_h), accent_b, 15)
-            draw.text((bar_left + 10, e_y + 3), f"Einweisungen {e}", font=bar_font, fill=text)
-            draw.text((bar_left + 10, b_y + 3), f"BWG {b}", font=bar_font, fill=text)
+            draw.rounded_rectangle((bar_left, e_y, bar_right, e_y + bar_h), radius=14, fill=track)
+            draw.rounded_rectangle((bar_left, b_y, bar_right, b_y + bar_h), radius=14, fill=track)
+            PersonnelService._rounded_bar(draw, (bar_left, e_y, bar_left + e_w, e_y + bar_h), accent_e, 14)
+            PersonnelService._rounded_bar(draw, (bar_left, b_y, bar_left + b_w, b_y + bar_h), accent_b, 14)
+            draw.text((bar_left + 10, e_y + 1), f"Einweisungen {e}", font=bar_font, fill=text)
+            draw.text((bar_left + 10, b_y + 1), f"BWG {b}", font=bar_font, fill=text)
 
-        footer_y = height - footer_h + 18
+        footer_y = height - footer_h + 22
         draw.text((margin, footer_y), "Raspberry-Bot • MD Personalabteilung", font=footer_font, fill=muted)
+        right = "Landscape • 3 Spalten • mobil & Desktop"
+        box = draw.textbbox((0, 0), right, font=footer_font)
+        draw.text((width - margin - (box[2] - box[0]), footer_y), right, font=footer_font, fill=muted)
 
         buf = BytesIO()
         image.save(buf, "PNG", optimize=True)
