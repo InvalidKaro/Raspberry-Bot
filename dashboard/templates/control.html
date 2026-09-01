@@ -32,6 +32,36 @@
 
     <section class="panel">
       <div class="panel-head">
+        <div><p class="card-label">SYSTEM HEALTH</p><h2>Pi & bot performance</h2></div>
+        <span class="branch" id="low-ram-state">LOW-RAM TUNED</span>
+      </div>
+      <p class="muted">Live values from the dashboard sampler. System history now runs every 90 seconds to reduce background work.</p>
+      <section class="metric-grid compact">
+        <article class="metric"><span>RAM</span><strong id="ram-percent">—</strong><small id="ram-detail">—</small></article>
+        <article class="metric"><span>Bot RAM</span><strong id="bot-ram">—</strong><small id="bot-cpu">— CPU</small></article>
+        <article class="metric"><span>Dashboard RAM</span><strong id="dashboard-ram">—</strong><small id="dashboard-cpu">— CPU</small></article>
+        <article class="metric"><span>CPU</span><strong id="cpu-percent">—</strong><small id="cpu-average">— avg</small></article>
+        <article class="metric"><span>Temperature</span><strong id="temperature">—</strong><small id="temp-state">—</small></article>
+        <article class="metric"><span>Swap</span><strong id="swap-percent">—</strong><small id="swap-detail">—</small></article>
+        <article class="metric"><span>Disk</span><strong id="disk-percent">—</strong><small id="disk-detail">—</small></article>
+        <article class="metric"><span>Bot service</span><strong id="bot-state">—</strong><small id="sample-age">—</small></article>
+      </section>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div><p class="card-label">PERSONNEL SNAPSHOT</p><h2>Perso 2.0</h2></div>
+      </div>
+      <p class="muted">The Discord bot now supports leaderboard and full report exports in addition to overview, chart and CSV.</p>
+      <div class="button-row">
+        <span class="button">/perso leaderboard</span>
+        <span class="button">/perso report</span>
+        <span class="button">/perso export</span>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
         <div><p class="card-label">QUICK COMMANDS</p><h2>Update & restart</h2></div>
       </div>
       <p class="muted">Same commands you would normally run over SSH, directly from the authenticated dashboard.</p>
