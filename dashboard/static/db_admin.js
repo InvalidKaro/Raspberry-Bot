@@ -138,6 +138,7 @@
   function columnType(column) { return String(column.type || '').toUpperCase(); }
   function isBlob(column) { return columnType(column).includes('BLOB'); }
   function isNumeric(column) { return /(INT|REAL|FLOA|DOUB|NUM|DEC)/.test(columnType(column)); }
+  function isInteger(column) { return /INT/.test(columnType(column)); }
 
   function openEditor(mode, row = null) {
     state.mode = mode; state.editing = row ? structuredClone(row) : null;
@@ -177,6 +178,29 @@
 
   function closeEditor() { els.editorBackdrop.classList.add('hidden'); state.editing = null; }
 
+  function sameValue(column, original, value) {
+    if (original === null || value === null) return original === value;
+    if (isInteger(column)) return String(original).trim() === String(value).trim();
+    if (isNumeric(column)) return Number(original) === Number(value);
+    return String(original) === String(value);
+  }
+
+  function parseInputValue(column, raw) {
+    if (!isNumeric(column) || raw === '') return raw;
+    if (isInteger(column)) {
+      if (!/^-?\d+$/.test(raw)) throw new Error(`${column.name}: ungültige Ganzzahl.`);
+      // Keep large integers as decimal strings. SQLite stores them exactly, while
+      // JavaScript Number would silently round Discord snowflake IDs.
+      if (raw.replace('-', '').length >= 16) return raw;
+      const parsed = Number(raw);
+      if (!Number.isSafeInteger(parsed)) return raw;
+      return parsed;
+    }
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) throw new Error(`${column.name}: ungültige Zahl.`);
+    return parsed;
+  }
+
   function collectValues() {
     const values = {};
     for (const column of state.metadata.columns) {
@@ -184,14 +208,17 @@
       const nullBox = els.editorForm.querySelector(`[data-null-for="${CSS.escape(column.name)}"]`);
       if (!input || isBlob(column)) continue;
       if (state.mode === 'edit' && state.metadata.primary_key.includes(column.name)) continue;
-      if (nullBox?.checked) { values[column.name] = null; continue; }
-      if (state.mode === 'new' && input.value === '') continue;
-      let value = input.value;
-      if (isNumeric(column) && value !== '') {
-        const parsed = Number(value);
-        if (!Number.isFinite(parsed)) throw new Error(`${column.name}: ungültige Zahl.`);
-        value = parsed;
+
+      let value;
+      if (nullBox?.checked) value = null;
+      else {
+        if (state.mode === 'new' && input.value === '') continue;
+        value = parseInputValue(column, input.value);
       }
+
+      // For edits, only send fields the user actually changed. This prevents
+      // unrelated IDs/timestamps from being rewritten and protects live bot data.
+      if (state.mode === 'edit' && sameValue(column, state.editing?.[column.name], value)) continue;
       values[column.name] = value;
     }
     return values;
@@ -211,11 +238,14 @@
       if (state.mode === 'new') {
         result = await api(`/api/database/admin/${encodeURIComponent(state.table)}/insert`, {method: 'POST', body: {values}});
       } else {
+        if (!Object.keys(values).length) {
+          closeEditor(); showNotice('Keine Änderungen erkannt.'); return;
+        }
         result = await api(`/api/database/admin/${encodeURIComponent(state.table)}/update`, {
           method: 'PATCH', body: {key: currentKey(), values, expected: state.editing}
         });
       }
-      closeEditor(); showNotice(`${result.message} Backup erstellt.`); await loadRows(); await loadTables();
+      closeEditor(); showNotice(`${result.message}${result.backup ? ' Backup erstellt.' : ''}`); await loadRows(); await loadTables();
     } catch (err) { showNotice(err.message, true); }
     finally { els.saveRow.disabled = false; }
   }
