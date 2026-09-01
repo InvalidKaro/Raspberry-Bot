@@ -12,7 +12,7 @@
       <div>
         <p class="eyebrow">RASPBERRY-BOT 4.0</p>
         <h1>Control Center</h1>
-        <p class="muted">Live bot management, command sync and operational totals.</p>
+        <p class="muted">Live bot management, personnel reports and Pi health.</p>
       </div>
       <div class="button-row">
         <a class="button" href="/">Dashboard</a>
@@ -35,7 +35,7 @@
         <div><p class="card-label">SYSTEM HEALTH</p><h2>Pi & bot performance</h2></div>
         <span class="branch" id="low-ram-state">LOW-RAM TUNED</span>
       </div>
-      <p class="muted">Live values from the dashboard sampler. System history now runs every 90 seconds to reduce background work.</p>
+      <p class="muted">Live sampler values. Persistent history runs every 90 seconds to keep background load low.</p>
       <section class="metric-grid compact">
         <article class="metric"><span>RAM</span><strong id="ram-percent">—</strong><small id="ram-detail">—</small></article>
         <article class="metric"><span>Bot RAM</span><strong id="bot-ram">—</strong><small id="bot-cpu">— CPU</small></article>
@@ -50,14 +50,55 @@
 
     <section class="panel">
       <div class="panel-head">
-        <div><p class="card-label">PERSONNEL SNAPSHOT</p><h2>Perso 2.0</h2></div>
+        <div><p class="card-label">PERFORMANCE HISTORY</p><h2>Recent trends</h2></div>
+        <span class="branch" id="history-state">90s history</span>
       </div>
-      <p class="muted">The Discord bot now supports leaderboard and full report exports in addition to overview, chart and CSV.</p>
+      <div class="detail-grid">
+        <article>
+          <p class="muted">RAM %</p>
+          <svg id="ram-chart" width="100%" height="180" viewBox="0 0 900 180" role="img" aria-label="RAM history"></svg>
+        </article>
+        <article>
+          <p class="muted">CPU %</p>
+          <svg id="cpu-chart" width="100%" height="180" viewBox="0 0 900 180" role="img" aria-label="CPU history"></svg>
+        </article>
+      </div>
+      <article>
+        <p class="muted">Temperature °C</p>
+        <svg id="temp-chart" width="100%" height="180" viewBox="0 0 900 180" role="img" aria-label="Temperature history"></svg>
+      </article>
+    </section>
+
+    <section class="detail-grid">
+      <article class="panel">
+        <div class="panel-head">
+          <div><p class="card-label">PERSONNEL</p><h2>Leaderboard</h2></div>
+          <span class="branch" id="perso-total">—</span>
+        </div>
+        <div id="perso-leaderboard" class="stack-list"></div>
+      </article>
+      <article class="panel">
+        <div class="panel-head"><div><p class="card-label">PERSONNEL REPORTS</p><h2>Generate PNG</h2></div></div>
+        <p class="muted">Uses the exact same Pillow renderer as Discord. Nothing is duplicated in memory permanently.</p>
+        <div class="button-row">
+          <a class="button" href="/api/control/personnel/report?format=overview">Overview PNG</a>
+          <a class="button" href="/api/control/personnel/report?format=chart">Diagram PNG</a>
+        </div>
+        <p class="muted">Discord commands: <strong>/perso leaderboard</strong> · <strong>/perso report</strong> · <strong>/perso export</strong></p>
+      </article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div><p class="card-label">MEMORY MAINTENANCE</p><h2>Safe low-RAM actions</h2></div>
+      </div>
+      <p class="muted">Actions are queued to the bot process instead of manipulating its memory or SQLite connection from the dashboard process.</p>
       <div class="button-row">
-        <span class="button">/perso leaderboard</span>
-        <span class="button">/perso report</span>
-        <span class="button">/perso export</span>
+        <button id="cache-clear" type="button">Clear Bot Caches</button>
+        <button id="gc-run" type="button">Run Python GC</button>
+        <button id="db-optimize" type="button">Optimize SQLite</button>
       </div>
+      <pre id="maintenance-result">Ready.</pre>
     </section>
 
     <section class="panel">
