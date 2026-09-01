@@ -241,8 +241,8 @@ def render_personnel_png(title: str, rows) -> bytes:
                 str(row["display_name"]),
                 name_right - name_left,
                 name_bottom - name_top,
-                maximum=108,
-                minimum=54,
+                maximum=96,
+                minimum=44,
             )
             _, name_h = _measure(draw, name_text, name_font)
             name_y = name_top + max(0, ((name_bottom - name_top) - name_h) // 2) - 4
@@ -313,7 +313,6 @@ def render_personnel_chart(title: str, rows) -> bytes:
     )
     max_value = max(1, max_value)
 
-    # Subtle vertical guides.
     guide_font = _font(22, bold=False)
     for step in range(6):
         value = round(max_value * step / 5)
@@ -350,9 +349,9 @@ def render_personnel_chart(title: str, rows) -> bytes:
 
             draw.rounded_rectangle((chart_left, e_y, chart_right, e_y + bar_h), radius=8, fill=TRACK)
             draw.rounded_rectangle((chart_left, b_y, chart_right, b_y + bar_h), radius=8, fill=TRACK)
-            if e_width:
+            if e_width > 0:
                 draw.rounded_rectangle((chart_left, e_y, chart_left + e_width, e_y + bar_h), radius=8, fill=BLUE)
-            if b_width:
+            if b_width > 0:
                 draw.rounded_rectangle((chart_left, b_y, chart_left + b_width, b_y + bar_h), radius=8, fill=GREEN)
 
             value_font = _font(24, bold=True)
@@ -360,15 +359,15 @@ def render_personnel_chart(title: str, rows) -> bytes:
             b_label = str(b)
             e_label_w, _ = _measure(draw, e_label, value_font)
             b_label_w, _ = _measure(draw, b_label, value_font)
-            e_x = min(chart_right - e_label_w - 8, chart_left + e_width + 10)
-            b_x = min(chart_right - b_label_w - 8, chart_left + b_width + 10)
-            draw.text((e_x, e_y - 6), e_label, font=value_font, fill=BLUE)
-            draw.text((b_x, b_y - 6), b_label, font=value_font, fill=GREEN)
+            e_label_x = min(chart_right - e_label_w, chart_left + max(8, e_width) + 10)
+            b_label_x = min(chart_right - b_label_w, chart_left + max(8, b_width) + 10)
+            draw.text((e_label_x, e_y - 5), e_label, font=value_font, fill=TEXT)
+            draw.text((b_label_x, b_y - 5), b_label, font=value_font, fill=TEXT)
 
     total_e = sum(_row_value(r, "inductions") for r in all_rows)
     total_b = sum(_row_value(r, "bwg") for r in all_rows)
-    footer_font = _font(25, bold=False)
-    footer = f"Gesamt: {total_e} Einweisungen • {total_b} BWG • {len(all_rows)} Personen"
+    footer_font = _font(26, bold=False)
+    footer = f"Gesamt: {total_e} Einweisungen • {total_b} BWG • {total_e + total_b} Aktivität"
     draw.text((margin, height - 58), footer, font=footer_font, fill=MUTED)
 
     return _png_bytes(image)
