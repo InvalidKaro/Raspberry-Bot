@@ -1,11 +1,12 @@
 (() => {
   let csrf = "";
   const $ = (id) => document.getElementById(id);
+  const SVG_NS = "http://www.w3.org/2000/svg";
 
   async function request(url, options = {}) {
     const headers = {"Content-Type": "application/json", ...(options.headers || {})};
     if (options.method && options.method !== "GET") headers["X-CSRF-Token"] = csrf;
-    const response = await fetch(url, {...options, headers});
+    const response = await fetch(url, {...options, headers, cache:"no-store"});
     const data = await response.json().catch(() => ({ok:false,message:"Invalid response"}));
     if (response.status === 401) location.href = "/login";
     return {response, data};
@@ -53,10 +54,117 @@
     else state.textContent = "LOW-RAM TUNED";
   }
 
+  function svgNode(name, attrs = {}) {
+    const node = document.createElementNS(SVG_NS, name);
+    for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value));
+    return node;
+  }
+
+  function renderTrend(svg, rows, key, options = {}) {
+    if (!svg) return;
+    svg.replaceChildren();
+    const width = 900;
+    const height = 180;
+    const padX = 38;
+    const padY = 20;
+    const values = rows
+      .map((row) => Number(row[key]))
+      .filter((value) => Number.isFinite(value));
+
+    const styles = getComputedStyle(document.documentElement);
+    const border = styles.getPropertyValue("--border").trim() || "#252c38";
+    const muted = styles.getPropertyValue("--muted").trim() || "#8e99aa";
+    const accent = options.color || styles.getPropertyValue("--accent").trim() || "#8b5cf6";
+
+    for (const ratio of [0, 0.5, 1]) {
+      const y = padY + (height - padY * 2) * ratio;
+      svg.appendChild(svgNode("line", {x1:padX, y1:y, x2:width-padX, y2:y, stroke:border, "stroke-width":1}));
+    }
+
+    if (values.length < 2) {
+      const text = svgNode("text", {x:width/2, y:height/2, fill:muted, "text-anchor":"middle", "font-size":18});
+      text.textContent = "Not enough history yet";
+      svg.appendChild(text);
+      return;
+    }
+
+    let min = options.min == null ? Math.min(...values) : Number(options.min);
+    let max = options.max == null ? Math.max(...values) : Number(options.max);
+    if (!Number.isFinite(min)) min = 0;
+    if (!Number.isFinite(max)) max = 100;
+    if (max - min < 1) max = min + 1;
+    const margin = options.padding == null ? (max - min) * 0.08 : Number(options.padding);
+    min = Math.max(options.floor == null ? -Infinity : Number(options.floor), min - margin);
+    max += margin;
+
+    const points = values.map((value, index) => {
+      const x = padX + (index / (values.length - 1)) * (width - padX * 2);
+      const y = height - padY - ((value - min) / (max - min)) * (height - padY * 2);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(" ");
+
+    svg.appendChild(svgNode("polyline", {
+      points,
+      fill:"none",
+      stroke:accent,
+      "stroke-width":4,
+      "stroke-linecap":"round",
+      "stroke-linejoin":"round"
+    }));
+
+    const last = values[values.length - 1];
+    const label = svgNode("text", {x:width-padX, y:18, fill:muted, "text-anchor":"end", "font-size":16});
+    label.textContent = `${last.toFixed(1)}${options.suffix || ""}`;
+    svg.appendChild(label);
+  }
+
+  function renderHistory(data = {}) {
+    const history = Array.isArray(data.history) ? data.history : [];
+    $("history-state").textContent = `${data.interval_seconds || 90}s · ${history.length} points`;
+    const styles = getComputedStyle(document.documentElement);
+    renderTrend($("ram-chart"), history, "ram_percent", {min:0, max:100, suffix:"%", color:styles.getPropertyValue("--accent").trim()});
+    renderTrend($("cpu-chart"), history, "cpu_percent", {min:0, max:100, suffix:"%", color:styles.getPropertyValue("--good").trim()});
+    renderTrend($("temp-chart"), history, "temperature", {floor:20, suffix:" °C", color:styles.getPropertyValue("--warning").trim()});
+  }
+
+  function renderPersonnel(data = {}) {
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    $("perso-total").textContent = `E ${data.total_e ?? 0} · BWG ${data.total_b ?? 0}`;
+    const target = $("perso-leaderboard");
+    target.replaceChildren();
+    if (!rows.length) {
+      const empty = document.createElement("p");
+      empty.className = "muted";
+      empty.textContent = "No personnel data yet.";
+      target.appendChild(empty);
+      return;
+    }
+    rows.slice(0, 10).forEach((row, index) => {
+      const item = document.createElement("div");
+      item.className = "stack-row";
+      const label = document.createElement("div");
+      const strong = document.createElement("strong");
+      strong.textContent = `${index + 1}. ${row.display_name}`;
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      meta.textContent = `E ${row.inductions} · BWG ${row.bwg}`;
+      label.append(strong, meta);
+      const total = document.createElement("strong");
+      total.textContent = String(row.activity ?? 0);
+      item.append(label, total);
+      target.appendChild(item);
+    });
+  }
+
   async function load() {
-    const [{response:r1,data:c},{response:r2,data:g},{response:r3,data:s}] = await Promise.all([
-      request("/api/control-center"), request("/api/cogs"), request("/api/status")
+    const results = await Promise.all([
+      request("/api/control-center"),
+      request("/api/cogs"),
+      request("/api/status"),
+      request("/api/control/history?limit=80"),
+      request("/api/control/personnel")
     ]);
+    const [{response:r1,data:c},{response:r2,data:g},{response:r3,data:s},{response:r4,data:h},{response:r5,data:p}] = results;
     if (!r1.ok || !c.ok) throw new Error(c.message || "Control center failed");
     const o = c.overview || {};
     $("tickets").textContent = o.tickets ?? "—";
@@ -68,6 +176,8 @@
     $("backups").textContent = c.backups ?? "—";
 
     if (r3.ok && s.ok && s.system) renderSystem(s.system);
+    if (r4.ok && h.ok) renderHistory(h);
+    if (r5.ok && p.ok) renderPersonnel(p);
 
     const exts = (g && g.extensions) || [];
     $("extension-count").textContent = `${exts.length} configured`;
@@ -102,22 +212,39 @@
       return;
     }
     $("command-result").textContent = `Queued #${data.command_id}: ${action}${extension ? ` ${extension}` : ""}`;
-    poll(data.command_id);
+    poll(data.command_id, "command-result");
   }
 
-  async function poll(id) {
-    for (let n = 0; n < 20; n++) {
+  async function maintenance(action) {
+    const output = $("maintenance-result");
+    output.textContent = `Queuing ${action}…`;
+    const {response, data} = await request(`/api/control/maintenance/${action}`, {
+      method:"POST",
+      body:JSON.stringify({})
+    });
+    if (!response.ok || !data.ok) {
+      output.textContent = data.message || "Maintenance action failed";
+      return;
+    }
+    output.textContent = `Queued #${data.command_id}: ${action}`;
+    poll(data.command_id, "maintenance-result");
+  }
+
+  async function poll(id, outputId) {
+    const output = $(outputId);
+    for (let n = 0; n < 25; n++) {
       await new Promise((resolve) => setTimeout(resolve, 1000));
       const {response, data} = await request(`/api/dashboard-command/${id}`);
       if (response.ok && data.ok && data.command) {
         const command = data.command;
-        $("command-result").textContent = `#${command.id} · ${command.status}\n${command.result || "Waiting…"}`;
+        output.textContent = `#${command.id} · ${command.status}\n${command.result || "Waiting…"}`;
         if (command.status !== "pending") {
           await load();
           return;
         }
       }
     }
+    output.textContent += "\nTimed out waiting for the bot queue.";
   }
 
   function setQuickBusy(busy) {
@@ -174,6 +301,9 @@
       await load();
       $("refresh").addEventListener("click", load);
       $("sync").addEventListener("click", () => queue("sync"));
+      $("cache-clear").addEventListener("click", () => maintenance("cache-clear"));
+      $("gc-run").addEventListener("click", () => maintenance("gc"));
+      $("db-optimize").addEventListener("click", () => maintenance("database-optimize"));
       $("git-pull").addEventListener("click", () => quick("pull"));
       $("restart-bot").addEventListener("click", () => quick("restart-bot", "Restart Raspberry-Bot now?"));
       $("restart-dashboard").addEventListener("click", () => quick("restart-dashboard", "Restart the dashboard now?"));
