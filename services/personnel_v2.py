@@ -99,9 +99,9 @@ class PersonnelService:
 
         width = 1440
         margin = 64
-        header_h = 250
-        row_h = 92
-        footer_h = 70
+        header_h = 282
+        row_h = 106
+        footer_h = 82
         height = header_h + max(1, len(rows)) * row_h + footer_h
 
         bg = (17, 19, 24)
@@ -117,29 +117,29 @@ class PersonnelService:
         image = Image.new("RGB", (width, height), bg)
         draw = ImageDraw.Draw(image)
 
-        title_font = PersonnelService._font(38, bold=True)
-        subtitle_font = PersonnelService._font(18)
-        card_label_font = PersonnelService._font(16)
-        card_value_font = PersonnelService._font(30, bold=True)
-        name_font = PersonnelService._font(21, bold=True)
-        meta_font = PersonnelService._font(14)
-        value_font = PersonnelService._font(17, bold=True)
-        footer_font = PersonnelService._font(14)
+        title_font = PersonnelService._font(46, bold=True)
+        subtitle_font = PersonnelService._font(22)
+        card_label_font = PersonnelService._font(19, bold=True)
+        card_value_font = PersonnelService._font(36, bold=True)
+        name_font = PersonnelService._font(26, bold=True)
+        meta_font = PersonnelService._font(17)
+        value_font = PersonnelService._font(22, bold=True)
+        footer_font = PersonnelService._font(17)
 
         total_e = sum(int(r["inductions"]) for r in rows)
         total_b = sum(int(r["bwg"]) for r in rows)
         total_activity = total_e + total_b
         top = rows[0] if rows else None
 
-        draw.text((margin, 42), title, font=title_font, fill=text)
+        draw.text((margin, 38), title, font=title_font, fill=text)
         draw.text(
-            (margin, 94),
+            (margin, 99),
             f"{len(rows)} Mitarbeitende • Einweisungen & BWG • automatisch aus gespeicherten Perso-Daten",
             font=subtitle_font,
             fill=muted,
         )
 
-        card_y = 132
+        card_y = 148
         gap = 18
         card_w = (width - margin * 2 - gap * 3) // 4
         cards = [
@@ -150,19 +150,19 @@ class PersonnelService:
         ]
         for i, (label, value, accent) in enumerate(cards):
             x = margin + i * (card_w + gap)
-            draw.rounded_rectangle((x, card_y, x + card_w, card_y + 92), radius=18, fill=panel)
-            draw.rounded_rectangle((x, card_y, x + 6, card_y + 92), radius=3, fill=accent)
+            draw.rounded_rectangle((x, card_y, x + card_w, card_y + 108), radius=18, fill=panel)
+            draw.rounded_rectangle((x, card_y, x + 6, card_y + 108), radius=3, fill=accent)
             draw.text((x + 22, card_y + 17), label, font=card_label_font, fill=muted)
             display = value
             while draw.textbbox((0, 0), display, font=card_value_font)[2] > card_w - 44 and len(display) > 4:
                 display = display[:-2] + "…"
-            draw.text((x + 22, card_y + 44), display, font=card_value_font, fill=accent)
+            draw.text((x + 22, card_y + 52), display, font=card_value_font, fill=accent)
 
         chart_top = header_h
         label_x = margin + 16
-        bars_x = 430
-        bars_right = width - margin - 180
-        values_x = width - margin - 145
+        bars_x = 455
+        bars_right = width - margin - 194
+        values_x = width - margin - 158
         available_bar_w = bars_right - bars_x
         max_value = max([max(int(r["inductions"]), int(r["bwg"])) for r in rows] or [1])
         max_value = max(1, max_value)
@@ -171,12 +171,12 @@ class PersonnelService:
             x = bars_x + int(available_bar_w * step / 4)
             draw.line((x, chart_top - 8, x, height - footer_h - 10), fill=grid, width=1)
             tick = round(max_value * step / 4)
-            draw.text((x - 8, chart_top - 28), str(tick), font=meta_font, fill=muted)
+            draw.text((x - 10, chart_top - 34), str(tick), font=meta_font, fill=muted)
 
         if not rows:
             box_y = chart_top + 18
-            draw.rounded_rectangle((margin, box_y, width - margin, box_y + 64), radius=16, fill=panel)
-            draw.text((margin + 24, box_y + 20), "Noch keine Daten für diesen Zeitraum.", font=name_font, fill=muted)
+            draw.rounded_rectangle((margin, box_y, width - margin, box_y + 76), radius=16, fill=panel)
+            draw.text((margin + 24, box_y + 22), "Noch keine Daten für diesen Zeitraum.", font=name_font, fill=muted)
 
         for index, row in enumerate(rows):
             y = chart_top + index * row_h
@@ -184,17 +184,17 @@ class PersonnelService:
             draw.rounded_rectangle((margin, y + 7, width - margin, y + row_h - 7), radius=16, fill=row_bg)
 
             name = str(row["display_name"])
-            if len(name) > 28:
-                name = name[:27] + "…"
+            if len(name) > 25:
+                name = name[:24] + "…"
             rank = str(row["rank_name"] or "")
             department = str(row["department"] or "")
             meta = " • ".join(part for part in (rank, department) if part)
 
-            draw.text((label_x, y + 21), f"{index + 1:02d}  {name}", font=name_font, fill=text)
+            draw.text((label_x, y + 24), f"{index + 1:02d}  {name}", font=name_font, fill=text)
             if meta:
-                if len(meta) > 38:
-                    meta = meta[:37] + "…"
-                draw.text((label_x + 43, y + 53), meta, font=meta_font, fill=muted)
+                if len(meta) > 34:
+                    meta = meta[:33] + "…"
+                draw.text((label_x + 48, y + 66), meta, font=meta_font, fill=muted)
 
             e = int(row["inductions"])
             b = int(row["bwg"])
@@ -202,24 +202,24 @@ class PersonnelService:
             e_w = int(available_bar_w * e / max_value)
             b_w = int(available_bar_w * b / max_value)
 
-            draw.rounded_rectangle((bars_x, y + 20, bars_right, y + 43), radius=10, fill=(42, 46, 56))
-            draw.rounded_rectangle((bars_x, y + 50, bars_right, y + 73), radius=10, fill=(42, 46, 56))
-            PersonnelService._rounded_bar(draw, (bars_x, y + 20, bars_x + e_w, y + 43), accent_e, 10)
-            PersonnelService._rounded_bar(draw, (bars_x, y + 50, bars_x + b_w, y + 73), accent_b, 10)
+            draw.rounded_rectangle((bars_x, y + 23, bars_right, y + 50), radius=11, fill=(42, 46, 56))
+            draw.rounded_rectangle((bars_x, y + 59, bars_right, y + 86), radius=11, fill=(42, 46, 56))
+            PersonnelService._rounded_bar(draw, (bars_x, y + 23, bars_x + e_w, y + 50), accent_e, 11)
+            PersonnelService._rounded_bar(draw, (bars_x, y + 59, bars_x + b_w, y + 86), accent_b, 11)
 
-            draw.text((values_x, y + 20), f"E  {e}", font=value_font, fill=accent_e)
-            draw.text((values_x, y + 50), f"B  {b}", font=value_font, fill=accent_b)
-            draw.text((width - margin - 55, y + 35), str(activity), font=value_font, fill=accent_total)
+            draw.text((values_x, y + 22), f"E  {e}", font=value_font, fill=accent_e)
+            draw.text((values_x, y + 58), f"B  {b}", font=value_font, fill=accent_b)
+            draw.text((width - margin - 62, y + 42), str(activity), font=value_font, fill=accent_total)
 
-        footer_y = height - footer_h + 14
-        draw.rounded_rectangle((margin, footer_y - 5, margin + 14, footer_y + 9), radius=4, fill=accent_e)
-        draw.text((margin + 22, footer_y - 5), "Einweisungen", font=footer_font, fill=muted)
-        draw.rounded_rectangle((margin + 145, footer_y - 5, margin + 159, footer_y + 9), radius=4, fill=accent_b)
-        draw.text((margin + 167, footer_y - 5), "BWG", font=footer_font, fill=muted)
-        draw.text((width - margin - 385, footer_y - 5), "Gesamtaktivität rechts", font=footer_font, fill=muted)
+        footer_y = height - footer_h + 17
+        draw.rounded_rectangle((margin, footer_y - 5, margin + 16, footer_y + 11), radius=4, fill=accent_e)
+        draw.text((margin + 26, footer_y - 8), "Einweisungen", font=footer_font, fill=muted)
+        draw.rounded_rectangle((margin + 172, footer_y - 5, margin + 188, footer_y + 11), radius=4, fill=accent_b)
+        draw.text((margin + 198, footer_y - 8), "BWG", font=footer_font, fill=muted)
+        draw.text((width - margin - 420, footer_y - 8), "Gesamtaktivität rechts", font=footer_font, fill=muted)
         footer_text = "Raspberry-Bot • MD Personalabteilung"
         footer_box = draw.textbbox((0, 0), footer_text, font=footer_font)
-        draw.text((width - margin - (footer_box[2] - footer_box[0]), footer_y + 21), footer_text, font=footer_font, fill=(105, 112, 126))
+        draw.text((width - margin - (footer_box[2] - footer_box[0]), footer_y + 27), footer_text, font=footer_font, fill=(105, 112, 126))
 
         buf = BytesIO()
         image.save(buf, "PNG", optimize=True)
