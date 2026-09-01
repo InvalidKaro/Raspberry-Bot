@@ -26,6 +26,84 @@
     return Number.isFinite(Number(value)) ? `${Number(value).toFixed(1)}%` : "—";
   }
 
+  function renderRecommendations(system = {}) {
+    const target = $("health-recommendations");
+    const score = $("health-score");
+    if (!target || !score) return;
+
+    const recommendations = [];
+    let severity = 0;
+    const ram = Number(system.memory_percent);
+    const swap = Number(system.swap_percent);
+    const cpu = Number(system.cpu_average_30s ?? system.cpu_percent);
+    const temp = Number(system.temperature_c);
+    const disk = Number(system.disk_percent);
+    const botRam = Number(system.bot_memory_mb);
+    const dashRam = Number(system.dashboard_memory_mb);
+
+    if (!system.bot_active) {
+      recommendations.push(["Critical", "Bot service is offline. Check the service logs before restarting it."]);
+      severity = Math.max(severity, 3);
+    }
+    if (Number.isFinite(ram) && ram >= 90) {
+      recommendations.push(["Critical", "RAM usage is above 90%. Clear bot caches first; use Python GC only if memory remains high."]);
+      severity = Math.max(severity, 3);
+    } else if (Number.isFinite(ram) && ram >= 80) {
+      recommendations.push(["Warning", "RAM usage is above 80%. Check Bot RAM and Dashboard RAM to find the main consumer."]);
+      severity = Math.max(severity, 2);
+    }
+    if (Number.isFinite(swap) && swap >= 50) {
+      recommendations.push(["Warning", "Swap usage is high. Avoid repeated heavy exports and check whether a process keeps growing."]);
+      severity = Math.max(severity, 2);
+    }
+    if (Number.isFinite(cpu) && cpu >= 80) {
+      recommendations.push(["Warning", "CPU has been high for the recent sample window. Inspect the process list on the main dashboard."]);
+      severity = Math.max(severity, 2);
+    }
+    if (Number.isFinite(temp) && temp >= 75) {
+      recommendations.push(["Critical", "Pi temperature is high. Check airflow, enclosure and sustained CPU load."]);
+      severity = Math.max(severity, 3);
+    } else if (Number.isFinite(temp) && temp >= 65) {
+      recommendations.push(["Notice", "Pi is warm. No action is required yet, but keep an eye on sustained temperature."]);
+      severity = Math.max(severity, 1);
+    }
+    if (Number.isFinite(disk) && disk >= 90) {
+      recommendations.push(["Critical", "Disk usage is above 90%. Check logs, backups and database growth."]);
+      severity = Math.max(severity, 3);
+    } else if (Number.isFinite(disk) && disk >= 80) {
+      recommendations.push(["Warning", "Disk usage is above 80%. Review old logs and backups before storage becomes tight."]);
+      severity = Math.max(severity, 2);
+    }
+    if (Number.isFinite(botRam) && botRam >= 350) {
+      recommendations.push(["Warning", `Bot RSS is ${botRam.toFixed(1)} MB. Use Clear Bot Caches, then watch whether it grows again.`]);
+      severity = Math.max(severity, 2);
+    }
+    if (Number.isFinite(dashRam) && dashRam >= 220) {
+      recommendations.push(["Warning", `Dashboard RSS is ${dashRam.toFixed(1)} MB. A dashboard restart can reclaim memory if it keeps growing.`]);
+      severity = Math.max(severity, 2);
+    }
+
+    if (!recommendations.length) {
+      recommendations.push(["Good", "No immediate optimization is needed. Current RAM, CPU, temperature and disk values look healthy."]);
+    }
+
+    score.textContent = severity >= 3 ? "ACTION NEEDED" : severity === 2 ? "CHECK SOON" : severity === 1 ? "WATCH" : "HEALTHY";
+    target.replaceChildren();
+    for (const [label, text] of recommendations.slice(0, 6)) {
+      const row = document.createElement("div");
+      row.className = "stack-row";
+      const left = document.createElement("div");
+      const strong = document.createElement("strong");
+      strong.textContent = label;
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      meta.textContent = text;
+      left.append(strong, meta);
+      row.appendChild(left);
+      target.appendChild(row);
+    }
+  }
+
   function renderSystem(system = {}) {
     $("ram-percent").textContent = fmtPercent(system.memory_percent);
     $("ram-detail").textContent = `${system.memory_used_mb ?? "—"} / ${system.memory_total_mb ?? "—"} MB`;
@@ -52,6 +130,8 @@
     else if (Number.isFinite(ram) && ram >= 80) state.textContent = "RAM HIGH";
     else if (Number.isFinite(swap) && swap >= 40) state.textContent = "SWAP ACTIVE";
     else state.textContent = "LOW-RAM TUNED";
+
+    renderRecommendations(system);
   }
 
   function svgNode(name, attrs = {}) {
@@ -67,9 +147,7 @@
     const height = 180;
     const padX = 38;
     const padY = 20;
-    const values = rows
-      .map((row) => Number(row[key]))
-      .filter((value) => Number.isFinite(value));
+    const values = rows.map((row) => Number(row[key])).filter((value) => Number.isFinite(value));
 
     const styles = getComputedStyle(document.documentElement);
     const border = styles.getPropertyValue("--border").trim() || "#252c38";
