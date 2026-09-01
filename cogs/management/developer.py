@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import socket
-from collections import Counter
+import time
 from pathlib import Path
 
 import discord
@@ -11,10 +11,31 @@ from discord import app_commands
 from discord.ext import commands
 
 from helpers.embeds import EmbedFactory
-from helpers.formatting import human_bytes, human_duration
+from helpers.formatting import human_bytes
 from services.maintenance import collect_garbage
 from services.pihole import collect_pihole_stats
-from services.system_metrics import collect_system_metrics
+from services.system_metrics import collect_system_metrics, throttling_labels
+
+
+def _tree_size(path: Path) -> int:
+    if not path.exists():
+        return 0
+    if path.is_file():
+        try:
+            return path.stat().st_size
+        except OSError:
+            return 0
+    total = 0
+    try:
+        for item in path.rglob("*"):
+            if item.is_file():
+                try:
+                    total += item.stat().st_size
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return total
 
 
 class Developer(commands.GroupCog, group_name="dev", group_description="Bot owner maintenance commands"):
@@ -77,16 +98,98 @@ class Developer(commands.GroupCog, group_name="dev", group_description="Bot owne
     async def memory(self, interaction: discord.Interaction) -> None:
         metrics = await collect_system_metrics(self.bot)
         process = psutil.Process()
-        info = process.memory_full_info()
+        info = process.memory_info()
         embed = EmbedFactory.system(title="Bot Memory Details")
         embed.add_field(name="Bot RSS", value=human_bytes(info.rss), inline=True)
         embed.add_field(name="Bot VMS", value=human_bytes(info.vms), inline=True)
-        if hasattr(info, "uss"):
-            embed.add_field(name="Bot USS", value=human_bytes(info.uss), inline=True)
         embed.add_field(name="Host used", value=f"{metrics.ram_percent:.1f}% • {human_bytes(metrics.ram_used)}", inline=True)
         embed.add_field(name="Host available", value=human_bytes(metrics.ram_available), inline=True)
         embed.add_field(name="Swap", value=f"{metrics.swap_percent:.1f}% • {human_bytes(metrics.swap_used)}", inline=True)
+        embed.add_field(name="Threads", value=str(process.num_threads()), inline=True)
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @app_commands.command(name="performance", description="Show CPU, event-loop, database and process performance.")
+    async def performance(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        metrics = await collect_system_metrics(self.bot)
+
+        loop = asyncio.get_running_loop()
+        loop_started = loop.time()
+        await asyncio.sleep(0.05)
+        event_loop_lag_ms = max((loop.time() - loop_started - 0.05) * 1000, 0.0)
+
+        db_started = time.perf_counter()
+        await self.bot.database.fetchone("SELECT 1 AS ok")
+        db_latency_ms = (time.perf_counter() - db_started) * 1000
+
+        process = psutil.Process()
+        embed = EmbedFactory.system(title="Performance")
+        embed.add_field(
+            name="CPU",
+            value=(
+                f"Host **{metrics.cpu_percent:.1f}%**\n"
+                f"30s **{metrics.cpu_average_30s:.1f}%** · 5m **{metrics.cpu_average_5m:.1f}%**\n"
+                f"Bot **{metrics.bot_cpu_percent:.1f}%**"
+            ),
+            inline=True,
+        )
+        embed.add_field(
+            name="Latency",
+            value=(
+                f"Discord **{max(self.bot.latency * 1000, 0):.1f} ms**\n"
+                f"Event loop **{event_loop_lag_ms:.1f} ms**\n"
+                f"SQLite **{db_latency_ms:.1f} ms**"
+            ),
+            inline=True,
+        )
+        embed.add_field(
+            name="Process",
+            value=(
+                f"RAM **{human_bytes(metrics.bot_memory)}**\n"
+                f"Threads **{process.num_threads()}**\n"
+                f"Load 1m **{metrics.load_1m:.2f}**"
+            ),
+            inline=True,
+        )
+        embed.add_field(
+            name="System",
+            value=(
+                f"RAM **{metrics.ram_percent:.1f}%** · Swap **{metrics.swap_percent:.1f}%**\n"
+                f"Temp **{metrics.temperature:.1f} °C**" if metrics.temperature is not None else
+                f"RAM **{metrics.ram_percent:.1f}%** · Swap **{metrics.swap_percent:.1f}%**\nTemp **n/a**"
+            ),
+            inline=False,
+        )
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @app_commands.command(name="storage", description="Show disk, database, logs and backup storage usage.")
+    async def storage(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        db_path = Path(self.bot.settings.database_path)
+        if not db_path.is_absolute():
+            db_path = Path.cwd() / db_path
+        root = psutil.disk_usage("/")
+        paths = {
+            "Database": db_path,
+            "SQLite WAL": Path(str(db_path) + "-wal"),
+            "SQLite SHM": Path(str(db_path) + "-shm"),
+            "Logs": Path("logs"),
+            "Backups": Path("data/backups"),
+            "Dashboard edit backups": Path("data/dashboard-edit-backups"),
+        }
+        sizes = await asyncio.gather(*(asyncio.to_thread(_tree_size, path) for path in paths.values()))
+        embed = EmbedFactory.system(title="Storage")
+        embed.add_field(
+            name="Disk /",
+            value=f"**{root.percent:.1f}%** used\n{human_bytes(root.used)} / {human_bytes(root.total)}\nFree **{human_bytes(root.free)}**",
+            inline=False,
+        )
+        embed.add_field(
+            name="Project data",
+            value="\n".join(f"**{name}:** {human_bytes(size)}" for name, size in zip(paths, sizes)),
+            inline=False,
+        )
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
     @app_commands.command(name="database-optimize", description="Run SQLite PRAGMA optimize.")
     async def database_optimize(self, interaction: discord.Interaction) -> None:
@@ -129,9 +232,7 @@ class Developer(commands.GroupCog, group_name="dev", group_description="Bot owne
     async def extensions(self, interaction: discord.Interaction) -> None:
         configured = tuple(getattr(__import__("bot"), "EXTENSIONS", ()))
         loaded = set(self.bot.extensions.keys())
-        lines = []
-        for extension in configured:
-            lines.append(f"{'✅' if extension in loaded else '❌'} `{extension}`")
+        lines = [f"{'✅' if extension in loaded else '❌'} `{extension}`" for extension in configured]
         extras = sorted(loaded.difference(configured))
         if extras:
             lines.append("\n**Loaded extras**")
@@ -144,10 +245,7 @@ class Developer(commands.GroupCog, group_name="dev", group_description="Bot owne
         try:
             await self.bot.reload_extension(extension.strip())
         except commands.ExtensionError as exc:
-            await interaction.response.send_message(
-                embed=EmbedFactory.error(title="Reload failed", description=f"`{type(exc).__name__}`\n{str(exc)[:1500]}"),
-                ephemeral=True,
-            )
+            await interaction.response.send_message(embed=EmbedFactory.error(title="Reload failed", description=f"`{type(exc).__name__}`\n{str(exc)[:1500]}"), ephemeral=True)
             return
         await interaction.response.send_message(embed=EmbedFactory.success(title="Extension reloaded", description=f"`{extension}`"), ephemeral=True)
 
@@ -179,16 +277,12 @@ class Developer(commands.GroupCog, group_name="dev", group_description="Bot owne
         path = Path("logs/bot.log")
         try:
             content = await asyncio.to_thread(path.read_text, encoding="utf-8", errors="replace")
-            selected = content.splitlines()[-int(lines):]
-            text = "\n".join(selected)
+            text = "\n".join(content.splitlines()[-int(lines):])
         except OSError as exc:
             text = f"Could not read `{path}`: {exc}"
         if len(text) > 3800:
             text = text[-3800:]
-        await interaction.response.send_message(
-            embed=EmbedFactory.system(title="Recent Bot Logs", description=f"```text\n{text}\n```"),
-            ephemeral=True,
-        )
+        await interaction.response.send_message(embed=EmbedFactory.system(title="Recent Bot Logs", description=f"```text\n{text}\n```"), ephemeral=True)
 
     @app_commands.command(name="command-stats", description="Show the most used commands in the last 24 hours.")
     async def command_stats(self, interaction: discord.Interaction) -> None:
@@ -197,38 +291,75 @@ class Developer(commands.GroupCog, group_name="dev", group_description="Bot owne
             "FROM command_usage WHERE created_at >= datetime('now', '-24 hours') "
             "GROUP BY command_name ORDER BY uses DESC LIMIT 15"
         )
-        description = "\n".join(
-            f"**/{row['command_name']}** • {int(row['uses']):,} uses • {int(row['users']):,} users"
-            for row in rows
-        ) or "No command usage recorded in the last 24 hours."
+        description = "\n".join(f"**/{row['command_name']}** • {int(row['uses']):,} uses • {int(row['users']):,} users" for row in rows) or "No command usage recorded in the last 24 hours."
         await interaction.response.send_message(embed=EmbedFactory.system(title="Command Usage • 24h", description=description), ephemeral=True)
 
-    @app_commands.command(name="diagnostics", description="Run bot, database, Pi-hole and system diagnostics.")
+    @app_commands.command(name="diagnostics", description="Run diagnostics and give concrete optimization recommendations.")
     async def diagnostics(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True, thinking=True)
         started = asyncio.get_running_loop().time()
         checks: list[tuple[str, bool, str]] = []
+        recommendations: list[str] = []
+
+        db_started = time.perf_counter()
         try:
             row = await self.bot.database.fetchone("SELECT 1 AS ok")
-            checks.append(("SQLite", bool(row and row["ok"] == 1), "SELECT 1"))
+            db_ms = (time.perf_counter() - db_started) * 1000
+            db_ok = bool(row and row["ok"] == 1)
+            checks.append(("SQLite", db_ok, f"{db_ms:.1f} ms"))
+            if db_ms > 100:
+                recommendations.append("SQLite is slow: run `/dev database-optimize` and check disk load.")
         except Exception as exc:
             checks.append(("SQLite", False, type(exc).__name__))
+            recommendations.append("SQLite check failed: inspect bot logs before restarting services.")
 
         metrics = await collect_system_metrics(self.bot)
-        checks.append(("System sampler", metrics.sample_age_seconds <= metrics.sample_interval_seconds * 2.5, f"{metrics.sample_age_seconds:.1f}s old"))
-        checks.append(("Discord gateway", not self.bot.is_closed(), f"{max(self.bot.latency * 1000, 0):.1f} ms"))
+        sampler_ok = metrics.sample_age_seconds <= metrics.sample_interval_seconds * 2.5
+        checks.append(("System sampler", sampler_ok, f"{metrics.sample_age_seconds:.1f}s old"))
+        if not sampler_ok:
+            recommendations.append("System sampler is stale: restart the bot if it remains stale.")
+
+        discord_ms = max(self.bot.latency * 1000, 0)
+        checks.append(("Discord gateway", not self.bot.is_closed() and discord_ms < 1000, f"{discord_ms:.1f} ms"))
+        if discord_ms > 250:
+            recommendations.append("Discord latency is elevated; check network/Tailscale load before changing bot code.")
+
         pihole = await collect_pihole_stats()
         checks.append(("Pi-hole FTL", pihole.active, "active" if pihole.active else "inactive"))
         pihole_api_detail = "available" if pihole.api_available else ("permission limited" if pihole.permission_limited else "limited")
         checks.append(("Pi-hole API", pihole.api_available, pihole_api_detail))
+        if pihole.permission_limited:
+            recommendations.append("Pi-hole access is permission-limited; fix service-user permissions instead of polling harder.")
+
+        if metrics.ram_percent >= 90:
+            recommendations.append("RAM is critical: use `/dev memory`, then clear only oversized caches with `/dev cache-clear`.")
+        elif metrics.ram_percent >= 80:
+            recommendations.append("RAM is high: inspect `/dev memory` before forcing garbage collection.")
+        if metrics.swap_percent >= 25:
+            recommendations.append("Swap usage is elevated; identify the largest process and avoid repeated forced GC loops.")
+        if metrics.temperature is not None and metrics.temperature >= 75:
+            recommendations.append("Pi temperature is high; improve airflow/cooling before increasing workloads.")
+        if metrics.disk_percent >= 90:
+            recommendations.append("Disk is almost full: inspect `/dev storage` and clean old logs/backups safely.")
+        throttle = throttling_labels(metrics.throttled_flags)
+        if throttle:
+            recommendations.append("Pi reports throttling/undervoltage: check power supply and cooling.")
+
         elapsed = (asyncio.get_running_loop().time() - started) * 1000
         description = "\n".join(f"{'✅' if ok else '⚠️'} **{name}:** {detail}" for name, ok, detail in checks)
         description += f"\n\nCompleted in **{elapsed:.0f} ms**."
-        await interaction.followup.send(embed=EmbedFactory.system(title="Owner Diagnostics", description=description), ephemeral=True)
+        embed = EmbedFactory.system(title="Owner Diagnostics", description=description)
+        embed.add_field(
+            name="Recommendations",
+            value="\n".join(f"• {item}" for item in recommendations[:8]) if recommendations else "No immediate optimization action needed.",
+            inline=False,
+        )
+        if throttle:
+            embed.add_field(name="Pi flags", value="\n".join(f"• {item}" for item in throttle[:8]), inline=False)
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
     @app_commands.command(name="dashboard", description="Send private dashboard links to the bot owner.")
     async def dashboard(self, interaction: discord.Interaction) -> None:
-        # Reuse the system command implementation through simple local link generation.
         import shutil
         import subprocess
 
@@ -253,21 +384,14 @@ class Developer(commands.GroupCog, group_name="dev", group_description="Bot owne
 
     @app_commands.command(name="sync", description="Synchronize application commands.")
     async def sync(self, interaction: discord.Interaction) -> None:
-        # A global command sync can take longer than Discord's interaction
-        # acknowledgement window. Defer immediately, then answer via followup.
         await interaction.response.defer(ephemeral=True)
-
         if self.bot.settings.dev_guild_id:
             guild = discord.Object(id=self.bot.settings.dev_guild_id)
             synced = await self.bot.tree.sync(guild=guild)
         else:
             synced = await self.bot.tree.sync()
-
         await interaction.followup.send(
-            embed=EmbedFactory.success(
-                title="Commands synchronized",
-                description=f"Synced **{len(synced)}** commands.",
-            ),
+            embed=EmbedFactory.success(title="Commands synchronized", description=f"Synced **{len(synced)}** commands."),
             ephemeral=True,
         )
 
