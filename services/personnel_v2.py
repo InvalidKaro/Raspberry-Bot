@@ -72,21 +72,155 @@ class PersonnelService:
         return s.getvalue().encode("utf-8-sig")
 
     @staticmethod
+    def _font(size: int, *, bold: bool = False):
+        paths = (
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold
+            else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        )
+        for path in paths:
+            try:
+                return ImageFont.truetype(path, size)
+            except OSError:
+                continue
+        return ImageFont.load_default()
+
+    @staticmethod
+    def _rounded_bar(draw: ImageDraw.ImageDraw, box, fill, radius: int = 9) -> None:
+        x1, y1, x2, y2 = box
+        if x2 <= x1:
+            return
+        draw.rounded_rectangle((x1, y1, x2, y2), radius=radius, fill=fill)
+
+    @staticmethod
     def png_bytes(title:str, rows) -> bytes:
-        width=1100; row_h=56; height=max(360,180+len(rows)*row_h)
-        im=Image.new("RGB",(width,height),(31,33,38)); d=ImageDraw.Draw(im)
-        font=ImageFont.load_default()
-        d.text((40,30),title,fill=(255,255,255),font=font)
-        maxv=max([max(int(r["inductions"]),int(r["bwg"])) for r in rows] or [1])
-        y=100
-        for r in rows:
-            name=str(r["display_name"])[:28]; e=int(r["inductions"]); b=int(r["bwg"])
-            d.text((40,y+12),name,fill=(230,230,230),font=font)
-            x0=260; scale=650/maxv
-            d.rectangle((x0,y,x0+e*scale,y+18),fill=(88,101,242))
-            d.rectangle((x0,y+25,x0+b*scale,y+43),fill=(87,242,135))
-            d.text((930,y+4),f"E {e}",fill=(255,255,255),font=font)
-            d.text((930,y+29),f"BWG {b}",fill=(255,255,255),font=font)
-            y+=row_h
-        d.text((40,height-40),"Raspberry-Bot • MD Personalabteilung",fill=(150,150,150),font=font)
-        buf=BytesIO(); im.save(buf,"PNG"); return buf.getvalue()
+        # Rendering only: existing personnel_members/personnel_records rows are never modified here.
+        rows = list(rows)
+
+        width = 1440
+        margin = 64
+        header_h = 250
+        row_h = 92
+        footer_h = 70
+        height = header_h + max(1, len(rows)) * row_h + footer_h
+
+        bg = (17, 19, 24)
+        panel = (26, 29, 36)
+        panel_alt = (30, 33, 41)
+        grid = (54, 59, 70)
+        text = (241, 243, 247)
+        muted = (159, 166, 181)
+        accent_e = (91, 110, 245)
+        accent_b = (71, 201, 145)
+        accent_total = (245, 184, 72)
+
+        image = Image.new("RGB", (width, height), bg)
+        draw = ImageDraw.Draw(image)
+
+        title_font = PersonnelService._font(38, bold=True)
+        subtitle_font = PersonnelService._font(18)
+        card_label_font = PersonnelService._font(16)
+        card_value_font = PersonnelService._font(30, bold=True)
+        name_font = PersonnelService._font(21, bold=True)
+        meta_font = PersonnelService._font(14)
+        value_font = PersonnelService._font(17, bold=True)
+        footer_font = PersonnelService._font(14)
+
+        total_e = sum(int(r["inductions"]) for r in rows)
+        total_b = sum(int(r["bwg"]) for r in rows)
+        total_activity = total_e + total_b
+        top = rows[0] if rows else None
+
+        draw.text((margin, 42), title, font=title_font, fill=text)
+        draw.text(
+            (margin, 94),
+            f"{len(rows)} Mitarbeitende • Einweisungen & BWG • automatisch aus gespeicherten Perso-Daten",
+            font=subtitle_font,
+            fill=muted,
+        )
+
+        card_y = 132
+        gap = 18
+        card_w = (width - margin * 2 - gap * 3) // 4
+        cards = [
+            ("EINWEISUNGEN", str(total_e), accent_e),
+            ("BWG", str(total_b), accent_b),
+            ("AKTIVITÄT", str(total_activity), accent_total),
+            ("TOP ACTIVITY", str(top["display_name"]) if top else "—", text),
+        ]
+        for i, (label, value, accent) in enumerate(cards):
+            x = margin + i * (card_w + gap)
+            draw.rounded_rectangle((x, card_y, x + card_w, card_y + 92), radius=18, fill=panel)
+            draw.rounded_rectangle((x, card_y, x + 6, card_y + 92), radius=3, fill=accent)
+            draw.text((x + 22, card_y + 17), label, font=card_label_font, fill=muted)
+            display = value
+            while draw.textbbox((0, 0), display, font=card_value_font)[2] > card_w - 44 and len(display) > 4:
+                display = display[:-2] + "…"
+            draw.text((x + 22, card_y + 44), display, font=card_value_font, fill=accent)
+
+        chart_top = header_h
+        label_x = margin + 16
+        bars_x = 430
+        bars_right = width - margin - 180
+        values_x = width - margin - 145
+        available_bar_w = bars_right - bars_x
+        max_value = max([max(int(r["inductions"]), int(r["bwg"])) for r in rows] or [1])
+        max_value = max(1, max_value)
+
+        for step in range(5):
+            x = bars_x + int(available_bar_w * step / 4)
+            draw.line((x, chart_top - 8, x, height - footer_h - 10), fill=grid, width=1)
+            tick = round(max_value * step / 4)
+            draw.text((x - 8, chart_top - 28), str(tick), font=meta_font, fill=muted)
+
+        if not rows:
+            box_y = chart_top + 18
+            draw.rounded_rectangle((margin, box_y, width - margin, box_y + 64), radius=16, fill=panel)
+            draw.text((margin + 24, box_y + 20), "Noch keine Daten für diesen Zeitraum.", font=name_font, fill=muted)
+
+        for index, row in enumerate(rows):
+            y = chart_top + index * row_h
+            row_bg = panel if index % 2 == 0 else panel_alt
+            draw.rounded_rectangle((margin, y + 7, width - margin, y + row_h - 7), radius=16, fill=row_bg)
+
+            name = str(row["display_name"])
+            if len(name) > 28:
+                name = name[:27] + "…"
+            rank = str(row["rank_name"] or "")
+            department = str(row["department"] or "")
+            meta = " • ".join(part for part in (rank, department) if part)
+
+            draw.text((label_x, y + 21), f"{index + 1:02d}  {name}", font=name_font, fill=text)
+            if meta:
+                if len(meta) > 38:
+                    meta = meta[:37] + "…"
+                draw.text((label_x + 43, y + 53), meta, font=meta_font, fill=muted)
+
+            e = int(row["inductions"])
+            b = int(row["bwg"])
+            activity = int(row["activity"])
+            e_w = int(available_bar_w * e / max_value)
+            b_w = int(available_bar_w * b / max_value)
+
+            draw.rounded_rectangle((bars_x, y + 20, bars_right, y + 43), radius=10, fill=(42, 46, 56))
+            draw.rounded_rectangle((bars_x, y + 50, bars_right, y + 73), radius=10, fill=(42, 46, 56))
+            PersonnelService._rounded_bar(draw, (bars_x, y + 20, bars_x + e_w, y + 43), accent_e, 10)
+            PersonnelService._rounded_bar(draw, (bars_x, y + 50, bars_x + b_w, y + 73), accent_b, 10)
+
+            draw.text((values_x, y + 20), f"E  {e}", font=value_font, fill=accent_e)
+            draw.text((values_x, y + 50), f"B  {b}", font=value_font, fill=accent_b)
+            draw.text((width - margin - 55, y + 35), str(activity), font=value_font, fill=accent_total)
+
+        footer_y = height - footer_h + 14
+        draw.rounded_rectangle((margin, footer_y - 5, margin + 14, footer_y + 9), radius=4, fill=accent_e)
+        draw.text((margin + 22, footer_y - 5), "Einweisungen", font=footer_font, fill=muted)
+        draw.rounded_rectangle((margin + 145, footer_y - 5, margin + 159, footer_y + 9), radius=4, fill=accent_b)
+        draw.text((margin + 167, footer_y - 5), "BWG", font=footer_font, fill=muted)
+        draw.text((width - margin - 385, footer_y - 5), "Gesamtaktivität rechts", font=footer_font, fill=muted)
+        footer_text = "Raspberry-Bot • MD Personalabteilung"
+        footer_box = draw.textbbox((0, 0), footer_text, font=footer_font)
+        draw.text((width - margin - (footer_box[2] - footer_box[0]), footer_y + 21), footer_text, font=footer_font, fill=(105, 112, 126))
+
+        buf = BytesIO()
+        image.save(buf, "PNG", optimize=True)
+        return buf.getvalue()
