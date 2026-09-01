@@ -21,17 +21,39 @@ class PersonnelService:
         return await self.get_by_name(guild_id, name)
 
     async def get_by_name(self, guild_id: int, name: str):
+        # Prefer the exact guild id, but tolerate a member row whose guild_id was
+        # previously damaged by the dashboard Snowflake precision bug if one of its
+        # linked records still carries the correct guild id.
         return await self.bot.database.fetchone(
-            "SELECT * FROM personnel_members WHERE guild_id=? AND lower(display_name)=lower(?)",
-            (guild_id, name.strip()),
+            """SELECT m.*
+               FROM personnel_members m
+               WHERE lower(m.display_name)=lower(?)
+                 AND (
+                   m.guild_id=?
+                   OR EXISTS (
+                     SELECT 1 FROM personnel_records r
+                     WHERE r.personnel_id=m.id AND r.guild_id=?
+                   )
+                 )
+               ORDER BY CASE WHEN m.guild_id=? THEN 0 ELSE 1 END, m.id
+               LIMIT 1""",
+            (name.strip(), guild_id, guild_id, guild_id),
         )
 
     async def list_members(self, guild_id: int, active_only: bool = True):
-        query = "SELECT * FROM personnel_members WHERE guild_id=?"
-        params = [guild_id]
+        query = """SELECT DISTINCT m.*
+                   FROM personnel_members m
+                   WHERE (
+                     m.guild_id=?
+                     OR EXISTS (
+                       SELECT 1 FROM personnel_records r
+                       WHERE r.personnel_id=m.id AND r.guild_id=?
+                     )
+                   )"""
+        params = [guild_id, guild_id]
         if active_only:
-            query += " AND active=1"
-        query += " ORDER BY display_name COLLATE NOCASE"
+            query += " AND m.active=1"
+        query += " ORDER BY m.display_name COLLATE NOCASE"
         return await self.bot.database.fetchall(query, params)
 
     async def record(self, guild_id: int, personnel_id: int, actor_id: int, *, inductions: int = 0, bwg: int = 0, record_date: str | None = None, period_key: str | None = None, note: str | None = None):
@@ -44,27 +66,55 @@ class PersonnelService:
         )
 
     async def totals(self, guild_id: int, *, period_like: str | None = None):
-        where = "WHERE m.guild_id=? AND m.active=1"
-        params = [guild_id]
+        # personnel_id is the authoritative relation between records and members.
+        # Once a member is resolved to the current guild, all records belonging to
+        # that member are safe to aggregate even if an old dashboard edit damaged
+        # the redundant guild_id stored on an individual record.
+        member_scope = """(
+            m.guild_id=?
+            OR EXISTS (
+                SELECT 1 FROM personnel_records rx
+                WHERE rx.personnel_id=m.id AND rx.guild_id=?
+            )
+        )"""
+        params: list[object] = [guild_id, guild_id]
+        record_filter = ""
         if period_like:
-            where += " AND r.period_key LIKE ?"
+            record_filter = " AND r.period_key LIKE ?"
             params.append(period_like)
         return await self.bot.database.fetchall(
             f"""SELECT m.id,m.display_name,m.rank_name,m.department,
-               COALESCE(SUM(r.inductions),0) inductions, COALESCE(SUM(r.bwg),0) bwg,
+               COALESCE(SUM(r.inductions),0) inductions,
+               COALESCE(SUM(r.bwg),0) bwg,
                COALESCE(SUM(r.inductions+r.bwg),0) activity
                FROM personnel_members m
-               LEFT JOIN personnel_records r ON r.personnel_id=m.id
-               {where}
-               GROUP BY m.id ORDER BY activity DESC, m.display_name COLLATE NOCASE""",
+               LEFT JOIN personnel_records r
+                 ON r.personnel_id=m.id{record_filter}
+               WHERE m.active=1 AND {member_scope}
+               GROUP BY m.id
+               ORDER BY activity DESC, m.display_name COLLATE NOCASE""",
             params,
         )
 
     async def history(self, guild_id: int, personnel_id: int, limit: int = 100):
+        # personnel_id uniquely identifies the member, so do not hide history merely
+        # because an old dashboard edit damaged the redundant guild_id on a record.
+        member = await self.bot.database.fetchone(
+            """SELECT id FROM personnel_members m
+               WHERE m.id=? AND (
+                 m.guild_id=? OR EXISTS (
+                   SELECT 1 FROM personnel_records r
+                   WHERE r.personnel_id=m.id AND r.guild_id=?
+                 )
+               )""",
+            (personnel_id, guild_id, guild_id),
+        )
+        if not member:
+            return []
         return await self.bot.database.fetchall(
-            """SELECT * FROM personnel_records WHERE guild_id=? AND personnel_id=?
+            """SELECT * FROM personnel_records WHERE personnel_id=?
                ORDER BY record_date DESC,id DESC LIMIT ?""",
-            (guild_id, personnel_id, limit),
+            (personnel_id, limit),
         )
 
     @staticmethod
@@ -98,18 +148,13 @@ class PersonnelService:
 
     @staticmethod
     def png_bytes(title: str, rows) -> bytes:
-        # Rendering only. No INSERT/UPDATE/DELETE is performed here.
         rows = list(rows)
-
-        # The old export was extremely tall. Discord's phone viewer therefore scaled the
-        # whole image down until even 60px text looked tiny. A two-column card grid keeps
-        # the image much closer to square, so text remains large in the actual preview.
-        width = 1200
-        margin = 42
-        header_h = 330
-        footer_h = 72
+        width = 900
+        margin = 34
+        header_h = 360
+        footer_h = 64
         gap = 18
-        card_h = 210
+        card_h = 230
         columns = 2
         card_w = (width - margin * 2 - gap) // columns
         grid_rows = max(1, (len(rows) + columns - 1) // columns)
@@ -128,14 +173,14 @@ class PersonnelService:
         image = Image.new("RGB", (width, height), bg)
         draw = ImageDraw.Draw(image)
 
-        title_font = PersonnelService._font(58, bold=True)
+        title_font = PersonnelService._font(52, bold=True)
         subtitle_font = PersonnelService._font(27)
-        kpi_label_font = PersonnelService._font(23, bold=True)
-        kpi_value_font = PersonnelService._font(38, bold=True)
-        name_font = PersonnelService._font(32, bold=True)
-        meta_font = PersonnelService._font(21)
-        bar_font = PersonnelService._font(23, bold=True)
-        total_font = PersonnelService._font(25, bold=True)
+        kpi_label_font = PersonnelService._font(22, bold=True)
+        kpi_value_font = PersonnelService._font(42, bold=True)
+        name_font = PersonnelService._font(34, bold=True)
+        meta_font = PersonnelService._font(23)
+        bar_font = PersonnelService._font(25, bold=True)
+        total_font = PersonnelService._font(28, bold=True)
         footer_font = PersonnelService._font(18)
 
         total_e = sum(int(r["inductions"]) for r in rows)
@@ -143,34 +188,30 @@ class PersonnelService:
         total_activity = total_e + total_b
         top = rows[0] if rows else None
 
-        draw.text((margin, 28), title, font=title_font, fill=text)
-        draw.text(
-            (margin, 101),
-            f"{len(rows)} Mitarbeitende • Einweisungen & BWG • gespeicherte Perso-Daten",
-            font=subtitle_font,
-            fill=muted,
-        )
+        draw.text((margin, 24), title, font=title_font, fill=text)
+        draw.text((margin, 88), f"{len(rows)} Mitarbeitende • gespeicherte Perso-Daten", font=subtitle_font, fill=muted)
 
-        # Four KPIs in one row are okay here because the export is now short enough to be
-        # displayed much larger by Discord. Values are deliberately large and bold.
-        kpi_y = 155
-        kpi_gap = 12
-        kpi_w = (width - margin * 2 - kpi_gap * 3) // 4
+        kpi_y = 138
+        kpi_gap = 14
+        kpi_w = (width - margin * 2 - kpi_gap) // 2
         kpis = [
             ("EINWEISUNGEN", str(total_e), accent_e),
             ("BWG", str(total_b), accent_b),
             ("AKTIVITÄT", str(total_activity), accent_total),
-            ("TOP", str(top["display_name"]) if top else "—", text),
+            ("TOP ACTIVITY", str(top["display_name"]) if top else "—", text),
         ]
         for i, (label, value, accent) in enumerate(kpis):
-            x = margin + i * (kpi_w + kpi_gap)
-            draw.rounded_rectangle((x, kpi_y, x + kpi_w, kpi_y + 118), radius=18, fill=panel)
-            draw.rounded_rectangle((x, kpi_y, x + 6, kpi_y + 118), radius=3, fill=accent)
-            draw.text((x + 18, kpi_y + 13), label, font=kpi_label_font, fill=muted)
+            col = i % 2
+            row_i = i // 2
+            x = margin + col * (kpi_w + kpi_gap)
+            y = kpi_y + row_i * 100
+            draw.rounded_rectangle((x, y, x + kpi_w, y + 86), radius=16, fill=panel)
+            draw.rounded_rectangle((x, y, x + 6, y + 86), radius=3, fill=accent)
+            draw.text((x + 18, y + 10), label, font=kpi_label_font, fill=muted)
             display = value
             while draw.textbbox((0, 0), display, font=kpi_value_font)[2] > kpi_w - 36 and len(display) > 4:
                 display = display[:-2] + "…"
-            draw.text((x + 18, kpi_y + 54), display, font=kpi_value_font, fill=accent)
+            draw.text((x + 18, y + 38), display, font=kpi_value_font, fill=accent)
 
         max_value = max([max(int(r["inductions"]), int(r["bwg"])) for r in rows] or [1])
         max_value = max(1, max_value)
@@ -189,49 +230,44 @@ class PersonnelService:
             draw.rounded_rectangle((x, y, x + card_w, y + card_h), radius=20, fill=fill)
 
             name = str(r["display_name"])
-            if len(name) > 22:
-                name = name[:21] + "…"
+            if len(name) > 18:
+                name = name[:17] + "…"
             rank = str(r["rank_name"] or "")
             department = str(r["department"] or "")
             meta = " • ".join(part for part in (rank, department) if part)
-            if len(meta) > 38:
-                meta = meta[:37] + "…"
+            if len(meta) > 30:
+                meta = meta[:29] + "…"
 
             e = int(r["inductions"])
             b = int(r["bwg"])
             activity = int(r["activity"])
 
-            draw.text((x + 22, y + 18), f"{index + 1:02d}  {name}", font=name_font, fill=text)
+            draw.text((x + 20, y + 18), f"{index + 1:02d}  {name}", font=name_font, fill=text)
             if meta:
-                draw.text((x + 58, y + 58), meta, font=meta_font, fill=muted)
+                draw.text((x + 20, y + 61), meta, font=meta_font, fill=muted)
 
             total_text = f"Gesamt {activity}"
             box = draw.textbbox((0, 0), total_text, font=total_font)
-            draw.text((x + card_w - 22 - (box[2] - box[0]), y + 61), total_text, font=total_font, fill=accent_total)
+            draw.text((x + card_w - 20 - (box[2] - box[0]), y + 88), total_text, font=total_font, fill=accent_total)
 
-            bar_left = x + 22
-            bar_right = x + card_w - 22
+            bar_left = x + 20
+            bar_right = x + card_w - 20
             bar_width = bar_right - bar_left
             e_w = int(bar_width * e / max_value)
             b_w = int(bar_width * b / max_value)
-            e_y = y + 104
-            b_y = y + 156
-            bar_h = 34
+            e_y = y + 126
+            b_y = y + 178
+            bar_h = 38
 
-            draw.rounded_rectangle((bar_left, e_y, bar_right, e_y + bar_h), radius=14, fill=track)
-            draw.rounded_rectangle((bar_left, b_y, bar_right, b_y + bar_h), radius=14, fill=track)
-            PersonnelService._rounded_bar(draw, (bar_left, e_y, bar_left + e_w, e_y + bar_h), accent_e, 14)
-            PersonnelService._rounded_bar(draw, (bar_left, b_y, bar_left + b_w, b_y + bar_h), accent_b, 14)
+            draw.rounded_rectangle((bar_left, e_y, bar_right, e_y + bar_h), radius=15, fill=track)
+            draw.rounded_rectangle((bar_left, b_y, bar_right, b_y + bar_h), radius=15, fill=track)
+            PersonnelService._rounded_bar(draw, (bar_left, e_y, bar_left + e_w, e_y + bar_h), accent_e, 15)
+            PersonnelService._rounded_bar(draw, (bar_left, b_y, bar_left + b_w, b_y + bar_h), accent_b, 15)
+            draw.text((bar_left + 10, e_y + 3), f"Einweisungen {e}", font=bar_font, fill=text)
+            draw.text((bar_left + 10, b_y + 3), f"BWG {b}", font=bar_font, fill=text)
 
-            # Labels are placed directly on the bars so they stay readable even at zero.
-            draw.text((bar_left + 11, e_y + 2), f"Einweisungen  {e}", font=bar_font, fill=text)
-            draw.text((bar_left + 11, b_y + 2), f"BWG  {b}", font=bar_font, fill=text)
-
-        footer_y = height - footer_h + 22
+        footer_y = height - footer_h + 18
         draw.text((margin, footer_y), "Raspberry-Bot • MD Personalabteilung", font=footer_font, fill=muted)
-        right = "2-Spalten Export • mobil optimiert"
-        box = draw.textbbox((0, 0), right, font=footer_font)
-        draw.text((width - margin - (box[2] - box[0]), footer_y), right, font=footer_font, fill=muted)
 
         buf = BytesIO()
         image.save(buf, "PNG", optimize=True)
