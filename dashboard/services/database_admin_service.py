@@ -79,11 +79,11 @@ class DatabaseAdminService:
             current = await self._get(db, table, key, pks)
             if current is None:
                 raise ValueError("Entry no longer exists.")
-            self._check_expected(current, expected)
+            self._check_expected(current, expected, allowed)
             clean = self._clean_values(values, allowed)
             for pk in pks:
                 clean.pop(pk, None)
-            clean = {name: value for name, value in clean.items() if current.get(name) != value}
+            clean = {name: value for name, value in clean.items() if not self._values_equal(current.get(name), value, allowed[name])}
             if not clean:
                 return {"ok": True, "message": "No changes detected.", "changed": 0}
             backup = await self._backup()
@@ -110,12 +110,13 @@ class DatabaseAdminService:
         try:
             await self._assert_table(db, table)
             columns = await self._columns(db, table)
+            allowed = {row["name"]: row for row in columns}
             pks = self._primary_keys(columns)
             self._validate_key(key, pks)
             current = await self._get(db, table, key, pks)
             if current is None:
                 raise ValueError("Entry no longer exists.")
-            self._check_expected(current, expected)
+            self._check_expected(current, expected, allowed)
             backup = await self._backup()
             where, params = self._where(key, pks)
             cur = await db.execute(f"DELETE FROM {self._quote(table)} WHERE {where}", tuple(params))
@@ -237,11 +238,38 @@ class DatabaseAdminService:
         return clean
 
     @staticmethod
-    def _check_expected(current: dict, expected: dict | None) -> None:
+    def _is_numeric(column: dict) -> bool:
+        type_name = str(column.get("type") or "").upper()
+        return any(token in type_name for token in ("INT", "REAL", "FLOA", "DOUB", "NUM", "DEC"))
+
+    @staticmethod
+    def _normalize(value, column: dict):
+        if value is None:
+            return None
+        if DatabaseAdminService._is_numeric(column):
+            if isinstance(value, (int, float)):
+                return value
+            if isinstance(value, str):
+                text = value.strip()
+                try:
+                    if any(token in str(column.get("type") or "").upper() for token in ("REAL", "FLOA", "DOUB", "NUM", "DEC")):
+                        return float(text)
+                    return int(text)
+                except ValueError:
+                    return value
+        return value
+
+    @staticmethod
+    def _values_equal(left, right, column: dict) -> bool:
+        return DatabaseAdminService._normalize(left, column) == DatabaseAdminService._normalize(right, column)
+
+    @staticmethod
+    def _check_expected(current: dict, expected: dict | None, allowed: dict[str, dict]) -> None:
         if expected is None:
             return
         if not isinstance(expected, dict):
             raise ValueError("Invalid row snapshot.")
         for name, value in expected.items():
-            if name in current and current[name] != value:
+            column = allowed.get(name)
+            if column is not None and name in current and not DatabaseAdminService._values_equal(current[name], value, column):
                 raise ValueError("This entry changed since you opened it. Reload before editing again.")
