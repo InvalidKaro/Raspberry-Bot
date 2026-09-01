@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Raspberry-Bot Control Center</title>
+  <title>Raspberry-Bot 4.1 Control Center</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
   <main class="shell">
     <header class="topbar">
       <div>
-        <p class="eyebrow">RASPBERRY-BOT 4.0</p>
+        <p class="eyebrow">RASPBERRY-BOT 4.1</p>
         <h1>Control Center</h1>
         <p class="muted">Live bot management, personnel reports and Pi health.</p>
       </div>
@@ -54,91 +54,48 @@
         <span class="branch" id="health-score">CHECKING</span>
       </div>
       <p class="muted">Automatic recommendations from the current Pi metrics. No extra background sampler is started.</p>
-      <div id="health-recommendations" class="stack-list">
-        <div class="stack-row"><span>Waiting for the first system sample…</span></div>
-      </div>
+      <div id="health-recommendations" class="stack-list"><div class="stack-row"><span>Waiting for the first system sample…</span></div></div>
     </section>
 
     <section class="panel">
-      <div class="panel-head">
-        <div><p class="card-label">PERFORMANCE HISTORY</p><h2>Recent trends</h2></div>
-        <span class="branch" id="history-state">90s history</span>
-      </div>
+      <div class="panel-head"><div><p class="card-label">PERFORMANCE HISTORY</p><h2>Recent trends</h2></div><span class="branch" id="history-state">90s history</span></div>
       <div class="detail-grid">
-        <article>
-          <p class="muted">RAM %</p>
-          <svg id="ram-chart" width="100%" height="180" viewBox="0 0 900 180" role="img" aria-label="RAM history"></svg>
-        </article>
-        <article>
-          <p class="muted">CPU %</p>
-          <svg id="cpu-chart" width="100%" height="180" viewBox="0 0 900 180" role="img" aria-label="CPU history"></svg>
-        </article>
+        <article><p class="muted">RAM %</p><svg id="ram-chart" width="100%" height="180" viewBox="0 0 900 180" role="img" aria-label="RAM history"></svg></article>
+        <article><p class="muted">CPU %</p><svg id="cpu-chart" width="100%" height="180" viewBox="0 0 900 180" role="img" aria-label="CPU history"></svg></article>
       </div>
-      <article>
-        <p class="muted">Temperature °C</p>
-        <svg id="temp-chart" width="100%" height="180" viewBox="0 0 900 180" role="img" aria-label="Temperature history"></svg>
-      </article>
+      <article><p class="muted">Temperature °C</p><svg id="temp-chart" width="100%" height="180" viewBox="0 0 900 180" role="img" aria-label="Temperature history"></svg></article>
     </section>
 
     <section class="detail-grid">
       <article class="panel">
-        <div class="panel-head">
-          <div><p class="card-label">PERSONNEL</p><h2>Leaderboard</h2></div>
-          <span class="branch" id="perso-total">—</span>
-        </div>
+        <div class="panel-head"><div><p class="card-label">PERSONNEL 2.1</p><h2>Leaderboard</h2></div><span class="branch" id="perso-total">—</span></div>
         <div id="perso-leaderboard" class="stack-list"></div>
       </article>
       <article class="panel">
         <div class="panel-head"><div><p class="card-label">PERSONNEL REPORTS</p><h2>Generate PNG</h2></div></div>
-        <p class="muted">Uses the exact same Pillow renderer as Discord. Nothing is duplicated in memory permanently.</p>
-        <div class="button-row">
-          <a class="button" href="/api/control/personnel/report?format=overview">Overview PNG</a>
-          <a class="button" href="/api/control/personnel/report?format=chart">Diagram PNG</a>
-        </div>
+        <p class="muted">Uses the same bounded Pillow renderer as Discord.</p>
+        <div class="button-row"><a class="button" href="/api/control/personnel/report?format=overview">Overview PNG</a><a class="button" href="/api/control/personnel/report?format=chart">Diagram PNG</a></div>
         <p class="muted">Discord commands: <strong>/perso leaderboard</strong> · <strong>/perso report</strong> · <strong>/perso export</strong></p>
       </article>
     </section>
 
     <section class="panel">
-      <div class="panel-head">
-        <div><p class="card-label">MEMORY MAINTENANCE</p><h2>Safe low-RAM actions</h2></div>
-      </div>
+      <div class="panel-head"><div><p class="card-label">MEMORY MAINTENANCE</p><h2>Safe low-RAM actions</h2></div><span class="branch">4.1</span></div>
       <p class="muted">Actions are queued to the bot process instead of manipulating its memory or SQLite connection from the dashboard process.</p>
-      <div class="button-row">
-        <button id="cache-clear" type="button">Clear Bot Caches</button>
-        <button id="gc-run" type="button">Run Python GC</button>
-        <button id="db-optimize" type="button">Optimize SQLite</button>
-      </div>
+      <div class="button-row"><button id="cache-clear" type="button">Clear Bot Caches</button><button id="gc-run" type="button">Run Python GC</button><button id="db-optimize" type="button">Optimize SQLite</button></div>
       <pre id="maintenance-result">Ready.</pre>
     </section>
 
     <section class="panel">
-      <div class="panel-head">
-        <div><p class="card-label">QUICK COMMANDS</p><h2>Update & restart</h2></div>
-      </div>
+      <div class="panel-head"><div><p class="card-label">QUICK COMMANDS</p><h2>Update & restart</h2></div></div>
       <p class="muted">Same commands you would normally run over SSH, directly from the authenticated dashboard.</p>
-      <div class="button-row">
-        <button id="git-pull" type="button">Git Pull</button>
-        <button id="restart-bot" type="button">Restart Bot</button>
-        <button id="restart-dashboard" type="button">Restart Dashboard</button>
-        <button id="update-all" class="primary" type="button">Pull + Restart Both</button>
-      </div>
+      <div class="button-row"><button id="git-pull" type="button">Git Pull</button><button id="restart-bot" type="button">Restart Bot</button><button id="restart-dashboard" type="button">Restart Dashboard</button><button id="update-all" class="primary" type="button">Pull + Restart Both</button></div>
       <pre id="quick-result">Ready.</pre>
     </section>
 
     <section class="detail-grid">
-      <article class="panel">
-        <div class="panel-head">
-          <div><p class="card-label">EXTENSIONS</p><h2>Live cog manager</h2></div>
-          <span class="branch" id="extension-count">—</span>
-        </div>
-        <p class="muted">Reload, load or unload extensions without a full bot restart.</p>
-        <div id="extension-list" class="stack-list"></div>
-      </article>
-      <article class="panel">
-        <div class="panel-head"><div><p class="card-label">COMMAND QUEUE</p><h2>Last action</h2></div></div>
-        <pre id="command-result">No action queued yet.</pre>
-      </article>
+      <article class="panel"><div class="panel-head"><div><p class="card-label">EXTENSIONS</p><h2>Live cog manager</h2></div><span class="branch" id="extension-count">—</span></div><p class="muted">Reload, load or unload extensions without a full bot restart.</p><div id="extension-list" class="stack-list"></div></article>
+      <article class="panel"><div class="panel-head"><div><p class="card-label">COMMAND QUEUE</p><h2>Last action</h2></div></div><pre id="command-result">No action queued yet.</pre></article>
     </section>
   </main>
   <script src="/static/control.js"></script>
