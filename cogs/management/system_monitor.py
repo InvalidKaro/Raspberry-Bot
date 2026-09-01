@@ -291,14 +291,15 @@ class SystemMonitor(commands.GroupCog, group_name="system", group_description="R
                 inline=True,
             )
         else:
-            embed.add_field(
-                name="Statistics API",
-                value=(
-                    "Detailed counters were not available to the bot. The service status still works.\n"
-                    "If Pi-hole CLI authentication is enabled, add the bot user to the `pihole` group."
-                ),
-                inline=False,
-            )
+            if stats.permission_limited:
+                api_text = (
+                    "Detailed counters are unavailable because the bot user cannot read Pi-hole's v6 configuration. "
+                    "Raspberry-Bot now skips repeated CLI calls in this state, so this does **not** spam the journal.\n"
+                    f"Detail: `{stats.permission_detail or 'permission limited'}`"
+                )
+            else:
+                api_text = "Detailed counters were not available to the bot. The FTL service status still works."
+            embed.add_field(name="Statistics API", value=api_text, inline=False)
 
         versions = []
         if stats.core_version:

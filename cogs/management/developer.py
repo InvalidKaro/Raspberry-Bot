@@ -219,7 +219,8 @@ class Developer(commands.GroupCog, group_name="dev", group_description="Bot owne
         checks.append(("Discord gateway", not self.bot.is_closed(), f"{max(self.bot.latency * 1000, 0):.1f} ms"))
         pihole = await collect_pihole_stats()
         checks.append(("Pi-hole FTL", pihole.active, "active" if pihole.active else "inactive"))
-        checks.append(("Pi-hole API", pihole.api_available, "available" if pihole.api_available else "limited"))
+        pihole_api_detail = "available" if pihole.api_available else ("permission limited" if pihole.permission_limited else "limited")
+        checks.append(("Pi-hole API", pihole.api_available, pihole_api_detail))
         elapsed = (asyncio.get_running_loop().time() - started) * 1000
         description = "\n".join(f"{'✅' if ok else '⚠️'} **{name}:** {detail}" for name, ok, detail in checks)
         description += f"\n\nCompleted in **{elapsed:.0f} ms**."

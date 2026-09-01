@@ -6,6 +6,7 @@ from discord.ext import commands
 
 from database.repositories.settings import SettingsRepository
 from helpers.embeds import EmbedFactory
+from services.welcome_templates import placeholder_help_text, render_welcome_template
 
 
 class Setup(commands.GroupCog, group_name="setup", group_description="Configure Raspberry-Bot for this server"):
@@ -71,19 +72,72 @@ class Setup(commands.GroupCog, group_name="setup", group_description="Configure 
             ephemeral=True,
         )
 
-    @app_commands.command(name="welcome-message", description="Customize the welcome message placeholders.")
+    @app_commands.command(name="welcome-message", description="Set a Dyno-style welcome template with {user}, {server} and more.")
+    @app_commands.describe(message="Template text. Leave empty to restore the default welcome message.")
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
     async def welcome_message(self, interaction: discord.Interaction, message: str | None = None) -> None:
         if interaction.guild_id is None:
             return
-        await self.repo.update_guild_settings(interaction.guild_id, welcome_message=str(message) if message else None)
+        cleaned = str(message).strip() if message else None
+        await self.repo.update_guild_settings(interaction.guild_id, welcome_message=cleaned or None)
         description = (
-            "Custom welcome message saved. Available placeholders: `{user}`, `{username}`, `{display_name}`, `{server}`, `{member_count}`."
-            if message
-            else "Custom welcome message cleared; the default message will be used."
+            "Custom welcome template saved. Use `/setup welcome-preview` to test it and "
+            "`/setup welcome-placeholders` to see every available argument."
+            if cleaned
+            else "Custom welcome message cleared; the default template will be used."
         )
-        await interaction.response.send_message(embed=EmbedFactory.success(title="Welcome message updated", description=description), ephemeral=True)
+        await interaction.response.send_message(
+            embed=EmbedFactory.success(title="Welcome message updated", description=description),
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="welcome-preview", description="Preview the configured welcome message with real member data.")
+    @app_commands.describe(member="Member whose data should be inserted into the placeholders.")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_guild=True)
+    async def welcome_preview(self, interaction: discord.Interaction, member: discord.Member | None = None) -> None:
+        if interaction.guild is None or interaction.guild_id is None:
+            return
+        target = member or interaction.user
+        if not isinstance(target, discord.Member):
+            await interaction.response.send_message(
+                embed=EmbedFactory.error(title="Preview unavailable", description="Run this command inside a server."),
+                ephemeral=True,
+            )
+            return
+        data = await self.repo.get_guild_settings(interaction.guild_id)
+        channel = interaction.guild.get_channel(int(data["welcome_channel_id"])) if data.get("welcome_channel_id") else interaction.channel
+        template = str(data.get("welcome_message") or "Welcome {user}! You are member #{member_count}.")
+        embed = EmbedFactory.success(
+            title=f"Welcome to {interaction.guild.name}",
+            description=render_welcome_template(template, target, channel if isinstance(channel, discord.abc.GuildChannel) else None),
+        )
+        embed.set_thumbnail(url=target.display_avatar.url)
+        embed.add_field(name="Template", value=f"```text\n{template[:900]}\n```", inline=False)
+        await interaction.response.send_message(
+            embed=embed,
+            ephemeral=True,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+    @app_commands.command(name="welcome-placeholders", description="Show all available welcome-message arguments/placeholders.")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_guild=True)
+    async def welcome_placeholders(self, interaction: discord.Interaction) -> None:
+        embed = EmbedFactory.info(
+            title="Welcome message placeholders",
+            description=(
+                "Use these directly inside `/setup welcome-message`. Unknown placeholders are left visible so typos are easy to spot.\n\n"
+                + placeholder_help_text()
+            ),
+        )
+        embed.add_field(
+            name="Example",
+            value="`Willkommen {user} auf {server}! Du bist Mitglied #{member_count}.`",
+            inline=False,
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @app_commands.command(name="autorole", description="Set or disable the automatic role for new members.")
     @app_commands.guild_only()
