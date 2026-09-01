@@ -11,6 +11,7 @@ from aiohttp import web
 from . import app_legacy
 from .config import DashboardConfig
 from .services.database_admin_service import DatabaseAdminService
+from .services.system_service import bot_action
 
 TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 
@@ -108,6 +109,64 @@ async def api_dashboard_command(request: web.Request) -> web.Response:
     return web.json_response({"ok": bool(row), "command": row})
 
 
+async def _restart_dashboard_later() -> None:
+    await asyncio.sleep(0.7)
+    await bot_action("raspberry-dashboard", "restart")
+
+
+async def api_control_system_action(request: web.Request) -> web.Response:
+    action = request.match_info["action"]
+    if action not in {"pull", "restart-bot", "restart-dashboard", "update-all"}:
+        return web.json_response({"ok": False, "message": "Unsupported control action."}, status=400)
+
+    config: DashboardConfig = request.app["config"]
+    audit = request.app.get("audit")
+
+    try:
+        if action == "pull":
+            result = await request.app["git"].pull()
+            if audit is not None:
+                audit.record("control.git.pull", ok=bool(result.get("ok")), detail=str(result.get("message", "")))
+            return web.json_response(result, status=200 if result.get("ok") else 409)
+
+        if action == "restart-bot":
+            result = await bot_action(config.bot_service, "restart")
+            if audit is not None:
+                audit.record("control.bot.restart", ok=bool(result.get("ok")), detail=str(result.get("message", "")))
+            return web.json_response(result, status=200 if result.get("ok") else 500)
+
+        if action == "restart-dashboard":
+            if audit is not None:
+                audit.record("control.dashboard.restart", ok=True, detail="Dashboard restart requested")
+            asyncio.create_task(_restart_dashboard_later(), name="dashboard-self-restart")
+            return web.json_response({"ok": True, "message": "Dashboard restart scheduled.", "dashboard_restarting": True})
+
+        pull = await request.app["git"].pull()
+        if not pull.get("ok"):
+            if audit is not None:
+                audit.record("control.update_all", ok=False, detail=f"git pull failed: {pull.get('message', '')}")
+            return web.json_response({"ok": False, "message": f"Git pull failed: {pull.get('message', '')}"}, status=409)
+
+        bot = await bot_action(config.bot_service, "restart")
+        if not bot.get("ok"):
+            if audit is not None:
+                audit.record("control.update_all", ok=False, detail=f"bot restart failed: {bot.get('message', '')}")
+            return web.json_response({"ok": False, "message": f"Pull completed, but bot restart failed: {bot.get('message', '')}"}, status=500)
+
+        if audit is not None:
+            audit.record("control.update_all", ok=True, detail="git pull + bot restart + dashboard restart")
+        asyncio.create_task(_restart_dashboard_later(), name="dashboard-update-restart")
+        return web.json_response({
+            "ok": True,
+            "message": "Git pull completed. Bot restarted. Dashboard restart scheduled.",
+            "dashboard_restarting": True,
+        })
+    except Exception as exc:
+        if audit is not None:
+            audit.record(f"control.{action}", ok=False, detail=f"{type(exc).__name__}: {exc}")
+        return web.json_response({"ok": False, "message": f"{type(exc).__name__}: {exc}"}, status=500)
+
+
 def _db_audit(request: web.Request, action: str, table: str, result: dict) -> None:
     audit = request.app.get("audit")
     if audit is not None:
@@ -185,6 +244,7 @@ def create_app(config: DashboardConfig | None = None) -> web.Application:
     app.router.add_get("/api/cogs", api_cogs)
     app.router.add_post("/api/cogs/{action}", api_cog_action)
     app.router.add_get("/api/dashboard-command/{id}", api_dashboard_command)
+    app.router.add_post("/api/control/system/{action}", api_control_system_action)
     app.router.add_get("/api/database/admin/{table}/metadata", api_database_admin_metadata)
     app.router.add_post("/api/database/admin/{table}/insert", api_database_admin_insert)
     app.router.add_patch("/api/database/admin/{table}/update", api_database_admin_update)
