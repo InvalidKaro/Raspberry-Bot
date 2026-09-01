@@ -39,27 +39,9 @@ class Database:
 
     async def initialize_schema(self) -> None:
         schema = """
-        CREATE TABLE IF NOT EXISTS guild_settings (
-            guild_id INTEGER PRIMARY KEY,
-            embed_color INTEGER,
-            ticket_category_id INTEGER,
-            ticket_log_channel_id INTEGER,
-            welcome_channel_id INTEGER,
-            suggestion_channel_id INTEGER,
-            general_log_channel_id INTEGER,
-            auto_role_id INTEGER,
-            welcome_message TEXT,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-        );
+        CREATE TABLE IF NOT EXISTS guild_settings (guild_id INTEGER PRIMARY KEY,embed_color INTEGER,ticket_category_id INTEGER,ticket_log_channel_id INTEGER,welcome_channel_id INTEGER,suggestion_channel_id INTEGER,general_log_channel_id INTEGER,auto_role_id INTEGER,welcome_message TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE IF NOT EXISTS ticket_staff_roles (guild_id INTEGER NOT NULL, role_id INTEGER NOT NULL, permission_level INTEGER NOT NULL DEFAULT 10, PRIMARY KEY (guild_id, role_id));
-        CREATE TABLE IF NOT EXISTS tickets (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL, channel_id INTEGER UNIQUE,
-            control_message_id INTEGER, opener_id INTEGER NOT NULL, category_name TEXT, subject TEXT NOT NULL,
-            description TEXT NOT NULL, priority TEXT NOT NULL DEFAULT 'normal', status TEXT NOT NULL DEFAULT 'open',
-            claimed_by INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            closed_at TEXT, closed_by INTEGER, close_reason TEXT
-        );
+        CREATE TABLE IF NOT EXISTS tickets (id INTEGER PRIMARY KEY AUTOINCREMENT,guild_id INTEGER NOT NULL,channel_id INTEGER UNIQUE,control_message_id INTEGER,opener_id INTEGER NOT NULL,category_name TEXT,subject TEXT NOT NULL,description TEXT NOT NULL,priority TEXT NOT NULL DEFAULT 'normal',status TEXT NOT NULL DEFAULT 'open',claimed_by INTEGER,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,closed_at TEXT,closed_by INTEGER,close_reason TEXT);
         CREATE INDEX IF NOT EXISTS idx_tickets_guild_status ON tickets(guild_id, status);
         CREATE INDEX IF NOT EXISTS idx_tickets_channel ON tickets(channel_id);
         CREATE TABLE IF NOT EXISTS ticket_members (ticket_id INTEGER NOT NULL,user_id INTEGER NOT NULL,added_by INTEGER,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(ticket_id,user_id),FOREIGN KEY(ticket_id) REFERENCES tickets(id) ON DELETE CASCADE);
@@ -87,6 +69,11 @@ class Database:
         CREATE TABLE IF NOT EXISTS personnel_records (id INTEGER PRIMARY KEY AUTOINCREMENT,guild_id INTEGER NOT NULL,personnel_id INTEGER NOT NULL,record_date TEXT NOT NULL,period_key TEXT NOT NULL,inductions INTEGER NOT NULL DEFAULT 0,bwg INTEGER NOT NULL DEFAULT 0,note TEXT,created_by INTEGER NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(personnel_id) REFERENCES personnel_members(id) ON DELETE CASCADE);
         CREATE INDEX IF NOT EXISTS idx_personnel_records_member_date ON personnel_records(guild_id,personnel_id,record_date);
         CREATE INDEX IF NOT EXISTS idx_personnel_records_period ON personnel_records(guild_id,period_key);
+        CREATE TABLE IF NOT EXISTS personnel_notes (id INTEGER PRIMARY KEY AUTOINCREMENT,guild_id INTEGER NOT NULL,personnel_id INTEGER NOT NULL,content TEXT NOT NULL,created_by INTEGER NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(personnel_id) REFERENCES personnel_members(id) ON DELETE CASCADE);
+        CREATE INDEX IF NOT EXISTS idx_personnel_notes_member ON personnel_notes(guild_id,personnel_id,created_at);
+        CREATE TABLE IF NOT EXISTS personnel_qualifications (id INTEGER PRIMARY KEY AUTOINCREMENT,guild_id INTEGER NOT NULL,personnel_id INTEGER NOT NULL,name TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'bestanden',created_by INTEGER NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(guild_id,personnel_id,name),FOREIGN KEY(personnel_id) REFERENCES personnel_members(id) ON DELETE CASCADE);
+        CREATE TABLE IF NOT EXISTS personnel_rank_history (id INTEGER PRIMARY KEY AUTOINCREMENT,guild_id INTEGER NOT NULL,personnel_id INTEGER NOT NULL,old_rank TEXT,new_rank TEXT,changed_by INTEGER NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(personnel_id) REFERENCES personnel_members(id) ON DELETE CASCADE);
+        CREATE TABLE IF NOT EXISTS personnel_goals (id INTEGER PRIMARY KEY AUTOINCREMENT,guild_id INTEGER NOT NULL,personnel_id INTEGER,target_type TEXT NOT NULL,target_value INTEGER NOT NULL,period_key TEXT NOT NULL,created_by INTEGER NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(guild_id,personnel_id,target_type,period_key));
         CREATE TABLE IF NOT EXISTS ticket_feedback (ticket_id INTEGER PRIMARY KEY,guild_id INTEGER NOT NULL,user_id INTEGER NOT NULL,rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),comment TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE IF NOT EXISTS bot_access_roles (guild_id INTEGER NOT NULL,role_id INTEGER NOT NULL,level TEXT NOT NULL,created_by INTEGER NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(guild_id,role_id));
         CREATE TABLE IF NOT EXISTS bot_audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT,guild_id INTEGER,actor_id INTEGER,action TEXT NOT NULL,target_type TEXT,target_id TEXT,before_json TEXT,after_json TEXT,metadata_json TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
