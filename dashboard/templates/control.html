@@ -50,6 +50,17 @@
 
     <section class="panel">
       <div class="panel-head">
+        <div><p class="card-label">SMART DIAGNOSTICS</p><h2>Health recommendations</h2></div>
+        <span class="branch" id="health-score">CHECKING</span>
+      </div>
+      <p class="muted">Automatic recommendations from the current Pi metrics. No extra background sampler is started.</p>
+      <div id="health-recommendations" class="stack-list">
+        <div class="stack-row"><span>Waiting for the first system sample…</span></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
         <div><p class="card-label">PERFORMANCE HISTORY</p><h2>Recent trends</h2></div>
         <span class="branch" id="history-state">90s history</span>
       </div>
