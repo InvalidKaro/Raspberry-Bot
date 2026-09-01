@@ -103,9 +103,9 @@ def render_personnel_png(title: str, rows) -> bytes:
     margin = 44
     columns = 2
     gap = 22
-    header_h = 490
+    header_h = 560
     footer_h = 96
-    card_h = 460
+    card_h = 540
     card_w = (width - margin * 2 - gap) // columns
     grid_rows = max(1, (len(shown) + columns - 1) // columns)
     height = header_h + grid_rows * (card_h + gap) + footer_h
@@ -125,15 +125,15 @@ def render_personnel_png(title: str, rows) -> bytes:
 
     # Readability floors. Automatic scaling is allowed ABOVE these values only.
     # In other words: a long name may shrink from 118 px, but never below 72 px.
-    TITLE_MAX, TITLE_MIN = 142, 92
-    SUBTITLE_MAX, SUBTITLE_MIN = 64, 48
-    KPI_LABEL_MAX, KPI_LABEL_MIN = 48, 34
-    KPI_VALUE_MAX, KPI_VALUE_MIN = 94, 58
-    NAME_MAX, NAME_MIN = 118, 72
-    META_MAX, META_MIN = 64, 44
-    TOTAL_MAX, TOTAL_MIN = 80, 58
-    BAR_MAX, BAR_MIN = 74, 56
-    FOOTER_MAX, FOOTER_MIN = 38, 30
+    TITLE_MAX, TITLE_MIN = 220, 150
+    SUBTITLE_MAX, SUBTITLE_MIN = 110, 72
+    KPI_LABEL_MAX, KPI_LABEL_MIN = 82, 54
+    KPI_VALUE_MAX, KPI_VALUE_MIN = 150, 96
+    NAME_MAX, NAME_MIN = 200, 120
+    META_MAX, META_MIN = 105, 70
+    TOTAL_MAX, TOTAL_MIN = 140, 92
+    BAR_MAX, BAR_MIN = 130, 88
+    FOOTER_MAX, FOOTER_MIN = 64, 42
 
     total_e = sum(int(r["inductions"]) for r in original)
     total_b = sum(int(r["bwg"]) for r in original)
@@ -159,9 +159,9 @@ def render_personnel_png(title: str, rows) -> bytes:
         max_size=SUBTITLE_MAX,
         min_size=SUBTITLE_MIN,
     )
-    draw.text((margin, 170), subtitle_text, font=subtitle_font, fill=muted)
+    draw.text((margin, 205), subtitle_text, font=subtitle_font, fill=muted)
 
-    kpi_y = 270
+    kpi_y = 320
     kpi_gap = 14
     kpi_w = (width - margin * 2 - kpi_gap * 3) // 4
     kpis = [
@@ -172,8 +172,8 @@ def render_personnel_png(title: str, rows) -> bytes:
     ]
     for i, (label, value, accent) in enumerate(kpis):
         x = margin + i * (kpi_w + kpi_gap)
-        draw.rounded_rectangle((x, kpi_y, x + kpi_w, kpi_y + 180), radius=24, fill=panel)
-        draw.rounded_rectangle((x, kpi_y, x + 10, kpi_y + 180), radius=4, fill=accent)
+        draw.rounded_rectangle((x, kpi_y, x + kpi_w, kpi_y + 205), radius=24, fill=panel)
+        draw.rounded_rectangle((x, kpi_y, x + 10, kpi_y + 205), radius=4, fill=accent)
 
         label_text, label_font = _fit_at_minimum(
             draw,
@@ -191,7 +191,7 @@ def render_personnel_png(title: str, rows) -> bytes:
             max_size=KPI_VALUE_MAX,
             min_size=KPI_VALUE_MIN,
         )
-        draw.text((x + 18, kpi_y + 72), value_text, font=value_font, fill=accent)
+        draw.text((x + 18, kpi_y + 88), value_text, font=value_font, fill=accent)
 
     max_value = max([max(int(r["inductions"]), int(r["bwg"])) for r in shown] or [1])
     max_value = max(1, max_value)
@@ -245,7 +245,7 @@ def render_personnel_png(title: str, rows) -> bytes:
 
         draw.text((x + 20, y + 10), name, font=name_font, fill=text)
         if meta and meta_font:
-            draw.text((x + 20, y + 132), meta, font=meta_font, fill=muted)
+            draw.text((x + 20, y + 155), meta, font=meta_font, fill=muted)
 
         total_text = f"Gesamt {activity}"
         total_display, total_font = _fit_at_minimum(
@@ -257,16 +257,16 @@ def render_personnel_png(title: str, rows) -> bytes:
         )
         total_box = draw.textbbox((0, 0), total_display, font=total_font)
         total_width = total_box[2] - total_box[0]
-        draw.text((x + card_w - 20 - total_width, y + 190), total_display, font=total_font, fill=accent_total)
+        draw.text((x + card_w - 20 - total_width, y + 225), total_display, font=total_font, fill=accent_total)
 
         bar_left = x + 20
         bar_right = x + card_w - 20
         bar_width = bar_right - bar_left
         e_w = int(bar_width * e / max_value)
         b_w = int(bar_width * b / max_value)
-        e_y = y + 280
-        b_y = y + 370
-        bar_h = 72
+        e_y = y + 335
+        b_y = y + 440
+        bar_h = 84
 
         draw.rounded_rectangle((bar_left, e_y, bar_right, e_y + bar_h), radius=24, fill=track)
         draw.rounded_rectangle((bar_left, b_y, bar_right, b_y + bar_h), radius=24, fill=track)
