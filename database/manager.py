@@ -29,6 +29,12 @@ class Database:
         await self._connection.execute("PRAGMA journal_mode=WAL;")
         await self._connection.execute("PRAGMA foreign_keys=ON;")
         await self._connection.execute("PRAGMA busy_timeout=5000;")
+        # Balanced defaults for a Raspberry Pi: WAL keeps reads responsive while
+        # NORMAL avoids unnecessary fsync pressure for this community-bot workload.
+        await self._connection.execute("PRAGMA synchronous=NORMAL;")
+        await self._connection.execute("PRAGMA temp_store=MEMORY;")
+        await self._connection.execute("PRAGMA cache_size=-4096;")
+        await self._connection.execute("PRAGMA wal_autocheckpoint=1000;")
         await self._connection.commit()
         await self.initialize_schema()
         logger.info("Database connected: %s", self.path)
@@ -213,6 +219,8 @@ class Database:
 
         CREATE INDEX IF NOT EXISTS idx_reminders_due
             ON reminders(delivered, due_at);
+        CREATE INDEX IF NOT EXISTS idx_reminders_user
+            ON reminders(user_id, delivered, due_at);
 
         CREATE TABLE IF NOT EXISTS command_usage (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -221,6 +229,33 @@ class Database:
             command_name TEXT NOT NULL,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE INDEX IF NOT EXISTS idx_command_usage_time
+            ON command_usage(created_at);
+        CREATE INDEX IF NOT EXISTS idx_command_usage_guild_time
+            ON command_usage(guild_id, created_at);
+
+        CREATE TABLE IF NOT EXISTS personnel_datasets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            title TEXT NOT NULL,
+            chart_type TEXT NOT NULL DEFAULT 'bar',
+            x_label TEXT NOT NULL DEFAULT 'Zeitraum',
+            y_label TEXT NOT NULL DEFAULT 'Anzahl',
+            labels_json TEXT NOT NULL,
+            values_json TEXT NOT NULL,
+            series_name TEXT NOT NULL DEFAULT 'Wert',
+            second_values_json TEXT,
+            second_series_name TEXT,
+            created_by INTEGER NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(guild_id, name)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_personnel_datasets_guild
+            ON personnel_datasets(guild_id, updated_at);
         """
         async with self._write_lock:
             await self.connection.executescript(schema)
