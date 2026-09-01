@@ -431,21 +431,22 @@ class CategorySelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        assert isinstance(self.view, HelpView)
-        self.view.category_key = self.values[0]
-        self.view.page = 0
-        self.view.command_name = None
-        self.view.rebuild_components()
+        view = self.view
+        assert isinstance(view, HelpView)
+        view.category_key = self.values[0]
+        view.page = 0
+        view.command_name = None
+        view.rebuild_components()
 
-        category = CATEGORY_BY_KEY[self.view.category_key]
+        category = CATEGORY_BY_KEY[view.category_key]
         await interaction.response.edit_message(
             embed=build_category_embed(
-                self.view.bot,
+                view.bot,
                 category,
-                page=self.view.page,
+                page=view.page,
                 user=interaction.user,
             ),
-            view=self.view,
+            view=view,
         )
 
 
@@ -485,13 +486,14 @@ class CommandSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        assert isinstance(self.view, HelpView)
+        view = self.view
+        assert isinstance(view, HelpView)
 
         if self.values[0] == "__none__":
             await interaction.response.defer()
             return
 
-        command = _find_command(self.view.bot, self.values[0])
+        command = _find_command(view.bot, self.values[0])
         if command is None:
             await interaction.response.send_message(
                 "That command is no longer registered. Re-open `/help` after syncing commands.",
@@ -499,12 +501,12 @@ class CommandSelect(discord.ui.Select):
             )
             return
 
-        self.view.command_name = _qualified_name(command)
-        self.view.rebuild_components()
+        view.command_name = _qualified_name(command)
+        view.rebuild_components()
 
         await interaction.response.edit_message(
             embed=build_command_embed(command, user=interaction.user),
-            view=self.view,
+            view=view,
         )
 
 
