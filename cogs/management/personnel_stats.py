@@ -95,7 +95,10 @@ class Personnel(commands.GroupCog, group_name="perso", group_description="MD Per
         if format.value=="csv":
             data=self.service.csv_bytes(rows); file=discord.File(BytesIO(data),filename="perso-statistik.csv")
         else:
-            data=self.service.png_bytes("MD Personalabteilung • Statistik",rows); file=discord.File(BytesIO(data),filename="perso-statistik.png")
+            pages=self.service.png_pages("MD Personalabteilung • Statistik",rows,per_page=6)
+            files=[discord.File(BytesIO(data),filename=f"perso-statistik-{i+1}.png") for i,data in enumerate(pages[:10])]
+            await interaction.followup.send(files=files,ephemeral=True)
+            return
         await interaction.followup.send(file=file,ephemeral=True)
 
     @app_commands.command(name="stats", description="Kurzer Einstieg in das neue gespeicherte Perso-System.")

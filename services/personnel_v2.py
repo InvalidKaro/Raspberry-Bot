@@ -120,6 +120,27 @@ class PersonnelService:
         draw.rounded_rectangle((x1, y1, x2, y2), radius=radius, fill=fill)
 
     @staticmethod
+    def png_pages(title: str, rows, per_page: int = 6) -> list[bytes]:
+        """Split the PNG export into short landscape pages for Discord mobile.
+
+        Discord scales very tall attachments down aggressively in chat previews.
+        Keeping each page to at most six staff cards preserves the intentionally
+        large typography instead of shrinking one giant image.
+        """
+        rows = list(rows)
+        if not rows:
+            return [PersonnelService.png_bytes(title, [])]
+        per_page = max(1, min(6, int(per_page)))
+        pages = []
+        total_pages = (len(rows) + per_page - 1) // per_page
+        for page_index in range(total_pages):
+            start = page_index * per_page
+            chunk = rows[start:start + per_page]
+            page_title = title if total_pages == 1 else f"{title} • {page_index + 1}/{total_pages}"
+            pages.append(PersonnelService.png_bytes(page_title, chunk))
+        return pages
+
+    @staticmethod
     def png_bytes(title: str, rows) -> bytes:
         rows = list(rows)
 
