@@ -5,25 +5,17 @@ from datetime import date, datetime
 from io import StringIO
 
 
-# Older dashboard builds could round Discord snowflakes in JavaScript before
-# writing them back to SQLite. At current Discord ID sizes the resulting drift
-# is small (normally < 128). 512 gives us enough room to recover those rows
-# without broadly mixing unrelated guilds.
-_GUILD_ID_DRIFT = 512
-
-
 class PersonnelService:
+    """Global personnel database.
+
+    Perso data is intentionally NOT scoped to a Discord guild/server. Existing
+    guild_id columns stay in SQLite for backwards compatibility with the current
+    schema and old rows, but all reads and profile lookups use personnel_id/name
+    only. This prevents legacy/rounded Snowflake values from hiding employees.
+    """
+
     def __init__(self, bot) -> None:
         self.bot = bot
-
-    @staticmethod
-    def _guild_match(column: str = "guild_id") -> str:
-        return f"({column}=? OR ABS(CAST({column} AS INTEGER)-?)<=?)"
-
-    @staticmethod
-    def _guild_params(guild_id: int) -> tuple[int, int, int]:
-        gid = int(guild_id)
-        return gid, gid, _GUILD_ID_DRIFT
 
     async def add(
         self,
@@ -37,8 +29,6 @@ class PersonnelService:
     ):
         existing = await self.get_by_name(guild_id, name, active_only=False)
         if existing:
-            # Do not overwrite the display name here: get_by_name already found
-            # the canonical DB profile and /perso edit is responsible for renames.
             await self.bot.database.execute(
                 "UPDATE personnel_members "
                 "SET user_id=COALESCE(?,user_id),rank_name=COALESCE(?,rank_name),"
@@ -51,6 +41,7 @@ class PersonnelService:
                 (int(existing["id"]),),
             )
 
+        # guild_id is retained only because the legacy schema marks it NOT NULL.
         await self.bot.database.execute(
             "INSERT INTO personnel_members(guild_id,user_id,display_name,rank_name,department,created_by) "
             "VALUES(?,?,?,?,?,?)",
@@ -59,24 +50,22 @@ class PersonnelService:
         return await self.get_by_name(guild_id, name)
 
     async def get_by_name(self, guild_id: int, name: str, active_only: bool = True):
-        match = self._guild_match("guild_id")
+        del guild_id
         sql = (
-            f"SELECT * FROM personnel_members WHERE {match} "
-            "AND lower(trim(display_name))=lower(trim(?))"
+            "SELECT * FROM personnel_members "
+            "WHERE lower(trim(display_name))=lower(trim(?))"
             + (" AND active=1" if active_only else "")
-            + " ORDER BY CASE WHEN guild_id=? THEN 0 ELSE 1 END, active DESC, id ASC LIMIT 1"
+            + " ORDER BY active DESC,id ASC LIMIT 1"
         )
-        params = (*self._guild_params(guild_id), name.strip(), int(guild_id))
-        return await self.bot.database.fetchone(sql, params)
+        return await self.bot.database.fetchone(sql, (name.strip(),))
 
     async def list_members(self, guild_id: int, active_only: bool = True):
-        match = self._guild_match("guild_id")
-        sql = (
-            f"SELECT * FROM personnel_members WHERE {match}"
-            + (" AND active=1" if active_only else "")
-            + " ORDER BY display_name COLLATE NOCASE,id ASC"
-        )
-        return await self.bot.database.fetchall(sql, self._guild_params(guild_id))
+        del guild_id
+        sql = "SELECT * FROM personnel_members"
+        if active_only:
+            sql += " WHERE active=1"
+        sql += " ORDER BY display_name COLLATE NOCASE,id ASC"
+        return await self.bot.database.fetchall(sql)
 
     async def edit(
         self,
@@ -89,10 +78,9 @@ class PersonnelService:
         department=None,
         user_id=None,
     ):
-        match = self._guild_match("guild_id")
         before = await self.bot.database.fetchone(
-            f"SELECT * FROM personnel_members WHERE id=? AND {match}",
-            (personnel_id, *self._guild_params(guild_id)),
+            "SELECT * FROM personnel_members WHERE id=?",
+            (personnel_id,),
         )
         if not before:
             return None
@@ -109,8 +97,6 @@ class PersonnelService:
                 (guild_id, personnel_id, before["rank_name"], new_rank, actor_id),
             )
 
-        # Update by primary key after the guild ownership check above. This also
-        # works for profiles whose old guild_id was rounded by the dashboard.
         await self.bot.database.execute(
             "UPDATE personnel_members SET display_name=?,rank_name=?,department=?,user_id=?,"
             "updated_at=CURRENT_TIMESTAMP WHERE id=?",
@@ -122,11 +108,10 @@ class PersonnelService:
         )
 
     async def archive(self, guild_id: int, personnel_id: int):
-        match = self._guild_match("guild_id")
+        del guild_id
         await self.bot.database.execute(
-            f"UPDATE personnel_members SET active=0,updated_at=CURRENT_TIMESTAMP "
-            f"WHERE id=? AND {match}",
-            (personnel_id, *self._guild_params(guild_id)),
+            "UPDATE personnel_members SET active=0,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (personnel_id,),
         )
 
     async def record(
@@ -150,32 +135,13 @@ class PersonnelService:
         )
 
     async def totals(self, guild_id: int, *, period_like: str | None = None):
-        """Return every active personnel profile belonging to this guild.
-
-        Guild ownership accepts a tiny Snowflake drift to recover rows modified
-        by older dashboard builds. The profile name always comes directly from
-        personnel_members, so dashboard DB name edits are reflected immediately.
-        """
-
-        member_match = self._guild_match("m.guild_id")
-        record_match = self._guild_match("r.guild_id")
-        recovery_match = self._guild_match("rx.guild_id")
-
-        record_filter = record_match
-        record_params: list[object] = list(self._guild_params(guild_id))
-        if period_like:
-            record_filter += " AND r.period_key LIKE ?"
-            record_params.append(period_like)
-
-        # Each aggregate gets its own complete filter/parameter set. The old
-        # query applied period_like only to inductions, which could also make
-        # overview/report data appear inconsistent.
+        """Return every active profile and all linked records, globally."""
+        del guild_id
         params: list[object] = []
-        params.extend(record_params)  # inductions
-        params.extend(record_params)  # bwg
-        params.extend(record_params)  # activity
-        params.extend(self._guild_params(guild_id))  # member profile ownership
-        params.extend(self._guild_params(guild_id))  # record based recovery
+        join = "LEFT JOIN personnel_records r ON r.personnel_id=m.id"
+        if period_like:
+            join += " AND r.period_key LIKE ?"
+            params.append(period_like)
 
         sql = f"""
             SELECT
@@ -183,51 +149,42 @@ class PersonnelService:
                 m.display_name,
                 m.rank_name,
                 m.department,
-                COALESCE(SUM(CASE WHEN {record_filter} THEN r.inductions ELSE 0 END),0) AS inductions,
-                COALESCE(SUM(CASE WHEN {record_filter} THEN r.bwg ELSE 0 END),0) AS bwg,
-                COALESCE(SUM(CASE WHEN {record_filter} THEN r.inductions+r.bwg ELSE 0 END),0) AS activity
+                COALESCE(SUM(r.inductions),0) AS inductions,
+                COALESCE(SUM(r.bwg),0) AS bwg,
+                COALESCE(SUM(r.inductions+r.bwg),0) AS activity
             FROM personnel_members m
-            LEFT JOIN personnel_records r ON r.personnel_id=m.id
+            {join}
             WHERE m.active=1
-              AND (
-                    {member_match}
-                    OR EXISTS(
-                        SELECT 1
-                        FROM personnel_records rx
-                        WHERE rx.personnel_id=m.id
-                          AND {recovery_match}
-                    )
-                  )
             GROUP BY m.id,m.display_name,m.rank_name,m.department
             ORDER BY activity DESC,m.display_name COLLATE NOCASE,m.id ASC
         """
         return await self.bot.database.fetchall(sql, params)
 
     async def history(self, guild_id: int, personnel_id: int, limit: int = 100):
-        match = self._guild_match("guild_id")
+        del guild_id
         return await self.bot.database.fetchall(
-            f"SELECT * FROM personnel_records WHERE {match} AND personnel_id=? "
+            "SELECT * FROM personnel_records WHERE personnel_id=? "
             "ORDER BY record_date DESC,id DESC LIMIT ?",
-            (*self._guild_params(guild_id), personnel_id, limit),
+            (personnel_id, limit),
         )
 
     async def activity_feed(self, guild_id: int, limit: int = 20):
-        match = self._guild_match("r.guild_id")
+        del guild_id
         return await self.bot.database.fetchall(
-            f"SELECT r.*,m.display_name FROM personnel_records r "
-            f"JOIN personnel_members m ON m.id=r.personnel_id WHERE {match} "
+            "SELECT r.*,m.display_name FROM personnel_records r "
+            "JOIN personnel_members m ON m.id=r.personnel_id "
             "ORDER BY r.created_at DESC,r.id DESC LIMIT ?",
-            (*self._guild_params(guild_id), limit),
+            (limit,),
         )
 
     async def trend(self, guild_id: int, limit: int = 12):
-        match = self._guild_match("guild_id")
+        del guild_id
         return await self.bot.database.fetchall(
-            f"SELECT period_key,COALESCE(SUM(inductions),0) inductions,"
-            f"COALESCE(SUM(bwg),0) bwg,COALESCE(SUM(inductions+bwg),0) activity "
-            f"FROM personnel_records WHERE {match} GROUP BY period_key "
+            "SELECT period_key,COALESCE(SUM(inductions),0) inductions,"
+            "COALESCE(SUM(bwg),0) bwg,COALESCE(SUM(inductions+bwg),0) activity "
+            "FROM personnel_records GROUP BY period_key "
             "ORDER BY period_key DESC LIMIT ?",
-            (*self._guild_params(guild_id), limit),
+            (limit,),
         )
 
     async def add_note(self, guild_id: int, personnel_id: int, actor_id: int, content: str):
@@ -237,11 +194,11 @@ class PersonnelService:
         )
 
     async def notes(self, guild_id: int, personnel_id: int, limit: int = 10):
-        match = self._guild_match("guild_id")
+        del guild_id
         return await self.bot.database.fetchall(
-            f"SELECT * FROM personnel_notes WHERE {match} AND personnel_id=? "
+            "SELECT * FROM personnel_notes WHERE personnel_id=? "
             "ORDER BY created_at DESC,id DESC LIMIT ?",
-            (*self._guild_params(guild_id), personnel_id, limit),
+            (personnel_id, limit),
         )
 
     async def set_qualification(
@@ -252,19 +209,30 @@ class PersonnelService:
         name: str,
         status: str,
     ):
+        existing = await self.bot.database.fetchone(
+            "SELECT id FROM personnel_qualifications "
+            "WHERE personnel_id=? AND lower(trim(name))=lower(trim(?)) "
+            "ORDER BY id ASC LIMIT 1",
+            (personnel_id, name.strip()),
+        )
+        if existing:
+            await self.bot.database.execute(
+                "UPDATE personnel_qualifications SET status=?,created_by=?,created_at=CURRENT_TIMESTAMP WHERE id=?",
+                (status.strip(), actor_id, int(existing["id"])),
+            )
+            return
         await self.bot.database.execute(
             "INSERT INTO personnel_qualifications(guild_id,personnel_id,name,status,created_by) "
-            "VALUES(?,?,?,?,?) ON CONFLICT(guild_id,personnel_id,name) DO UPDATE SET "
-            "status=excluded.status,created_by=excluded.created_by,created_at=CURRENT_TIMESTAMP",
+            "VALUES(?,?,?,?,?)",
             (guild_id, personnel_id, name.strip(), status.strip(), actor_id),
         )
 
     async def qualifications(self, guild_id: int, personnel_id: int):
-        match = self._guild_match("guild_id")
+        del guild_id
         return await self.bot.database.fetchall(
-            f"SELECT * FROM personnel_qualifications WHERE {match} AND personnel_id=? "
-            "ORDER BY name COLLATE NOCASE",
-            (*self._guild_params(guild_id), personnel_id),
+            "SELECT * FROM personnel_qualifications WHERE personnel_id=? "
+            "ORDER BY name COLLATE NOCASE,id ASC",
+            (personnel_id,),
         )
 
     async def set_goal(
@@ -276,19 +244,36 @@ class PersonnelService:
         target_value: int,
         period_key: str,
     ):
+        if personnel_id is None:
+            existing = await self.bot.database.fetchone(
+                "SELECT id FROM personnel_goals WHERE personnel_id IS NULL "
+                "AND target_type=? AND period_key=? ORDER BY id ASC LIMIT 1",
+                (target_type, period_key),
+            )
+        else:
+            existing = await self.bot.database.fetchone(
+                "SELECT id FROM personnel_goals WHERE personnel_id=? "
+                "AND target_type=? AND period_key=? ORDER BY id ASC LIMIT 1",
+                (personnel_id, target_type, period_key),
+            )
+        if existing:
+            await self.bot.database.execute(
+                "UPDATE personnel_goals SET target_value=?,created_by=?,created_at=CURRENT_TIMESTAMP WHERE id=?",
+                (target_value, actor_id, int(existing["id"])),
+            )
+            return
         await self.bot.database.execute(
             "INSERT INTO personnel_goals(guild_id,personnel_id,target_type,target_value,period_key,created_by) "
-            "VALUES(?,?,?,?,?,?) ON CONFLICT(guild_id,personnel_id,target_type,period_key) DO UPDATE SET "
-            "target_value=excluded.target_value,created_by=excluded.created_by,created_at=CURRENT_TIMESTAMP",
+            "VALUES(?,?,?,?,?,?)",
             (guild_id, personnel_id, target_type, target_value, period_key, actor_id),
         )
 
     async def rank_history(self, guild_id: int, personnel_id: int, limit: int = 10):
-        match = self._guild_match("guild_id")
+        del guild_id
         return await self.bot.database.fetchall(
-            f"SELECT * FROM personnel_rank_history WHERE {match} AND personnel_id=? "
+            "SELECT * FROM personnel_rank_history WHERE personnel_id=? "
             "ORDER BY created_at DESC,id DESC LIMIT ?",
-            (*self._guild_params(guild_id), personnel_id, limit),
+            (personnel_id, limit),
         )
 
     @staticmethod
