@@ -253,13 +253,21 @@ class Developer(commands.GroupCog, group_name="dev", group_description="Bot owne
 
     @app_commands.command(name="sync", description="Synchronize application commands.")
     async def sync(self, interaction: discord.Interaction) -> None:
+        # A global command sync can take longer than Discord's interaction
+        # acknowledgement window. Defer immediately, then answer via followup.
+        await interaction.response.defer(ephemeral=True)
+
         if self.bot.settings.dev_guild_id:
             guild = discord.Object(id=self.bot.settings.dev_guild_id)
             synced = await self.bot.tree.sync(guild=guild)
         else:
             synced = await self.bot.tree.sync()
-        await interaction.response.send_message(
-            embed=EmbedFactory.success(title="Commands synchronized", description=f"Synced **{len(synced)}** commands."),
+
+        await interaction.followup.send(
+            embed=EmbedFactory.success(
+                title="Commands synchronized",
+                description=f"Synced **{len(synced)}** commands.",
+            ),
             ephemeral=True,
         )
 
