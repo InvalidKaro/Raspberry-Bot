@@ -29,30 +29,27 @@ def _fit(draw: ImageDraw.ImageDraw, text: str, font, max_width: int) -> str:
 
 
 def render_personnel_png(title: str, rows) -> bytes:
-    """Render one single, wide Perso image with deliberately huge mobile text.
+    """Render exactly one Perso PNG with very large fixed typography.
 
-    If there are many rows, zero-activity people are omitted first. This keeps one
-    image short enough for Discord mobile without shrinking the typography again.
+    0/0 rows are omitted when the list would otherwise become unnecessarily tall.
+    Active rows are never dropped just to make the canvas smaller.
     """
     original = list(rows)
     active = [r for r in original if int(r["inductions"]) > 0 or int(r["bwg"]) > 0]
     zero = [r for r in original if int(r["inductions"]) == 0 and int(r["bwg"]) == 0]
 
-    # One image only. Prefer useful rows and remove 0/0 rows when needed.
-    if len(original) > 8 and active:
-        shown = active[:10]
-    else:
-        shown = original[:10]
-
+    # Keep one image. If there are more than eight entries, remove only 0/0 rows.
+    # Never cut active people simply to keep the image compact.
+    shown = active if len(original) > 8 and active else original
     hidden = max(0, len(original) - len(shown))
 
     width = 1600
-    margin = 52
+    margin = 44
     columns = 2
-    gap = 26
-    header_h = 390
-    footer_h = 86
-    card_h = 330
+    gap = 22
+    header_h = 470
+    footer_h = 92
+    card_h = 440
     card_w = (width - margin * 2 - gap) // columns
     grid_rows = max(1, (len(shown) + columns - 1) // columns)
     height = header_h + grid_rows * (card_h + gap) + footer_h
@@ -70,30 +67,30 @@ def render_personnel_png(title: str, rows) -> bytes:
     image = Image.new("RGB", (width, height), bg)
     draw = ImageDraw.Draw(image)
 
-    # These are intentionally huge. Do not auto-scale them down based on row count.
-    title_font = _font(104, bold=True)
-    subtitle_font = _font(42, bold=True)
-    kpi_label_font = _font(34, bold=True)
-    kpi_value_font = _font(70, bold=True)
-    name_font = _font(68, bold=True)
-    meta_font = _font(38, bold=True)
-    total_font = _font(48, bold=True)
-    bar_font = _font(44, bold=True)
-    footer_font = _font(28, bold=True)
+    # Deliberately huge fixed font sizes. They are NOT reduced based on row count.
+    title_font = _font(132, bold=True)
+    subtitle_font = _font(56, bold=True)
+    kpi_label_font = _font(42, bold=True)
+    kpi_value_font = _font(86, bold=True)
+    name_font = _font(96, bold=True)
+    meta_font = _font(54, bold=True)
+    total_font = _font(68, bold=True)
+    bar_font = _font(62, bold=True)
+    footer_font = _font(34, bold=True)
 
     total_e = sum(int(r["inductions"]) for r in original)
     total_b = sum(int(r["bwg"]) for r in original)
     total_activity = total_e + total_b
     top = original[0] if original else None
 
-    draw.text((margin, 20), _fit(draw, title, title_font, width - margin * 2), font=title_font, fill=text)
+    draw.text((margin, 12), _fit(draw, title, title_font, width - margin * 2), font=title_font, fill=text)
     subtitle = f"{len(shown)} angezeigt"
     if hidden:
         subtitle += f" • {hidden} mit 0/0 ausgeblendet"
-    draw.text((margin, 142), subtitle, font=subtitle_font, fill=muted)
+    draw.text((margin, 164), subtitle, font=subtitle_font, fill=muted)
 
-    kpi_y = 220
-    kpi_gap = 18
+    kpi_y = 255
+    kpi_gap = 14
     kpi_w = (width - margin * 2 - kpi_gap * 3) // 4
     kpis = [
         ("EINWEISUNGEN", str(total_e), accent_e),
@@ -103,19 +100,19 @@ def render_personnel_png(title: str, rows) -> bytes:
     ]
     for i, (label, value, accent) in enumerate(kpis):
         x = margin + i * (kpi_w + kpi_gap)
-        draw.rounded_rectangle((x, kpi_y, x + kpi_w, kpi_y + 132), radius=22, fill=panel)
-        draw.rounded_rectangle((x, kpi_y, x + 9, kpi_y + 132), radius=4, fill=accent)
-        draw.text((x + 22, kpi_y + 12), label, font=kpi_label_font, fill=muted)
-        display = _fit(draw, value, kpi_value_font, kpi_w - 44)
-        draw.text((x + 22, kpi_y + 55), display, font=kpi_value_font, fill=accent)
+        draw.rounded_rectangle((x, kpi_y, x + kpi_w, kpi_y + 174), radius=24, fill=panel)
+        draw.rounded_rectangle((x, kpi_y, x + 10, kpi_y + 174), radius=4, fill=accent)
+        draw.text((x + 18, kpi_y + 10), label, font=kpi_label_font, fill=muted)
+        display = _fit(draw, value, kpi_value_font, kpi_w - 36)
+        draw.text((x + 18, kpi_y + 66), display, font=kpi_value_font, fill=accent)
 
     max_value = max([max(int(r["inductions"]), int(r["bwg"])) for r in shown] or [1])
     max_value = max(1, max_value)
 
     if not shown:
         y = header_h
-        draw.rounded_rectangle((margin, y, width - margin, y + card_h), radius=24, fill=panel)
-        draw.text((margin + 36, y + 110), "Keine Perso-Daten vorhanden.", font=name_font, fill=muted)
+        draw.rounded_rectangle((margin, y, width - margin, y + card_h), radius=26, fill=panel)
+        draw.text((margin + 32, y + 140), "Keine Perso-Daten vorhanden.", font=name_font, fill=muted)
 
     for index, r in enumerate(shown):
         col = index % columns
@@ -123,48 +120,48 @@ def render_personnel_png(title: str, rows) -> bytes:
         x = margin + col * (card_w + gap)
         y = header_h + row_index * (card_h + gap)
         fill = panel if row_index % 2 == 0 else panel_alt
-        draw.rounded_rectangle((x, y, x + card_w, y + card_h), radius=24, fill=fill)
+        draw.rounded_rectangle((x, y, x + card_w, y + card_h), radius=26, fill=fill)
 
-        name = _fit(draw, f"{index + 1:02d}  {r['display_name']}", name_font, card_w - 48)
+        name = _fit(draw, f"{index + 1:02d} {r['display_name']}", name_font, card_w - 40)
         rank = str(r["rank_name"] or "")
         department = str(r["department"] or "")
         meta = " • ".join(part for part in (rank, department) if part)
-        meta = _fit(draw, meta, meta_font, card_w - 48) if meta else ""
+        meta = _fit(draw, meta, meta_font, card_w - 40) if meta else ""
 
         e = int(r["inductions"])
         b = int(r["bwg"])
         activity = int(r["activity"])
 
-        draw.text((x + 24, y + 18), name, font=name_font, fill=text)
+        draw.text((x + 20, y + 10), name, font=name_font, fill=text)
         if meta:
-            draw.text((x + 24, y + 96), meta, font=meta_font, fill=muted)
+            draw.text((x + 20, y + 120), meta, font=meta_font, fill=muted)
 
         total_text = f"Gesamt {activity}"
         total_box = draw.textbbox((0, 0), total_text, font=total_font)
-        draw.text((x + card_w - 24 - (total_box[2] - total_box[0]), y + 136), total_text, font=total_font, fill=accent_total)
+        draw.text((x + card_w - 20 - (total_box[2] - total_box[0]), y + 174), total_text, font=total_font, fill=accent_total)
 
-        bar_left = x + 24
-        bar_right = x + card_w - 24
+        bar_left = x + 20
+        bar_right = x + card_w - 20
         bar_width = bar_right - bar_left
         e_w = int(bar_width * e / max_value)
         b_w = int(bar_width * b / max_value)
-        e_y = y + 194
-        b_y = y + 258
-        bar_h = 54
+        e_y = y + 258
+        b_y = y + 348
+        bar_h = 72
 
-        draw.rounded_rectangle((bar_left, e_y, bar_right, e_y + bar_h), radius=19, fill=track)
-        draw.rounded_rectangle((bar_left, b_y, bar_right, b_y + bar_h), radius=19, fill=track)
+        draw.rounded_rectangle((bar_left, e_y, bar_right, e_y + bar_h), radius=24, fill=track)
+        draw.rounded_rectangle((bar_left, b_y, bar_right, b_y + bar_h), radius=24, fill=track)
         if e_w > 0:
-            draw.rounded_rectangle((bar_left, e_y, bar_left + e_w, e_y + bar_h), radius=19, fill=accent_e)
+            draw.rounded_rectangle((bar_left, e_y, bar_left + e_w, e_y + bar_h), radius=24, fill=accent_e)
         if b_w > 0:
-            draw.rounded_rectangle((bar_left, b_y, bar_left + b_w, b_y + bar_h), radius=19, fill=accent_b)
+            draw.rounded_rectangle((bar_left, b_y, bar_left + b_w, b_y + bar_h), radius=24, fill=accent_b)
 
-        draw.text((bar_left + 14, e_y + 2), f"Einweisungen {e}", font=bar_font, fill=text)
-        draw.text((bar_left + 14, b_y + 2), f"BWG {b}", font=bar_font, fill=text)
+        draw.text((bar_left + 12, e_y - 1), f"Einweisungen {e}", font=bar_font, fill=text)
+        draw.text((bar_left + 12, b_y - 1), f"BWG {b}", font=bar_font, fill=text)
 
-    footer_y = height - footer_h + 24
+    footer_y = height - footer_h + 22
     draw.text((margin, footer_y), "Raspberry-Bot • MD Personalabteilung", font=footer_font, fill=muted)
-    right = "1 Bild • MAX Lesbarkeit"
+    right = "1 Bild • XXL Schrift"
     rb = draw.textbbox((0, 0), right, font=footer_font)
     draw.text((width - margin - (rb[2] - rb[0]), footer_y), right, font=footer_font, fill=muted)
 
