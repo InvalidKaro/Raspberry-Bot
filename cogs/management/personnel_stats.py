@@ -111,6 +111,111 @@ def _weekly_kpi_text(labels: Sequence[str], applications: Sequence[float], induc
     )
 
 
+
+class PersonnelStatsMenu(discord.ui.View):
+    def __init__(self, cog: "PersonnelStats", author_id: int) -> None:
+        super().__init__(timeout=180)
+        self.cog = cog
+        self.author_id = author_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.author_id:
+            return True
+        await interaction.response.send_message(
+            "Dieses Statistik-Menü gehört zu einer anderen Person. Nutze selbst `/perso stats`.",
+            ephemeral=True,
+        )
+        return False
+
+    @discord.ui.button(label="Alle Angestellten", emoji="👥", style=discord.ButtonStyle.primary)
+    async def all_staff(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await interaction.response.send_modal(AllStaffStatsModal(self.cog))
+
+    @discord.ui.button(label="Einzelperson", emoji="👤", style=discord.ButtonStyle.secondary)
+    async def one_person(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await interaction.response.send_modal(PersonStatsModal(self.cog))
+
+
+class AllStaffStatsModal(discord.ui.Modal, title="MD Perso • Alle Angestellten"):
+    employees = discord.ui.TextInput(
+        label="Angestellte",
+        placeholder="Jasen; Ava; Matteo; Hailey",
+        required=True,
+        max_length=1000,
+    )
+    inductions = discord.ui.TextInput(
+        label="Einweisungen",
+        placeholder="8; 5; 11; 6",
+        required=True,
+        max_length=500,
+    )
+    bwg = discord.ui.TextInput(
+        label="BWG",
+        placeholder="3; 2; 7; 4",
+        required=True,
+        max_length=500,
+    )
+    title_input = discord.ui.TextInput(
+        label="Titel (optional)",
+        placeholder="MD Personalabteilung • Gesamtstatistik",
+        required=False,
+        max_length=120,
+    )
+
+    def __init__(self, cog: "PersonnelStats") -> None:
+        super().__init__()
+        self.cog = cog
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await self.cog.create_all_staff_stats(
+            interaction,
+            employees=str(self.employees),
+            inductions=str(self.inductions),
+            bwg=str(self.bwg),
+            title=str(self.title_input).strip() or "Angestelltenstatistik",
+        )
+
+
+class PersonStatsModal(discord.ui.Modal, title="MD Perso • Einzelperson"):
+    person = discord.ui.TextInput(
+        label="Person",
+        placeholder="z. B. Jasen Katlyn",
+        required=True,
+        max_length=80,
+    )
+    periods = discord.ui.TextInput(
+        label="Zeiträume / Wochen",
+        placeholder="KW35; KW36; KW37; KW38",
+        required=True,
+        max_length=500,
+    )
+    inductions = discord.ui.TextInput(
+        label="Einweisungen",
+        placeholder="2; 4; 3; 6",
+        required=True,
+        max_length=500,
+    )
+    bwg = discord.ui.TextInput(
+        label="BWG",
+        placeholder="1; 0; 2; 3",
+        required=True,
+        max_length=500,
+    )
+
+    def __init__(self, cog: "PersonnelStats") -> None:
+        super().__init__()
+        self.cog = cog
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await self.cog.create_person_stats(
+            interaction,
+            person=str(self.person).strip(),
+            periods=str(self.periods),
+            inductions=str(self.inductions),
+            bwg=str(self.bwg),
+        )
+
+
 class PersonnelStats(commands.GroupCog, group_name="perso", group_description="MD Personalabteilung statistics and graphs"):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
@@ -230,6 +335,238 @@ class PersonnelStats(commands.GroupCog, group_name="perso", group_description="M
                 second_series_name[:50] if second_series_name else None,
                 interaction.user.id,
             ),
+        )
+
+
+    async def create_all_staff_stats(
+        self,
+        interaction: discord.Interaction,
+        *,
+        employees: str,
+        inductions: str,
+        bwg: str,
+        title: str = "Angestelltenstatistik",
+        private: bool = False,
+    ) -> None:
+        try:
+            labels = _split_labels(employees)
+            induction_values = _parse_values(inductions)
+            bwg_values = _parse_values(bwg)
+            _validate_weekly_counts(induction_values, field_name="Einweisungen")
+            _validate_weekly_counts(bwg_values, field_name="BWG")
+
+            if len(labels) != len(induction_values):
+                raise ValueError(
+                    f"Du hast {len(labels)} Angestellte angegeben, aber "
+                    f"{len(induction_values)} Einweisungswerte."
+                )
+            if len(labels) != len(bwg_values):
+                raise ValueError(
+                    f"Du hast {len(labels)} Angestellte angegeben, aber "
+                    f"{len(bwg_values)} BWG-Werte."
+                )
+        except ValueError as exc:
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    embed=EmbedFactory.error(title="Ungültige Perso-Daten", description=str(exc)),
+                    ephemeral=True,
+                )
+            else:
+                await interaction.response.send_message(
+                    embed=EmbedFactory.error(title="Ungültige Perso-Daten", description=str(exc)),
+                    ephemeral=True,
+                )
+            return
+
+        total_inductions = int(sum(induction_values))
+        total_bwg = int(sum(bwg_values))
+        best_induction = max(range(len(labels)), key=lambda i: induction_values[i])
+        best_bwg = max(range(len(labels)), key=lambda i: bwg_values[i])
+
+        await self._render_and_send(
+            interaction,
+            title=title.strip()[:120] or "Angestelltenstatistik",
+            labels=labels,
+            values=induction_values,
+            x_label="Angestellte",
+            y_label="Anzahl",
+            series_name="Einweisungen",
+            chart_type="bar",
+            second_values=bwg_values,
+            second_series_name="BWG",
+            private=private,
+            extra_fields=[
+                (
+                    "Gesamtübersicht",
+                    (
+                        f"Einweisungen gesamt: **{total_inductions}**\n"
+                        f"BWG gesamt: **{total_bwg}**\n"
+                        f"Angestellte: **{len(labels)}**"
+                    ),
+                    True,
+                ),
+                (
+                    "Spitzenwerte",
+                    (
+                        f"Meiste Einweisungen: **{labels[best_induction]}** "
+                        f"({int(induction_values[best_induction])})\n"
+                        f"Meiste BWG: **{labels[best_bwg]}** "
+                        f"({int(bwg_values[best_bwg])})"
+                    ),
+                    True,
+                ),
+            ],
+        )
+
+    async def create_person_stats(
+        self,
+        interaction: discord.Interaction,
+        *,
+        person: str,
+        periods: str,
+        inductions: str,
+        bwg: str,
+        private: bool = False,
+    ) -> None:
+        try:
+            if not person.strip():
+                raise ValueError("Bitte gib eine Person an.")
+            labels = _split_labels(periods)
+            induction_values = _parse_values(inductions)
+            bwg_values = _parse_values(bwg)
+            _validate_weekly_counts(induction_values, field_name="Einweisungen")
+            _validate_weekly_counts(bwg_values, field_name="BWG")
+
+            if len(labels) != len(induction_values):
+                raise ValueError(
+                    f"Du hast {len(labels)} Zeiträume angegeben, aber "
+                    f"{len(induction_values)} Einweisungswerte."
+                )
+            if len(labels) != len(bwg_values):
+                raise ValueError(
+                    f"Du hast {len(labels)} Zeiträume angegeben, aber "
+                    f"{len(bwg_values)} BWG-Werte."
+                )
+        except ValueError as exc:
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    embed=EmbedFactory.error(title="Ungültige Perso-Daten", description=str(exc)),
+                    ephemeral=True,
+                )
+            else:
+                await interaction.response.send_message(
+                    embed=EmbedFactory.error(title="Ungültige Perso-Daten", description=str(exc)),
+                    ephemeral=True,
+                )
+            return
+
+        await self._render_and_send(
+            interaction,
+            title=f"{person.strip()} • Perso-Statistik",
+            labels=labels,
+            values=induction_values,
+            x_label="Zeitraum",
+            y_label="Anzahl",
+            series_name="Einweisungen",
+            chart_type="bar",
+            second_values=bwg_values,
+            second_series_name="BWG",
+            private=private,
+            extra_fields=[
+                ("Person", f"**{person.strip()}**", True),
+                (
+                    "Gesamt",
+                    (
+                        f"Einweisungen: **{int(sum(induction_values))}**\n"
+                        f"BWG: **{int(sum(bwg_values))}**"
+                    ),
+                    True,
+                ),
+            ],
+        )
+
+    @app_commands.command(
+        name="stats",
+        description="Einfaches MD-Perso-Menü: Alle Angestellten oder eine Einzelperson.",
+    )
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_messages=True)
+    async def stats_menu(self, interaction: discord.Interaction) -> None:
+        embed = EmbedFactory.info(
+            title="MD Personalabteilung • Statistik",
+            description=(
+                "Wähle einfach aus, was du erstellen möchtest.\n\n"
+                "👥 **Alle Angestellten**\n"
+                "Für jede Person: **Einweisungen + BWG** im direkten Vergleich.\n\n"
+                "👤 **Einzelperson**\n"
+                "Für eine Person: **Einweisungen + BWG** über mehrere Wochen/Zeiträume.\n\n"
+                "Danach öffnet sich ein kleines Eingabefenster. "
+                "Trenne Namen, Wochen und Zahlen einfach mit `;`."
+            ),
+        )
+        await interaction.response.send_message(
+            embed=embed,
+            view=PersonnelStatsMenu(self, interaction.user.id),
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="team",
+        description="Alle Angestellten vergleichen: Einweisungen und BWG.",
+    )
+    @app_commands.describe(
+        angestellte="Namen mit ; trennen, z. B. Jasen;Ava;Matteo",
+        einweisungen="Einweisungen je Person, z. B. 8;5;11",
+        bwg="BWG je Person, z. B. 3;2;7",
+        privat="Ergebnis nur für dich anzeigen",
+    )
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_messages=True)
+    async def team(
+        self,
+        interaction: discord.Interaction,
+        angestellte: str,
+        einweisungen: str,
+        bwg: str,
+        privat: bool = False,
+    ) -> None:
+        await self.create_all_staff_stats(
+            interaction,
+            employees=angestellte,
+            inductions=einweisungen,
+            bwg=bwg,
+            private=privat,
+        )
+
+    @app_commands.command(
+        name="person",
+        description="Eine Person über mehrere Wochen vergleichen: Einweisungen und BWG.",
+    )
+    @app_commands.describe(
+        person="Name der Person",
+        zeitraeume="Wochen/Zeiträume mit ; trennen, z. B. KW35;KW36;KW37",
+        einweisungen="Einweisungen je Zeitraum, z. B. 2;4;3",
+        bwg="BWG je Zeitraum, z. B. 1;0;2",
+        privat="Ergebnis nur für dich anzeigen",
+    )
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_messages=True)
+    async def person(
+        self,
+        interaction: discord.Interaction,
+        person: str,
+        zeitraeume: str,
+        einweisungen: str,
+        bwg: str,
+        privat: bool = False,
+    ) -> None:
+        await self.create_person_stats(
+            interaction,
+            person=person,
+            periods=zeitraeume,
+            inductions=einweisungen,
+            bwg=bwg,
+            private=privat,
         )
 
     @app_commands.command(name="weekly", description="Create the MD weekly personnel chart for applications and inductions.")
