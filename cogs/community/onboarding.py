@@ -3,7 +3,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from helpers.embeds import EmbedFactory
-from services.welcome_templates import render_welcome_template, placeholder_help
+from services.welcome_templates import render_welcome_template, placeholder_help_text
 
 class RoleButton(discord.ui.Button):
     def __init__(self, role_id:int,label:str,emoji:str|None=None):
@@ -38,12 +38,12 @@ class Onboarding(commands.GroupCog,group_name="onboarding",group_description="We
 
     @app_commands.command(name="placeholders",description="Alle Welcome-Placeholder anzeigen.")
     async def placeholders(self,interaction):
-        await interaction.response.send_message(embed=EmbedFactory.info(title="Welcome Placeholder",description=placeholder_help()),ephemeral=True)
+        await interaction.response.send_message(embed=EmbedFactory.info(title="Welcome Placeholder",description=placeholder_help_text()),ephemeral=True)
 
     @app_commands.command(name="preview",description="Welcome-Nachricht mit einem Testmitglied rendern.")
     async def preview(self,interaction:discord.Interaction,text:str,mitglied:discord.Member|None=None):
         member=mitglied or interaction.user
-        rendered=render_welcome_template(text,member,interaction.guild,interaction.channel)
+        rendered=render_welcome_template(text,member,interaction.channel)
         await interaction.response.send_message(embed=EmbedFactory.info(title="Welcome Preview",description=rendered),ephemeral=True)
 
     @app_commands.command(name="role-button",description="Einfachen Button zum An-/Ablegen einer Rolle senden.")
