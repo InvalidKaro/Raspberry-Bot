@@ -26,6 +26,9 @@ HELP_CATEGORIES = {
         "/suggest", "/poll", "/reminder create", "/reminder list", "/reminder cancel",
         "Welcome messages and auto roles",
     ]),
+    "personnel": ("MD Personnel", "📊", [
+        "/perso graph", "/perso list", "/perso render", "/perso delete", "/perso help",
+    ]),
     "system": ("System", "🖥️", [
         "/system now", "/system health", "/system memory", "/system storage",
         "/system pihole", "/system graph", "/system setup", "/system config",
@@ -34,7 +37,8 @@ HELP_CATEGORIES = {
     "management": ("Management", "🔧", [
         "/manage role-add", "/manage role-remove", "/manage nickname", "/manage announce",
         "/setup tickets", "/setup staff-add", "/setup staff-remove", "/setup welcome",
-        "/setup autorole", "/setup welcome-message", "/setup suggestions", "/setup logs", "/setup show",
+        "/setup autorole", "/setup welcome-message", "/setup welcome-preview",
+        "/setup welcome-placeholders", "/setup suggestions", "/setup logs", "/setup show",
     ]),
     "owner": ("Bot Owner", "🔐", [
         "/system dashboard", "/system network", "/system processes", "/dev dashboard",
