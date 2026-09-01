@@ -1,0 +1,195 @@
+name: Perso Mobile Export V2 Once
+
+on:
+  push:
+    paths:
+      - '.github/workflows/perso-mobile-export-v2-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build phone-readable paged Perso PNG export
+        shell: python
+        run: |
+          from pathlib import Path
+
+          service = Path('services/personnel_v2.py')
+          s = service.read_text(encoding='utf-8')
+          marker = '    @staticmethod\n    def png_bytes(title: str, rows) -> bytes:\n'
+          head = s.split(marker, 1)[0]
+          replacement = r'''    @staticmethod
+    def _png_page(title: str, rows, *, page: int, pages: int, total_rows) -> bytes:
+        """Render one compact phone-first page. Read-only: never mutates Perso data."""
+        rows = list(rows)
+        total_rows = list(total_rows)
+
+        width = 900
+        margin = 42
+        header_h = 330
+        card_h = 190
+        gap = 18
+        footer_h = 82
+        height = header_h + max(1, len(rows)) * (card_h + gap) + footer_h
+
+        bg = (17, 19, 24)
+        panel = (27, 30, 37)
+        panel_alt = (31, 34, 42)
+        track = (45, 49, 59)
+        text = (246, 247, 250)
+        muted = (176, 182, 194)
+        accent_e = (91, 110, 245)
+        accent_b = (71, 201, 145)
+        accent_total = (245, 184, 72)
+
+        image = Image.new('RGB', (width, height), bg)
+        draw = ImageDraw.Draw(image)
+
+        title_font = PersonnelService._font(56, bold=True)
+        subtitle_font = PersonnelService._font(28)
+        kpi_label_font = PersonnelService._font(23, bold=True)
+        kpi_value_font = PersonnelService._font(40, bold=True)
+        name_font = PersonnelService._font(35, bold=True)
+        meta_font = PersonnelService._font(23)
+        bar_font = PersonnelService._font(26, bold=True)
+        total_font = PersonnelService._font(28, bold=True)
+        footer_font = PersonnelService._font(20)
+
+        total_e = sum(int(r['inductions']) for r in total_rows)
+        total_b = sum(int(r['bwg']) for r in total_rows)
+        total_activity = total_e + total_b
+        top = total_rows[0] if total_rows else None
+
+        draw.text((margin, 28), title, font=title_font, fill=text)
+        draw.text((margin, 96), f'{len(total_rows)} Mitarbeitende • Seite {page}/{pages}', font=subtitle_font, fill=muted)
+
+        kpi_y = 145
+        kpi_gap = 14
+        kpi_w = (width - margin * 2 - kpi_gap) // 2
+        kpis = [
+            ('EINWEISUNGEN', str(total_e), accent_e),
+            ('BWG', str(total_b), accent_b),
+            ('AKTIVITÄT', str(total_activity), accent_total),
+            ('TOP ACTIVITY', str(top['display_name']) if top else '—', text),
+        ]
+        for i, (label, value, accent) in enumerate(kpis):
+            col = i % 2
+            row = i // 2
+            x = margin + col * (kpi_w + kpi_gap)
+            y = kpi_y + row * 88
+            draw.rounded_rectangle((x, y, x + kpi_w, y + 76), radius=16, fill=panel)
+            draw.rounded_rectangle((x, y, x + 7, y + 76), radius=3, fill=accent)
+            draw.text((x + 20, y + 9), label, font=kpi_label_font, fill=muted)
+            display = value
+            while draw.textbbox((0, 0), display, font=kpi_value_font)[2] > kpi_w - 42 and len(display) > 4:
+                display = display[:-2] + '…'
+            draw.text((x + 20, y + 34), display, font=kpi_value_font, fill=accent)
+
+        max_value = max([max(int(r['inductions']), int(r['bwg'])) for r in total_rows] or [1])
+        max_value = max(1, max_value)
+
+        if not rows:
+            y = header_h
+            draw.rounded_rectangle((margin, y, width - margin, y + card_h), radius=20, fill=panel)
+            draw.text((margin + 28, y + 70), 'Keine Daten für diesen Zeitraum.', font=name_font, fill=muted)
+
+        start_index = (page - 1) * 4
+        for local_index, r in enumerate(rows):
+            global_index = start_index + local_index
+            y = header_h + local_index * (card_h + gap)
+            fill = panel if local_index % 2 == 0 else panel_alt
+            draw.rounded_rectangle((margin, y, width - margin, y + card_h), radius=20, fill=fill)
+
+            name = str(r['display_name'])
+            if len(name) > 28:
+                name = name[:27] + '…'
+            rank = str(r['rank_name'] or '')
+            department = str(r['department'] or '')
+            meta = ' • '.join(part for part in (rank, department) if part)
+            if len(meta) > 48:
+                meta = meta[:47] + '…'
+
+            e = int(r['inductions'])
+            b = int(r['bwg'])
+            activity = int(r['activity'])
+
+            draw.text((margin + 22, y + 18), f'{global_index + 1:02d}  {name}', font=name_font, fill=text)
+            if meta:
+                draw.text((margin + 68, y + 62), meta, font=meta_font, fill=muted)
+
+            total_text = f'Gesamt {activity}'
+            box = draw.textbbox((0, 0), total_text, font=total_font)
+            draw.text((width - margin - 22 - (box[2] - box[0]), y + 60), total_text, font=total_font, fill=accent_total)
+
+            bar_left = margin + 22
+            bar_right = width - margin - 22
+            bar_width = bar_right - bar_left
+            e_w = int(bar_width * e / max_value)
+            b_w = int(bar_width * b / max_value)
+            e_y = y + 103
+            b_y = y + 148
+            bar_h = 34
+
+            draw.rounded_rectangle((bar_left, e_y, bar_right, e_y + bar_h), radius=14, fill=track)
+            draw.rounded_rectangle((bar_left, b_y, bar_right, b_y + bar_h), radius=14, fill=track)
+            PersonnelService._rounded_bar(draw, (bar_left, e_y, bar_left + e_w, e_y + bar_h), accent_e, 14)
+            PersonnelService._rounded_bar(draw, (bar_left, b_y, bar_left + b_w, b_y + bar_h), accent_b, 14)
+            draw.text((bar_left + 12, e_y + 1), f'Einweisungen  {e}', font=bar_font, fill=text)
+            draw.text((bar_left + 12, b_y + 1), f'BWG  {b}', font=bar_font, fill=text)
+
+        footer_y = height - footer_h + 24
+        draw.text((margin, footer_y), 'Raspberry-Bot • MD Personalabteilung', font=footer_font, fill=muted)
+        right = f'Mobil optimiert • {page}/{pages}'
+        box = draw.textbbox((0, 0), right, font=footer_font)
+        draw.text((width - margin - (box[2] - box[0]), footer_y), right, font=footer_font, fill=muted)
+
+        buf = BytesIO()
+        image.save(buf, 'PNG', optimize=True)
+        return buf.getvalue()
+
+    @staticmethod
+    def png_pages(title: str, rows, per_page: int = 4) -> list[bytes]:
+        """Return multiple short PNGs so Discord does not shrink text on phones."""
+        all_rows = list(rows)
+        if not all_rows:
+            return [PersonnelService._png_page(title, [], page=1, pages=1, total_rows=[])]
+        per_page = max(1, min(4, int(per_page)))
+        pages = (len(all_rows) + per_page - 1) // per_page
+        return [
+            PersonnelService._png_page(
+                title,
+                all_rows[i * per_page:(i + 1) * per_page],
+                page=i + 1,
+                pages=pages,
+                total_rows=all_rows,
+            )
+            for i in range(pages)
+        ]
+
+    @staticmethod
+    def png_bytes(title: str, rows) -> bytes:
+        """Compatibility wrapper: first mobile page only."""
+        return PersonnelService.png_pages(title, rows, per_page=4)[0]
+'''
+          service.write_text(head + replacement, encoding='utf-8')
+
+          cog = Path('cogs/management/personnel_stats.py')
+          c = cog.read_text(encoding='utf-8')
+          old = '''        else:\n            data=self.service.png_bytes("MD Personalabteilung • Statistik",rows); file=discord.File(BytesIO(data),filename="perso-statistik.png")\n        await interaction.followup.send(file=file,ephemeral=True)'''
+          new = '''        else:\n            pages=self.service.png_pages("MD Personalabteilung • Statistik",rows,per_page=4)\n            files=[discord.File(BytesIO(data),filename=f"perso-statistik-{i+1}.png") for i,data in enumerate(pages)]\n            await interaction.followup.send(files=files[:10],ephemeral=True)\n            return\n        await interaction.followup.send(file=file,ephemeral=True)'''
+          if old not in c:
+              raise SystemExit('export block not found')
+          cog.write_text(c.replace(old, new), encoding='utf-8')
+      - name: Validate Python
+        run: python -m py_compile services/personnel_v2.py cogs/management/personnel_stats.py
+      - name: Commit and push
+        run: |
+          git config user.name 'InvalidKaro'
+          git config user.email '76846752+InvalidKaro@users.noreply.github.com'
+          git add services/personnel_v2.py cogs/management/personnel_stats.py
+          git commit -m 'style: make perso export truly readable on phones'
+          git push
