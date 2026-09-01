@@ -7,6 +7,7 @@ import aiosqlite
 
 
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_JS_SAFE_INTEGER = 9_007_199_254_740_991
 
 
 class DatabaseBrowserService:
@@ -14,6 +15,10 @@ class DatabaseBrowserService:
 
     The service never accepts raw SQL. Table and column names are validated
     against SQLite metadata before they are interpolated into a query.
+
+    Large SQLite INTEGER values are serialized as strings. Discord snowflakes
+    are larger than JavaScript's safe integer range and would otherwise be
+    rounded by the browser before an edited row is written back.
     """
 
     def __init__(self, database_path: Path) -> None:
@@ -87,7 +92,10 @@ class DatabaseBrowserService:
             order = self._preferred_order(columns)
             sql = f"SELECT * FROM {qtable}{where}{order} LIMIT ? OFFSET ?"
             cur = await db.execute(sql, (*params, limit, offset))
-            rows = [dict(row) for row in await cur.fetchall()]
+            rows = [
+                {key: self._json_safe(value) for key, value in dict(row).items()}
+                for row in await cur.fetchall()
+            ]
             await cur.close()
         finally:
             await db.close()
@@ -128,6 +136,12 @@ class DatabaseBrowserService:
         await cur.close()
         if exists is None:
             raise ValueError("Unknown database table.")
+
+    @staticmethod
+    def _json_safe(value):
+        if isinstance(value, int) and abs(value) > _JS_SAFE_INTEGER:
+            return str(value)
+        return value
 
     @staticmethod
     def _quote(value: str) -> str:
