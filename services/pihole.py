@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -28,6 +29,8 @@ class PiHoleStats:
     web_version: str | None = None
     ftl_version: str | None = None
     raw_status: str = ""
+    permission_limited: bool = False
+    permission_detail: str | None = None
 
 
 _CACHE: PiHoleStats | None = None
@@ -116,13 +119,45 @@ def _parse_versions(text: str) -> tuple[str | None, str | None, str | None]:
     return core, web, ftl
 
 
+def _systemctl_active(service: str) -> bool:
+    binary = shutil.which("systemctl")
+    if not binary:
+        return False
+    code, text = _run([binary, "is-active", service], timeout=3)
+    return code == 0 and text.strip() == "active"
+
+
 def _collect_sync() -> PiHoleStats:
     binary = shutil.which("pihole")
     if not binary:
         return PiHoleStats(installed=False)
 
+    config_path = "/etc/pihole/pihole.toml"
+    if os.path.exists(config_path) and not os.access(config_path, os.R_OK):
+        # Pi-hole v6 CLI reads pihole.toml. Calling the CLI without read access
+        # can cause one journal line per statistics refresh, so degrade quietly
+        # to FTL service status until the bot user has the required access.
+        return PiHoleStats(
+            installed=True,
+            active=_systemctl_active("pihole-FTL"),
+            api_available=False,
+            permission_limited=True,
+            permission_detail=f"Bot user cannot read {config_path}",
+            raw_status="Pi-hole CLI skipped to avoid permission-error log spam.",
+        )
+
     status_code, status_text = _run([binary, "status"], timeout=5)
     status_lower = status_text.lower()
+    if "permission denied" in status_lower and "pihole.toml" in status_lower:
+        return PiHoleStats(
+            installed=True,
+            active=_systemctl_active("pihole-FTL"),
+            api_available=False,
+            permission_limited=True,
+            permission_detail="Pi-hole CLI cannot read pihole.toml",
+            raw_status=status_text[-1600:],
+        )
+
     enabled = "blocking is enabled" in status_lower or "blocking enabled" in status_lower
     disabled = "blocking is disabled" in status_lower or "blocking disabled" in status_lower
     active = status_code == 0 and (
@@ -131,6 +166,8 @@ def _collect_sync() -> PiHoleStats:
         or enabled
         or disabled
     )
+    if not active:
+        active = _systemctl_active("pihole-FTL")
 
     stats = PiHoleStats(
         installed=True,
@@ -144,6 +181,11 @@ def _collect_sync() -> PiHoleStats:
         stats.core_version, stats.web_version, stats.ftl_version = _parse_versions(version_text)
 
     summary_code, summary_text = _run([binary, "api", "stats/summary"], timeout=6)
+    if "permission denied" in summary_text.lower() and "pihole.toml" in summary_text.lower():
+        stats.permission_limited = True
+        stats.permission_detail = "Pi-hole statistics API is unavailable to the bot user"
+        return stats
+
     summary = _extract_json(summary_text) if summary_code == 0 else {}
     if summary:
         stats.api_available = True
