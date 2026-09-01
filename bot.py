@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import sys
+import time
 import uuid
 from datetime import UTC, datetime
 
@@ -18,6 +19,8 @@ from helpers.logging import setup_logging
 from services.cache import CacheManager
 from services.tickets import TicketService
 from services.system_metrics import SystemMetricsSampler
+from services.audit import AuditService
+from services.access_control import AccessControl
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +46,13 @@ EXTENSIONS: tuple[str, ...] = (
     "cogs.management.developer",
     "tasks.cache_cleanup",
     "tasks.system_monitor",
+    "tasks.dashboard_commands",
+    "tasks.database_maintenance",
+    "tasks.system_history",
+    "cogs.community.onboarding",
+    "cogs.management.access",
+    "cogs.management.analytics",
+    "cogs.management.audit",
 )
 
 
@@ -75,9 +85,26 @@ class RaspberryBot(commands.Bot):
         self.ticket_service = TicketService(self)
         self.system_metrics = SystemMetricsSampler(settings.system_metrics_sample_interval)
         self.started_at = datetime.now(UTC)
+        self.audit = AuditService(self.database)
+        self.access = AccessControl(self)
+        self._command_started: dict[int, float] = {}
 
     async def setup_hook(self) -> None:
         await self.database.connect()
+
+        async def _maintenance_check(interaction: discord.Interaction) -> bool:
+            self._command_started[interaction.id] = time.perf_counter()
+            row = await self.database.fetchone("SELECT enabled, reason FROM maintenance_state WHERE id=1")
+            if row and int(row["enabled"]):
+                if interaction.user.id in self.settings.owner_ids:
+                    return True
+                if isinstance(interaction.user, discord.Member) and interaction.user.guild_permissions.administrator:
+                    return True
+                embed = EmbedFactory.warning(title="Maintenance Mode", description=str(row["reason"] or "Raspberry-Bot is temporarily in maintenance mode."))
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+                return False
+            return True
+        self.tree.interaction_check = _maintenance_check
         await self.system_metrics.start()
 
         from views.suggestions import SuggestionView
@@ -133,6 +160,12 @@ class RaspberryBot(commands.Bot):
                 "INSERT INTO command_usage (guild_id, user_id, command_name) VALUES (?, ?, ?)",
                 (interaction.guild_id, interaction.user.id, command.qualified_name),
             )
+            started = self._command_started.pop(interaction.id, None)
+            duration_ms = (time.perf_counter() - started) * 1000 if started else None
+            await self.database.execute(
+                "INSERT INTO command_analytics(guild_id,user_id,command_name,success,duration_ms) VALUES(?,?,?,?,?)",
+                (interaction.guild_id, interaction.user.id, command.qualified_name, 1, duration_ms),
+            )
         except Exception:
             logger.exception("Failed to persist command usage for %s", command.qualified_name)
 
@@ -144,6 +177,16 @@ class RaspberryBot(commands.Bot):
 
 async def handle_tree_error(interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
     original = getattr(error, "original", error)
+    try:
+        command_name = interaction.command.qualified_name if interaction.command else "unknown"
+        started = getattr(interaction.client, "_command_started", {}).pop(interaction.id, None)
+        duration_ms = (time.perf_counter() - started) * 1000 if started else None
+        await interaction.client.database.execute(
+            "INSERT INTO command_analytics(guild_id,user_id,command_name,success,duration_ms,error_type) VALUES(?,?,?,?,?,?)",
+            (interaction.guild_id, interaction.user.id, command_name, 0, duration_ms, type(original).__name__),
+        )
+    except Exception:
+        pass
 
     if isinstance(error, app_commands.CommandOnCooldown):
         embed = EmbedFactory.warning(
