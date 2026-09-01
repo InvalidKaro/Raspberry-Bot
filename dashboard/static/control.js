@@ -17,9 +17,45 @@
     csrf = data.csrf;
   }
 
+  function fmtMb(value) {
+    return Number.isFinite(Number(value)) ? `${Number(value).toFixed(1)} MB` : "—";
+  }
+
+  function fmtPercent(value) {
+    return Number.isFinite(Number(value)) ? `${Number(value).toFixed(1)}%` : "—";
+  }
+
+  function renderSystem(system = {}) {
+    $("ram-percent").textContent = fmtPercent(system.memory_percent);
+    $("ram-detail").textContent = `${system.memory_used_mb ?? "—"} / ${system.memory_total_mb ?? "—"} MB`;
+    $("bot-ram").textContent = fmtMb(system.bot_memory_mb);
+    $("bot-cpu").textContent = `${fmtPercent(system.bot_cpu_percent)} CPU`;
+    $("dashboard-ram").textContent = fmtMb(system.dashboard_memory_mb);
+    $("dashboard-cpu").textContent = `${fmtPercent(system.dashboard_cpu_percent)} CPU`;
+    $("cpu-percent").textContent = fmtPercent(system.cpu_percent);
+    $("cpu-average").textContent = `${fmtPercent(system.cpu_average_30s)} / 30s`;
+    $("temperature").textContent = system.temperature_c == null ? "—" : `${Number(system.temperature_c).toFixed(1)} °C`;
+    const temp = Number(system.temperature_c);
+    $("temp-state").textContent = !Number.isFinite(temp) ? "No sensor data" : temp >= 75 ? "High" : temp >= 65 ? "Warm" : "Normal";
+    $("swap-percent").textContent = fmtPercent(system.swap_percent);
+    $("swap-detail").textContent = `${system.swap_used_mb ?? "—"} / ${system.swap_total_mb ?? "—"} MB`;
+    $("disk-percent").textContent = fmtPercent(system.disk_percent);
+    $("disk-detail").textContent = `${system.disk_used_gb ?? "—"} / ${system.disk_total_gb ?? "—"} GB`;
+    $("bot-state").textContent = system.bot_active ? "ONLINE" : "OFFLINE";
+    $("sample-age").textContent = `sample ${system.sample_age_seconds ?? "—"}s old`;
+
+    const ram = Number(system.memory_percent);
+    const swap = Number(system.swap_percent);
+    const state = $("low-ram-state");
+    if (Number.isFinite(ram) && ram >= 90) state.textContent = "RAM CRITICAL";
+    else if (Number.isFinite(ram) && ram >= 80) state.textContent = "RAM HIGH";
+    else if (Number.isFinite(swap) && swap >= 40) state.textContent = "SWAP ACTIVE";
+    else state.textContent = "LOW-RAM TUNED";
+  }
+
   async function load() {
-    const [{response:r1,data:c},{response:r2,data:g}] = await Promise.all([
-      request("/api/control-center"), request("/api/cogs")
+    const [{response:r1,data:c},{response:r2,data:g},{response:r3,data:s}] = await Promise.all([
+      request("/api/control-center"), request("/api/cogs"), request("/api/status")
     ]);
     if (!r1.ok || !c.ok) throw new Error(c.message || "Control center failed");
     const o = c.overview || {};
@@ -30,6 +66,8 @@
     $("mod-cases").textContent = o.mod_cases ?? "—";
     $("errors").textContent = o.errors_24h ?? "—";
     $("backups").textContent = c.backups ?? "—";
+
+    if (r3.ok && s.ok && s.system) renderSystem(s.system);
 
     const exts = (g && g.extensions) || [];
     $("extension-count").textContent = `${exts.length} configured`;
