@@ -10,50 +10,44 @@ class PersonnelService:
         self.bot = bot
 
     async def add(self, guild_id: int, name: str, actor_id: int, *, user_id: int | None = None, rank: str | None = None, department: str | None = None):
+        existing = await self.get_by_name(guild_id, name)
+        if existing:
+            await self.bot.database.execute(
+                """UPDATE personnel_members
+                   SET user_id=COALESCE(?,user_id),
+                       rank_name=COALESCE(?,rank_name),
+                       department=COALESCE(?,department),
+                       active=1,
+                       updated_at=CURRENT_TIMESTAMP
+                   WHERE id=?""",
+                (user_id, rank, department, int(existing["id"])),
+            )
+            return await self.bot.database.fetchone("SELECT * FROM personnel_members WHERE id=?", (int(existing["id"]),))
+
         await self.bot.database.execute(
             """INSERT INTO personnel_members(guild_id,user_id,display_name,rank_name,department,created_by)
-               VALUES(?,?,?,?,?,?)
-               ON CONFLICT(guild_id,display_name) DO UPDATE SET
-               user_id=COALESCE(excluded.user_id,user_id), rank_name=COALESCE(excluded.rank_name,rank_name),
-               department=COALESCE(excluded.department,department), active=1, updated_at=CURRENT_TIMESTAMP""",
+               VALUES(?,?,?,?,?,?)""",
             (guild_id, user_id, name.strip(), rank, department, actor_id),
         )
         return await self.get_by_name(guild_id, name)
 
     async def get_by_name(self, guild_id: int, name: str):
-        # Prefer the exact guild id, but tolerate a member row whose guild_id was
-        # previously damaged by the dashboard Snowflake precision bug if one of its
-        # linked records still carries the correct guild id.
+        # Perso is intentionally global. guild_id is retained only for backwards
+        # compatibility with the existing schema and is not used to scope lookups.
         return await self.bot.database.fetchone(
-            """SELECT m.*
-               FROM personnel_members m
-               WHERE lower(m.display_name)=lower(?)
-                 AND (
-                   m.guild_id=?
-                   OR EXISTS (
-                     SELECT 1 FROM personnel_records r
-                     WHERE r.personnel_id=m.id AND r.guild_id=?
-                   )
-                 )
-               ORDER BY CASE WHEN m.guild_id=? THEN 0 ELSE 1 END, m.id
+            """SELECT * FROM personnel_members
+               WHERE lower(display_name)=lower(?)
+               ORDER BY active DESC, id ASC
                LIMIT 1""",
-            (name.strip(), guild_id, guild_id, guild_id),
+            (name.strip(),),
         )
 
     async def list_members(self, guild_id: int, active_only: bool = True):
-        query = """SELECT DISTINCT m.*
-                   FROM personnel_members m
-                   WHERE (
-                     m.guild_id=?
-                     OR EXISTS (
-                       SELECT 1 FROM personnel_records r
-                       WHERE r.personnel_id=m.id AND r.guild_id=?
-                     )
-                   )"""
-        params = [guild_id, guild_id]
+        query = "SELECT * FROM personnel_members"
+        params: list[object] = []
         if active_only:
-            query += " AND m.active=1"
-        query += " ORDER BY m.display_name COLLATE NOCASE"
+            query += " WHERE active=1"
+        query += " ORDER BY display_name COLLATE NOCASE, id ASC"
         return await self.bot.database.fetchall(query, params)
 
     async def record(self, guild_id: int, personnel_id: int, actor_id: int, *, inductions: int = 0, bwg: int = 0, record_date: str | None = None, period_key: str | None = None, note: str | None = None):
@@ -66,19 +60,11 @@ class PersonnelService:
         )
 
     async def totals(self, guild_id: int, *, period_like: str | None = None):
-        # personnel_id is the authoritative relation between records and members.
-        # Once a member is resolved to the current guild, all records belonging to
-        # that member are safe to aggregate even if an old dashboard edit damaged
-        # the redundant guild_id stored on an individual record.
-        member_scope = """(
-            m.guild_id=?
-            OR EXISTS (
-                SELECT 1 FROM personnel_records rx
-                WHERE rx.personnel_id=m.id AND rx.guild_id=?
-            )
-        )"""
-        params: list[object] = [guild_id, guild_id]
+        # Global personnel totals: records are linked by personnel_id. guild_id is
+        # deliberately ignored so entries remain visible regardless of where they
+        # were created or whether an old dashboard edit damaged a guild snowflake.
         record_filter = ""
+        params: list[object] = []
         if period_like:
             record_filter = " AND r.period_key LIKE ?"
             params.append(period_like)
@@ -90,24 +76,16 @@ class PersonnelService:
                FROM personnel_members m
                LEFT JOIN personnel_records r
                  ON r.personnel_id=m.id{record_filter}
-               WHERE m.active=1 AND {member_scope}
+               WHERE m.active=1
                GROUP BY m.id
                ORDER BY activity DESC, m.display_name COLLATE NOCASE""",
             params,
         )
 
     async def history(self, guild_id: int, personnel_id: int, limit: int = 100):
-        # personnel_id uniquely identifies the member, so do not hide history merely
-        # because an old dashboard edit damaged the redundant guild_id on a record.
         member = await self.bot.database.fetchone(
-            """SELECT id FROM personnel_members m
-               WHERE m.id=? AND (
-                 m.guild_id=? OR EXISTS (
-                   SELECT 1 FROM personnel_records r
-                   WHERE r.personnel_id=m.id AND r.guild_id=?
-                 )
-               )""",
-            (personnel_id, guild_id, guild_id),
+            "SELECT id FROM personnel_members WHERE id=?",
+            (personnel_id,),
         )
         if not member:
             return []
