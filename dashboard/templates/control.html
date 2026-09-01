@@ -30,6 +30,20 @@
       <article class="metric"><span>Backups</span><strong id="backups">—</strong></article>
     </section>
 
+    <section class="panel">
+      <div class="panel-head">
+        <div><p class="card-label">QUICK COMMANDS</p><h2>Update & restart</h2></div>
+      </div>
+      <p class="muted">Same commands you would normally run over SSH, directly from the authenticated dashboard.</p>
+      <div class="button-row">
+        <button id="git-pull" type="button">Git Pull</button>
+        <button id="restart-bot" type="button">Restart Bot</button>
+        <button id="restart-dashboard" type="button">Restart Dashboard</button>
+        <button id="update-all" class="primary" type="button">Pull + Restart Both</button>
+      </div>
+      <pre id="quick-result">Ready.</pre>
+    </section>
+
     <section class="detail-grid">
       <article class="panel">
         <div class="panel-head">
