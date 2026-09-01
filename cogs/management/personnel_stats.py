@@ -58,6 +58,29 @@ class Personnel(commands.GroupCog, group_name="perso", group_description="MD Per
         e.add_field(name="Low Activity",value=f"**{rows[-1]['display_name']}** · {rows[-1]['activity']}",inline=True)
         await interaction.response.send_message(embed=e)
 
+    @app_commands.command(name="leaderboard", description="Ranking nach Einweisungen, BWG oder Gesamtaktivität.")
+    @app_commands.guild_only()
+    @app_commands.choices(metric=[
+        app_commands.Choice(name="Gesamt", value="activity"),
+        app_commands.Choice(name="Einweisungen", value="inductions"),
+        app_commands.Choice(name="BWG", value="bwg"),
+    ])
+    async def leaderboard(self, interaction:discord.Interaction, metric:app_commands.Choice[str], zeitraum:str|None=None):
+        rows=await self.service.totals(interaction.guild_id,period_like=zeitraum)
+        if not rows:
+            await interaction.response.send_message(embed=EmbedFactory.info(title="Keine Perso-Daten",description="Für diesen Zeitraum sind keine Daten vorhanden."),ephemeral=True); return
+        key=metric.value
+        ordered=sorted(rows,key=lambda r:int(r[key]),reverse=True)
+        labels={"activity":"Gesamt","inductions":"Einweisungen","bwg":"BWG"}
+        medals=("🥇","🥈","🥉")
+        lines=[]
+        for i,r in enumerate(ordered[:15],1):
+            prefix=medals[i-1] if i<=3 else f"`{i:02d}.`"
+            lines.append(f"{prefix} **{r['display_name']}** — **{int(r[key])}**")
+        title=f"Perso • Leaderboard • {labels[key]}"
+        if zeitraum: title+=f" • {zeitraum}"
+        await interaction.response.send_message(embed=EmbedFactory.info(title=title,description="\n".join(lines)))
+
     @app_commands.command(name="person", description="Historie und Summen einer einzelnen Person.")
     @app_commands.guild_only()
     @app_commands.autocomplete(person=_name_auto)
@@ -87,6 +110,26 @@ class Personnel(commands.GroupCog, group_name="perso", group_description="MD Per
             lines.append(f"**{n}** · {zeitraum_a}: {av} → {zeitraum_b}: {bv} (`{sign}{delta}`)")
         await interaction.response.send_message(embed=EmbedFactory.info(title="Perso • Vergleich",description="\n".join(lines) or "Keine Daten."))
 
+    @app_commands.command(name="report", description="Kompletten Perso-Bericht mit Übersicht und Diagramm erstellen.")
+    @app_commands.guild_only()
+    async def report(self, interaction:discord.Interaction, zeitraum:str|None=None):
+        await interaction.response.defer(ephemeral=True)
+        rows=await self.service.totals(interaction.guild_id,period_like=zeitraum)
+        if not rows:
+            await interaction.followup.send(embed=EmbedFactory.info(title="Keine Perso-Daten",description="Für diesen Zeitraum sind keine Daten vorhanden."),ephemeral=True); return
+        overview=render_personnel_png("MD Personalabteilung • Statistik",rows)
+        chart=render_personnel_chart("MD Personalabteilung • Aktivitätsdiagramm",rows)
+        files=[
+            discord.File(BytesIO(overview),filename="perso-statistik.png"),
+            discord.File(BytesIO(chart),filename="perso-diagramm.png"),
+        ]
+        total_e=sum(int(r["inductions"]) for r in rows)
+        total_b=sum(int(r["bwg"]) for r in rows)
+        top=max(rows,key=lambda r:int(r["activity"]))
+        desc=f"**{len(rows)} Personen**\nEinweisungen: **{total_e}** · BWG: **{total_b}** · Gesamt: **{total_e+total_b}**\nTop: **{top['display_name']}** · {top['activity']}"
+        if zeitraum: desc=f"Zeitraum: **{zeitraum}**\n"+desc
+        await interaction.followup.send(embed=EmbedFactory.info(title="Perso • Bericht",description=desc),files=files,ephemeral=True)
+
     @app_commands.command(name="export", description="Perso-Daten als Übersicht, Diagramm oder CSV exportieren.")
     @app_commands.guild_only()
     @app_commands.choices(format=[
@@ -110,7 +153,7 @@ class Personnel(commands.GroupCog, group_name="perso", group_description="MD Per
 
     @app_commands.command(name="stats", description="Kurzer Einstieg in das neue gespeicherte Perso-System.")
     async def stats(self, interaction:discord.Interaction):
-        e=EmbedFactory.info(title="Perso 2.0",description="**1.** `/perso add` Person einmalig speichern\n**2.** `/perso record` Einweisungen/BWG eintragen\n**3.** `/perso overview` Gesamtübersicht\n**4.** `/perso person` Historie einer Person\n**5.** `/perso export` Übersicht/Diagramm/CSV")
+        e=EmbedFactory.info(title="Perso 2.0",description="**1.** `/perso add` Person einmalig speichern\n**2.** `/perso record` Einweisungen/BWG eintragen\n**3.** `/perso overview` Gesamtübersicht\n**4.** `/perso leaderboard` Ranking\n**5.** `/perso person` Historie einer Person\n**6.** `/perso report` kompletter Bericht\n**7.** `/perso export` Übersicht/Diagramm/CSV")
         await interaction.response.send_message(embed=e,ephemeral=True)
 
 async def setup(bot):
