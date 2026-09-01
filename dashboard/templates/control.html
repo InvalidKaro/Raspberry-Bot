@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Raspberry-Bot Control Center</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">RASPBERRY-BOT 4.0</p>
+        <h1>Control Center</h1>
+        <p class="muted">Live bot management, command sync and operational totals.</p>
+      </div>
+      <div class="button-row">
+        <a class="button" href="/">Dashboard</a>
+        <button id="refresh" type="button">Refresh</button>
+        <button id="sync" class="primary" type="button">Sync commands</button>
+      </div>
+    </header>
+
+    <section class="metric-grid compact">
+      <article class="metric"><span>Tickets</span><strong id="tickets">—</strong><small id="open-tickets">— open</small></article>
+      <article class="metric"><span>Personnel</span><strong id="personnel">—</strong><small id="perso-detail">—</small></article>
+      <article class="metric"><span>Moderation cases</span><strong id="mod-cases">—</strong></article>
+      <article class="metric"><span>Errors / 24h</span><strong id="errors">—</strong></article>
+      <article class="metric"><span>Backups</span><strong id="backups">—</strong></article>
+    </section>
+
+    <section class="detail-grid">
+      <article class="panel">
+        <div class="panel-head">
+          <div><p class="card-label">EXTENSIONS</p><h2>Live cog manager</h2></div>
+          <span class="branch" id="extension-count">—</span>
+        </div>
+        <p class="muted">Reload, load or unload extensions without a full bot restart.</p>
+        <div id="extension-list" class="stack-list"></div>
+      </article>
+      <article class="panel">
+        <div class="panel-head"><div><p class="card-label">COMMAND QUEUE</p><h2>Last action</h2></div></div>
+        <pre id="command-result">No action queued yet.</pre>
+      </article>
+    </section>
+  </main>
+  <script src="/static/control.js"></script>
+</body>
+</html>
