@@ -6,7 +6,7 @@ from discord import app_commands
 from discord.ext import commands
 from helpers.embeds import EmbedFactory
 from services.personnel_v2 import PersonnelService
-from services.personnel_export import render_personnel_png
+from services.personnel_export import render_personnel_png, render_personnel_chart
 
 class Personnel(commands.GroupCog, group_name="perso", group_description="MD Personalabteilung • Mitarbeiter & Statistiken"):
     def __init__(self, bot):
@@ -87,14 +87,22 @@ class Personnel(commands.GroupCog, group_name="perso", group_description="MD Per
             lines.append(f"**{n}** · {zeitraum_a}: {av} → {zeitraum_b}: {bv} (`{sign}{delta}`)")
         await interaction.response.send_message(embed=EmbedFactory.info(title="Perso • Vergleich",description="\n".join(lines) or "Keine Daten."))
 
-    @app_commands.command(name="export", description="Perso-Übersicht als PNG oder CSV exportieren.")
+    @app_commands.command(name="export", description="Perso-Daten als Übersicht, Diagramm oder CSV exportieren.")
     @app_commands.guild_only()
-    @app_commands.choices(format=[app_commands.Choice(name="PNG",value="png"),app_commands.Choice(name="CSV",value="csv")])
+    @app_commands.choices(format=[
+        app_commands.Choice(name="Übersicht PNG",value="png"),
+        app_commands.Choice(name="Diagramm PNG",value="chart"),
+        app_commands.Choice(name="CSV",value="csv"),
+    ])
     async def export(self, interaction:discord.Interaction, format:app_commands.Choice[str], zeitraum:str|None=None):
         await interaction.response.defer(ephemeral=True)
         rows=await self.service.totals(interaction.guild_id,period_like=zeitraum)
         if format.value=="csv":
-            data=self.service.csv_bytes(rows); file=discord.File(BytesIO(data),filename="perso-statistik.csv")
+            data=self.service.csv_bytes(rows)
+            file=discord.File(BytesIO(data),filename="perso-statistik.csv")
+        elif format.value=="chart":
+            data=render_personnel_chart("MD Personalabteilung • Aktivitätsdiagramm",rows)
+            file=discord.File(BytesIO(data),filename="perso-diagramm.png")
         else:
             data=render_personnel_png("MD Personalabteilung • Statistik",rows)
             file=discord.File(BytesIO(data),filename="perso-statistik.png")
@@ -102,7 +110,7 @@ class Personnel(commands.GroupCog, group_name="perso", group_description="MD Per
 
     @app_commands.command(name="stats", description="Kurzer Einstieg in das neue gespeicherte Perso-System.")
     async def stats(self, interaction:discord.Interaction):
-        e=EmbedFactory.info(title="Perso 2.0",description="**1.** `/perso add` Person einmalig speichern\n**2.** `/perso record` Einweisungen/BWG eintragen\n**3.** `/perso overview` Gesamtübersicht\n**4.** `/perso person` Historie einer Person\n**5.** `/perso export` PNG/CSV")
+        e=EmbedFactory.info(title="Perso 2.0",description="**1.** `/perso add` Person einmalig speichern\n**2.** `/perso record` Einweisungen/BWG eintragen\n**3.** `/perso overview` Gesamtübersicht\n**4.** `/perso person` Historie einer Person\n**5.** `/perso export` Übersicht/Diagramm/CSV")
         await interaction.response.send_message(embed=e,ephemeral=True)
 
 async def setup(bot):
