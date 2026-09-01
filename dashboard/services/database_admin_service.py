@@ -16,8 +16,9 @@ class DatabaseAdminService:
     """Safe, metadata-driven SQLite CRUD for the authenticated dashboard.
 
     Raw SQL is never accepted. Every table/column is validated, values are
-    parameterized, update/delete require a real primary key, writes are guarded
-    by an optimistic row snapshot, and every mutation creates a DB backup first.
+    parameterized, update/delete require a real primary key, writes create a
+    database backup first, and conflict checks only use a real row-version field
+    when one exists so harmless browser/SQLite type differences cannot block edits.
     """
 
     def __init__(self, database_path: Path) -> None:
@@ -265,11 +266,17 @@ class DatabaseAdminService:
 
     @staticmethod
     def _check_expected(current: dict, expected: dict | None, allowed: dict[str, dict]) -> None:
-        if expected is None:
+        if expected is None or not isinstance(expected, dict):
             return
-        if not isinstance(expected, dict):
-            raise ValueError("Invalid row snapshot.")
-        for name, value in expected.items():
-            column = allowed.get(name)
-            if column is not None and name in current and not DatabaseAdminService._values_equal(current[name], value, column):
+        # Only use a genuine row-version style column for optimistic locking.
+        # Comparing the whole JSON snapshot caused false conflicts because SQLite
+        # and JavaScript serialize numeric/boolean values differently.
+        for version_name in ("updated_at", "modified_at", "version"):
+            if version_name not in current or version_name not in expected:
+                continue
+            column = allowed.get(version_name)
+            if column is None:
+                continue
+            if not DatabaseAdminService._values_equal(current[version_name], expected[version_name], column):
                 raise ValueError("This entry changed since you opened it. Reload before editing again.")
+            return
