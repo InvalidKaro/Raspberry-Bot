@@ -32,9 +32,16 @@ async def database_admin_page(_: web.Request) -> web.Response:
     )
 
 
+def _dashboard_db_path(config: DashboardConfig) -> Path:
+    configured = Path(config.database_path)
+    if configured.is_absolute():
+        return configured
+    return Path(config.repo_path) / configured
+
+
 async def api_control_center(request: web.Request) -> web.Response:
     config: DashboardConfig = request.app["config"]
-    db_path = Path(config.repo_path) / "data" / "bot.sqlite3"
+    db_path = _dashboard_db_path(config)
 
     def read_overview() -> dict:
         con = sqlite3.connect(db_path)
@@ -59,11 +66,142 @@ async def api_control_center(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "overview": overview, "backups": len(backups)})
 
 
+async def api_control_history(request: web.Request) -> web.Response:
+    config: DashboardConfig = request.app["config"]
+    db_path = _dashboard_db_path(config)
+    try:
+        limit = max(12, min(160, int(request.query.get("limit", "80"))))
+    except ValueError:
+        limit = 80
+
+    def read_history() -> list[dict]:
+        con = sqlite3.connect(db_path)
+        con.row_factory = sqlite3.Row
+        try:
+            rows = con.execute(
+                """SELECT recorded_at,
+                          ROUND(AVG(cpu_percent), 1) AS cpu_percent,
+                          ROUND(AVG(ram_percent), 1) AS ram_percent,
+                          ROUND(AVG(temperature), 1) AS temperature
+                   FROM system_snapshots_v4
+                   GROUP BY recorded_at
+                   ORDER BY recorded_at DESC
+                   LIMIT ?""",
+                (limit,),
+            ).fetchall()
+            return [dict(row) for row in reversed(rows)]
+        finally:
+            con.close()
+
+    try:
+        history = await asyncio.to_thread(read_history)
+    except sqlite3.Error as exc:
+        return web.json_response({"ok": False, "message": str(exc), "history": []}, status=400)
+    return web.json_response({"ok": True, "history": history, "interval_seconds": 90})
+
+
+async def api_control_personnel(request: web.Request) -> web.Response:
+    config: DashboardConfig = request.app["config"]
+    db_path = _dashboard_db_path(config)
+
+    def read_personnel() -> dict:
+        con = sqlite3.connect(db_path)
+        con.row_factory = sqlite3.Row
+        try:
+            rows = con.execute(
+                """SELECT pm.id, pm.display_name,
+                          COALESCE(SUM(pr.inductions), 0) AS inductions,
+                          COALESCE(SUM(pr.bwg), 0) AS bwg,
+                          COALESCE(SUM(pr.inductions), 0) + COALESCE(SUM(pr.bwg), 0) AS activity
+                   FROM personnel_members pm
+                   LEFT JOIN personnel_records pr ON pr.personnel_id = pm.id
+                   WHERE pm.active = 1
+                   GROUP BY pm.id, pm.display_name
+                   ORDER BY activity DESC, pm.display_name COLLATE NOCASE
+                   LIMIT 30"""
+            ).fetchall()
+            result = [dict(row) for row in rows]
+            return {
+                "rows": result,
+                "total_e": sum(int(row["inductions"]) for row in result),
+                "total_b": sum(int(row["bwg"]) for row in result),
+            }
+        finally:
+            con.close()
+
+    try:
+        data = await asyncio.to_thread(read_personnel)
+    except sqlite3.Error as exc:
+        return web.json_response({"ok": False, "message": str(exc)}, status=400)
+    return web.json_response({"ok": True, **data})
+
+
+async def api_control_personnel_report(request: web.Request) -> web.Response:
+    config: DashboardConfig = request.app["config"]
+    db_path = _dashboard_db_path(config)
+    report_format = request.query.get("format", "overview")
+    if report_format not in {"overview", "chart"}:
+        return web.json_response({"ok": False, "message": "Unsupported report format."}, status=400)
+
+    def read_rows() -> list[dict]:
+        con = sqlite3.connect(db_path)
+        con.row_factory = sqlite3.Row
+        try:
+            rows = con.execute(
+                """SELECT pm.display_name,
+                          COALESCE(SUM(pr.inductions), 0) AS inductions,
+                          COALESCE(SUM(pr.bwg), 0) AS bwg,
+                          COALESCE(SUM(pr.inductions), 0) + COALESCE(SUM(pr.bwg), 0) AS activity
+                   FROM personnel_members pm
+                   LEFT JOIN personnel_records pr ON pr.personnel_id = pm.id
+                   WHERE pm.active = 1
+                   GROUP BY pm.id, pm.display_name
+                   ORDER BY activity DESC, pm.display_name COLLATE NOCASE"""
+            ).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            con.close()
+
+    try:
+        rows = await asyncio.to_thread(read_rows)
+        from services.personnel_export import render_personnel_chart, render_personnel_png
+        if report_format == "chart":
+            data = await asyncio.to_thread(render_personnel_chart, "MD Personalabteilung • Aktivitätsdiagramm", rows)
+            filename = "perso-diagramm.png"
+        else:
+            data = await asyncio.to_thread(render_personnel_png, "MD Personalabteilung • Statistik", rows)
+            filename = "perso-statistik.png"
+    except (sqlite3.Error, OSError, RuntimeError) as exc:
+        return web.json_response({"ok": False, "message": str(exc)}, status=500)
+
+    return web.Response(
+        body=data,
+        content_type="image/png",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
 async def api_cogs(request: web.Request) -> web.Response:
     config: DashboardConfig = request.app["config"]
     text = (Path(config.repo_path) / "bot.py").read_text(encoding="utf-8")
     extensions = re.findall(r'"((?:cogs|tasks)\.[^"]+)"', text)
     return web.json_response({"ok": True, "extensions": extensions})
+
+
+def _enqueue_dashboard_command(db_path: Path, action: str, payload: dict) -> int:
+    con = sqlite3.connect(db_path)
+    try:
+        cur = con.execute(
+            "INSERT INTO dashboard_commands(action,payload_json) VALUES(?,?)",
+            (action, json.dumps(payload)),
+        )
+        con.commit()
+        return int(cur.lastrowid)
+    finally:
+        con.close()
 
 
 async def api_cog_action(request: web.Request) -> web.Response:
@@ -73,27 +211,35 @@ async def api_cog_action(request: web.Request) -> web.Response:
     data = await request.json()
     payload = {} if action == "sync" else {"extension": str(data.get("extension", ""))}
     config: DashboardConfig = request.app["config"]
-    db_path = Path(config.repo_path) / "data" / "bot.sqlite3"
+    command_id = await asyncio.to_thread(
+        _enqueue_dashboard_command,
+        _dashboard_db_path(config),
+        action,
+        payload,
+    )
+    return web.json_response({"ok": True, "command_id": command_id, "message": "Queued for bot process"})
 
-    def enqueue() -> int:
-        con = sqlite3.connect(db_path)
-        try:
-            cur = con.execute(
-                "INSERT INTO dashboard_commands(action,payload_json) VALUES(?,?)",
-                (action, json.dumps(payload)),
-            )
-            con.commit()
-            return int(cur.lastrowid)
-        finally:
-            con.close()
 
-    command_id = await asyncio.to_thread(enqueue)
+async def api_maintenance_action(request: web.Request) -> web.Response:
+    action = request.match_info["action"]
+    if action not in {"cache-clear", "gc", "database-optimize"}:
+        return web.json_response({"ok": False, "message": "Unsupported maintenance action"}, status=400)
+    config: DashboardConfig = request.app["config"]
+    command_id = await asyncio.to_thread(
+        _enqueue_dashboard_command,
+        _dashboard_db_path(config),
+        action,
+        {},
+    )
+    audit = request.app.get("audit")
+    if audit is not None:
+        audit.record(f"control.maintenance.{action}", ok=True, detail=f"queued #{command_id}")
     return web.json_response({"ok": True, "command_id": command_id, "message": "Queued for bot process"})
 
 
 async def api_dashboard_command(request: web.Request) -> web.Response:
     config: DashboardConfig = request.app["config"]
-    db_path = Path(config.repo_path) / "data" / "bot.sqlite3"
+    db_path = _dashboard_db_path(config)
     command_id = int(request.match_info["id"])
 
     def read() -> dict | None:
@@ -241,6 +387,10 @@ def create_app(config: DashboardConfig | None = None) -> web.Application:
     app.router.add_get("/control", control_page)
     app.router.add_get("/database-admin", database_admin_page)
     app.router.add_get("/api/control-center", api_control_center)
+    app.router.add_get("/api/control/history", api_control_history)
+    app.router.add_get("/api/control/personnel", api_control_personnel)
+    app.router.add_get("/api/control/personnel/report", api_control_personnel_report)
+    app.router.add_post("/api/control/maintenance/{action}", api_maintenance_action)
     app.router.add_get("/api/cogs", api_cogs)
     app.router.add_post("/api/cogs/{action}", api_cog_action)
     app.router.add_get("/api/dashboard-command/{id}", api_dashboard_command)
