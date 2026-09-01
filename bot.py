@@ -22,6 +22,7 @@ from services.system_metrics import SystemMetricsSampler
 logger = logging.getLogger(__name__)
 
 EXTENSIONS: tuple[str, ...] = (
+    "cogs.management.discord_log_channel",
     "cogs.core.info",
     "cogs.core.help",
     "cogs.core.utility",
