@@ -82,12 +82,64 @@
     }
   }
 
+  function setQuickBusy(busy) {
+    for (const id of ["git-pull", "restart-bot", "restart-dashboard", "update-all"]) {
+      const el = $(id);
+      if (el) el.disabled = busy;
+    }
+  }
+
+  async function quick(action, confirmText = "") {
+    if (confirmText && !confirm(confirmText)) return;
+    setQuickBusy(true);
+    $("quick-result").textContent = `Running ${action}…`;
+    try {
+      const {response, data} = await request(`/api/control/system/${action}`, {
+        method:"POST",
+        body:JSON.stringify({})
+      });
+      if (!response.ok || !data.ok) {
+        $("quick-result").textContent = data.message || `${action} failed`;
+        return;
+      }
+      $("quick-result").textContent = data.message || `${action} completed.`;
+      if (data.dashboard_restarting) {
+        $("quick-result").textContent += "\nDashboard is restarting. Reconnecting…";
+        await reconnectDashboard();
+      } else {
+        await load();
+      }
+    } catch (error) {
+      $("quick-result").textContent = String(error);
+    } finally {
+      setQuickBusy(false);
+    }
+  }
+
+  async function reconnectDashboard() {
+    for (let n = 0; n < 30; n++) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      try {
+        const response = await fetch("/health", {cache:"no-store"});
+        if (response.ok) {
+          location.reload();
+          return;
+        }
+      } catch (_) {}
+    }
+    $("quick-result").textContent += "\nDashboard did not come back within 30 seconds.";
+  }
+
   async function init() {
     try {
       await bootstrap();
       await load();
       $("refresh").addEventListener("click", load);
       $("sync").addEventListener("click", () => queue("sync"));
+      $("git-pull").addEventListener("click", () => quick("pull"));
+      $("restart-bot").addEventListener("click", () => quick("restart-bot", "Restart Raspberry-Bot now?"));
+      $("restart-dashboard").addEventListener("click", () => quick("restart-dashboard", "Restart the dashboard now?"));
+      $("update-all").addEventListener("click", () => quick("update-all", "Run git pull and restart both Bot + Dashboard?"));
     } catch (error) {
       $("command-result").textContent = String(error);
     }
