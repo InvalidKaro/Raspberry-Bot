@@ -37,6 +37,7 @@ EXTENSIONS: tuple[str, ...] = (
     "cogs.community.audit_logging",
     "cogs.management.configuration",
     "cogs.management.server_tools",
+    "cogs.management.personnel_stats",
     "cogs.management.system_monitor",
     "cogs.management.developer",
     "tasks.cache_cleanup",
