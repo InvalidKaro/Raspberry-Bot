@@ -1,0 +1,58 @@
+name: Perso absurd font test one-shot
+on:
+  push:
+    paths:
+      - '.github/workflows/perso-absurd-font-test-once.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Force absurdly large Perso typography
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('services/personnel_export.py')
+          s = p.read_text(encoding='utf-8')
+          replacements = {
+              'header_h = 490': 'header_h = 560',
+              'card_h = 460': 'card_h = 540',
+              'TITLE_MAX, TITLE_MIN = 142, 92': 'TITLE_MAX, TITLE_MIN = 220, 150',
+              'SUBTITLE_MAX, SUBTITLE_MIN = 64, 48': 'SUBTITLE_MAX, SUBTITLE_MIN = 110, 72',
+              'KPI_LABEL_MAX, KPI_LABEL_MIN = 48, 34': 'KPI_LABEL_MAX, KPI_LABEL_MIN = 82, 54',
+              'KPI_VALUE_MAX, KPI_VALUE_MIN = 94, 58': 'KPI_VALUE_MAX, KPI_VALUE_MIN = 150, 96',
+              'NAME_MAX, NAME_MIN = 118, 72': 'NAME_MAX, NAME_MIN = 200, 120',
+              'META_MAX, META_MIN = 64, 44': 'META_MAX, META_MIN = 105, 70',
+              'TOTAL_MAX, TOTAL_MIN = 80, 58': 'TOTAL_MAX, TOTAL_MIN = 140, 92',
+              'BAR_MAX, BAR_MIN = 74, 56': 'BAR_MAX, BAR_MIN = 130, 88',
+              'FOOTER_MAX, FOOTER_MIN = 38, 30': 'FOOTER_MAX, FOOTER_MIN = 64, 42',
+              'draw.text((margin, 170), subtitle_text': 'draw.text((margin, 205), subtitle_text',
+              'kpi_y = 270': 'kpi_y = 320',
+              'kpi_y + 180': 'kpi_y + 205',
+              'kpi_y + 72': 'kpi_y + 88',
+              'y + 132), meta': 'y + 155), meta',
+              'y + 190), total_display': 'y + 225), total_display',
+              'e_y = y + 280': 'e_y = y + 335',
+              'b_y = y + 370': 'b_y = y + 440',
+              'bar_h = 72': 'bar_h = 84',
+          }
+          for old, new in replacements.items():
+              if old not in s:
+                  raise SystemExit(f'missing marker: {old}')
+              s = s.replace(old, new)
+          p.write_text(s, encoding='utf-8')
+          PY
+      - name: Validate
+        run: python -m compileall -q services/personnel_export.py
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add services/personnel_export.py
+          git commit -m 'test: make Perso typography absurdly large'
+          git push origin main
