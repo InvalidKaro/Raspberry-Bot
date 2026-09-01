@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Raspberry-Bot • Database Admin</title>
+  <link rel="stylesheet" href="/static/db_admin.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">RASPBERRY-BOT CONTROL CENTER</p>
+      <h1>Database Admin</h1>
+      <p class="sub">Sicher Einträge ansehen, erstellen, bearbeiten und löschen.</p>
+    </div>
+    <div class="top-actions">
+      <a class="button ghost" href="/control">Control Center</a>
+      <a class="button ghost" href="/">Dashboard</a>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar card">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">DATENBANK</p>
+          <h2>Tabellen</h2>
+        </div>
+        <button id="refreshTables" class="icon-button" type="button" aria-label="Tabellen neu laden">↻</button>
+      </div>
+      <input id="tableFilter" class="input" type="search" placeholder="Tabelle suchen…" autocomplete="off">
+      <div id="tableList" class="table-list"></div>
+      <div class="safety-box">
+        <strong>Safe Edit</strong>
+        <span>Vor jeder Änderung wird automatisch ein SQLite-Backup erstellt. Update/Delete funktionieren nur über echte Primary Keys.</span>
+      </div>
+    </aside>
+
+    <section class="content">
+      <div class="card toolbar-card">
+        <div>
+          <p class="eyebrow">AUSGEWÄHLTE TABELLE</p>
+          <h2 id="tableTitle">Keine Tabelle gewählt</h2>
+          <p id="tableMeta" class="muted">Wähle links eine Tabelle.</p>
+        </div>
+        <div class="toolbar-actions">
+          <input id="rowSearch" class="input search" type="search" placeholder="Einträge durchsuchen…" autocomplete="off" disabled>
+          <button id="newRow" class="button primary" type="button" disabled>+ Neuer Eintrag</button>
+          <button id="reloadRows" class="button ghost" type="button" disabled>Neu laden</button>
+        </div>
+      </div>
+
+      <div id="notice" class="notice hidden" role="status"></div>
+
+      <div class="card table-card">
+        <div id="emptyState" class="empty-state">
+          <strong>Database Browser bereit</strong>
+          <span>Wähle eine Tabelle, um ihre Einträge zu verwalten.</span>
+        </div>
+        <div id="gridWrap" class="grid-wrap hidden">
+          <table id="dataGrid">
+            <thead id="gridHead"></thead>
+            <tbody id="gridBody"></tbody>
+          </table>
+        </div>
+        <div id="pagination" class="pagination hidden">
+          <button id="prevPage" class="button ghost" type="button">← Zurück</button>
+          <span id="pageInfo"></span>
+          <button id="nextPage" class="button ghost" type="button">Weiter →</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="editorBackdrop" class="modal-backdrop hidden">
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="editorTitle">
+      <div class="modal-head">
+        <div>
+          <p id="editorMode" class="eyebrow">EINTRAG</p>
+          <h2 id="editorTitle">Eintrag bearbeiten</h2>
+        </div>
+        <button id="closeEditor" class="icon-button" type="button" aria-label="Schließen">×</button>
+      </div>
+      <div id="editorWarning" class="warning hidden"></div>
+      <form id="editorForm" class="form-grid"></form>
+      <div class="modal-actions">
+        <button id="deleteRow" class="button danger hidden" type="button">Eintrag löschen</button>
+        <div class="spacer"></div>
+        <button id="cancelEditor" class="button ghost" type="button">Abbrechen</button>
+        <button id="saveRow" class="button primary" type="button">Speichern</button>
+      </div>
+    </section>
+  </div>
+
+  <div id="deleteBackdrop" class="modal-backdrop hidden">
+    <section class="modal small" role="dialog" aria-modal="true" aria-labelledby="deleteTitle">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow danger-text">DESTRUCTIVE ACTION</p>
+          <h2 id="deleteTitle">Eintrag wirklich löschen?</h2>
+        </div>
+      </div>
+      <p class="muted">Ein Backup wird direkt davor erstellt. Gib <strong>DELETE</strong> ein, um genau diesen Datensatz zu löschen.</p>
+      <input id="deleteConfirm" class="input" type="text" placeholder="DELETE" autocomplete="off">
+      <div class="modal-actions">
+        <div class="spacer"></div>
+        <button id="cancelDelete" class="button ghost" type="button">Abbrechen</button>
+        <button id="confirmDelete" class="button danger" type="button">Jetzt löschen</button>
+      </div>
+    </section>
+  </div>
+
+  <script src="/static/db_admin.js" defer></script>
+</body>
+</html>
