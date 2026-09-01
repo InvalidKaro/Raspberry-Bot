@@ -1,0 +1,70 @@
+name: Boost Perso Text Once
+
+on:
+  push:
+    paths:
+      - '.github/workflows/boost-perso-text-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enlarge personnel export typography
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('services/personnel_v2.py')
+          s = p.read_text(encoding='utf-8')
+          replacements = {
+              'header_h = 282': 'header_h = 340',
+              'row_h = 106': 'row_h = 136',
+              'footer_h = 82': 'footer_h = 104',
+              '_font(46, bold=True)': '_font(64, bold=True)',
+              '_font(22)\n        card_label_font': '_font(30)\n        card_label_font',
+              '_font(19, bold=True)': '_font(26, bold=True)',
+              '_font(36, bold=True)': '_font(48, bold=True)',
+              '_font(26, bold=True)': '_font(34, bold=True)',
+              '_font(17)\n        value_font': '_font(22)\n        value_font',
+              '_font(22, bold=True)': '_font(30, bold=True)',
+              '_font(17)\n\n        total_e': '_font(22)\n\n        total_e',
+              '(margin, 38)': '(margin, 34)',
+              '(margin, 99)': '(margin, 116)',
+              'card_y = 148': 'card_y = 180',
+              'card_y + 108': 'card_y + 132',
+              'card_y + 17': 'card_y + 20',
+              'card_y + 52': 'card_y + 68',
+              'bars_x = 455': 'bars_x = 500',
+              'bars_right = width - margin - 194': 'bars_right = width - margin - 230',
+              'values_x = width - margin - 158': 'values_x = width - margin - 192',
+              'chart_top - 34': 'chart_top - 44',
+              'name = name[:24] + "…"': 'name = name[:21] + "…"',
+              'if len(name) > 25:': 'if len(name) > 22:',
+              'y + 24': 'y + 30',
+              'y + 66': 'y + 86',
+              'y + 23, bars_right, y + 50': 'y + 28, bars_right, y + 62',
+              'y + 59, bars_right, y + 86': 'y + 76, bars_right, y + 110',
+              'y + 23, bars_x + e_w, y + 50': 'y + 28, bars_x + e_w, y + 62',
+              'y + 59, bars_x + b_w, y + 86': 'y + 76, bars_x + b_w, y + 110',
+              'y + 22), f"E  {e}"': 'y + 29), f"E  {e}"',
+              'y + 58), f"B  {b}"': 'y + 77), f"B  {b}"',
+              'y + 42), str(activity)': 'y + 54), str(activity)',
+              'footer_y = height - footer_h + 17': 'footer_y = height - footer_h + 24',
+          }
+          for old, new in replacements.items():
+              if old not in s:
+                  print(f'warning: pattern not found: {old}')
+              s = s.replace(old, new)
+          p.write_text(s, encoding='utf-8')
+      - name: Validate Python
+        run: python -m py_compile services/personnel_v2.py
+      - name: Commit change
+        run: |
+          git config user.name 'InvalidKaro'
+          git config user.email '76846752+InvalidKaro@users.noreply.github.com'
+          git add services/personnel_v2.py
+          git commit -m 'style: make personnel export text phone-readable'
+          git push
