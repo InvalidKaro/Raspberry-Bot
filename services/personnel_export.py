@@ -1,19 +1,63 @@
 from __future__ import annotations
 
+from functools import lru_cache
 from io import BytesIO
+from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 
-FONT_REGULAR = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-FONT_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+# Raspberry Pi OS Lite does not always ship the DejaVu font in the exact path we
+# previously assumed. Falling back to ImageFont.load_default() was the real reason
+# changing 50/100/200 px barely changed the export: Pillow's bitmap fallback has a
+# basically fixed visual size. Search several normal Linux font locations instead.
+FONT_CANDIDATES_BOLD = (
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+)
+FONT_CANDIDATES_REGULAR = (
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+)
 
 
+@lru_cache(maxsize=128)
 def _font(size: int, *, bold: bool = False):
-    path = FONT_BOLD if bold else FONT_REGULAR
+    """Return a genuinely scalable TrueType font at the requested pixel size."""
+    candidates = FONT_CANDIDATES_BOLD if bold else FONT_CANDIDATES_REGULAR
+
+    for path in candidates:
+        if Path(path).is_file():
+            try:
+                return ImageFont.truetype(path, size=size)
+            except OSError:
+                pass
+
+    # Pillow can often resolve DejaVu by filename even if distro paths differ.
+    names = ("DejaVuSans-Bold.ttf", "LiberationSans-Bold.ttf") if bold else (
+        "DejaVuSans.ttf",
+        "LiberationSans-Regular.ttf",
+    )
+    for name in names:
+        try:
+            return ImageFont.truetype(name, size=size)
+        except OSError:
+            pass
+
+    # Newer Pillow versions support a sized fallback. This is still preferable to
+    # silently returning the tiny fixed bitmap font.
     try:
-        return ImageFont.truetype(path, size)
-    except OSError:
-        return ImageFont.load_default()
+        return ImageFont.load_default(size=size)
+    except TypeError as exc:
+        raise RuntimeError(
+            "No scalable TrueType font found for personnel PNG rendering. "
+            "Install fonts-dejavu-core on the host."
+        ) from exc
 
 
 def _bbox(draw: ImageDraw.ImageDraw, value: str, font):
@@ -72,7 +116,6 @@ def _fit_box(
         if width <= max_width and height <= max_height:
             return value, font
 
-    # Never make the name microscopic. At the minimum size, shorten the text.
     font = _font(minimum, bold=bold)
     suffix = "…"
     trimmed = value
@@ -193,8 +236,8 @@ def render_personnel_png(title: str, rows) -> bytes:
             b = _row_value(row, "bwg")
             activity = _row_value(row, "activity") or (e + b)
 
-            # The whole upper card area belongs to the name.
-            # Ranking is moved into a tiny badge so it no longer steals name width.
+            # Keep ranking compact; let the name consume essentially the entire
+            # remaining upper card area. A real scalable TTF now makes this visible.
             badge_size = 46
             badge_x = x + 18
             badge_y = y + 18
@@ -217,9 +260,9 @@ def render_personnel_png(title: str, rows) -> bytes:
             )
 
             name_left = badge_x + badge_size + 16
-            name_right = x + card_w - 20
-            name_top = y + 10
-            name_bottom = y + 101
+            name_right = x + card_w - 18
+            name_top = y + 2
+            name_bottom = y + 108
             name_box_w = name_right - name_left
             name_box_h = name_bottom - name_top
 
@@ -228,14 +271,13 @@ def render_personnel_png(title: str, rows) -> bytes:
                 str(row["display_name"]),
                 name_box_w,
                 name_box_h,
-                maximum=112,
-                minimum=58,
+                maximum=126,
+                minimum=60,
             )
-            name_w, name_h = _measure(draw, name_text, name_font)
+            _, name_h = _measure(draw, name_text, name_font)
             name_y = name_top + max(0, (name_box_h - name_h) // 2) - 5
             draw.text((name_left, name_y), name_text, font=name_font, fill=text)
 
-            # Stats stay in the lower third of the card.
             stat_y = y + 111
             stat_gap = 14
             stat_w = (card_w - 44 - stat_gap * 2) // 3
