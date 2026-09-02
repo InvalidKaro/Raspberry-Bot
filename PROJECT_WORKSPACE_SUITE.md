@@ -23,7 +23,7 @@ This project bundle expands Raspberry-Bot into a modular Discord workspace. It i
 - Medication/knowledge entries
 - Internal wiki
 - FAQ system
-- Smart Search across knowledge and training
+- Ranked Smart Search with autocomplete across knowledge, training, quiz, templates, forms and custom commands
 
 ### Community
 - Lightweight XP with a 45-second per-user write throttle
@@ -43,25 +43,28 @@ This project bundle expands Raspberry-Bot into a modular Discord workspace. It i
 
 ### Dashboard
 - `/workspace` Control Center
+- `/workspace/studio` Workspace Studio
 - Message Composer
+- Rich Embed Builder + live Discord-style preview
+- Template auto-fill
+- Smart Search + live suggestions
+- Workspace data catalog
 - Custom Command Builder
 - Server Config UI
 - Plugin UI
 - Live Discord Console (audit + command analytics)
 - Workspace status cards
 
-### REST API
-Read-only endpoints (protected by the dashboard's existing middleware):
-- `/api/v1/status`
-- `/api/v1/tasks`
-- `/api/v1/events`
-- `/api/v1/knowledge?q=...&kind=...`
+## Dashboard architecture
+
+The dashboard uses authenticated internal `/api/workspace/...` routes to communicate with its own backend. There is intentionally no separate public `/api/v1/...` REST API surface. Bot actions that must execute inside the Discord process are queued through `dashboard_commands`.
 
 ## Main command groups
 - `/creator ...`
 - `/workspace ...`
 - `/community ...`
 - `/automation ...`
+- `/mdplan ...`
 
 Existing `/perso`, ticket, moderation, Pi-hole/system and dashboard features remain separate.
 
