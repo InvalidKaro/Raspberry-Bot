@@ -17,6 +17,15 @@ def _embed_color(value: str | None) -> int:
         return discord.Color.blurple().value
 
 
+def _clean_url(value: object) -> str | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if not raw.startswith(("https://", "http://")):
+        raise ValueError("Image/thumbnail URLs must start with http:// or https://")
+    return raw
+
+
 class DashboardCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -75,16 +84,42 @@ class DashboardCommands(commands.Cog):
                             raise ValueError("Channel not found")
                         await channel.send(str(payload["text"])[:1900])
                         result = f"Message sent to {payload['channel_id']}"
-                    elif action == "send-embed":
+                    elif action in {"send-embed", "send-embed-v2"}:
                         channel = self.bot.get_channel(int(payload["channel_id"]))
                         if not isinstance(channel, discord.abc.Messageable):
                             raise ValueError("Channel not found")
                         embed = discord.Embed(
-                            title=str(payload.get("title", ""))[:256],
-                            description=str(payload.get("text", ""))[:4096],
+                            title=str(payload.get("title", ""))[:256] or None,
+                            description=str(payload.get("text", ""))[:4096] or None,
                             color=_embed_color(payload.get("color")),
                         )
-                        await channel.send(embed=embed)
+                        if action == "send-embed-v2":
+                            author = str(payload.get("author", "")).strip()
+                            footer = str(payload.get("footer", "")).strip()
+                            thumbnail = _clean_url(payload.get("thumbnail"))
+                            image = _clean_url(payload.get("image"))
+                            if author:
+                                embed.set_author(name=author[:256])
+                            if footer:
+                                embed.set_footer(text=footer[:2048])
+                            if thumbnail:
+                                embed.set_thumbnail(url=thumbnail)
+                            if image:
+                                embed.set_image(url=image)
+                            fields = payload.get("fields") or []
+                            if not isinstance(fields, list):
+                                raise ValueError("fields must be a list")
+                            for item in fields[:25]:
+                                if not isinstance(item, dict):
+                                    continue
+                                name = str(item.get("name", "")).strip()[:256]
+                                value = str(item.get("value", "")).strip()[:1024]
+                                if name and value:
+                                    embed.add_field(name=name, value=value, inline=bool(item.get("inline")))
+                        await channel.send(
+                            embed=embed,
+                            allowed_mentions=discord.AllowedMentions.none(),
+                        )
                         result = f"Embed sent to {payload['channel_id']}"
                     elif action == "plugin-toggle":
                         ext = str(payload["extension"])
