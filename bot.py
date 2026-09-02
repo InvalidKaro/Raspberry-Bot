@@ -59,6 +59,11 @@ EXTENSIONS: tuple[str, ...] = (
     "cogs.management.audit",
 )
 
+CORE_EXTENSIONS = {
+    "cogs.community.community_plus",
+    "cogs.management.automation_suite",
+}
+
 
 class RaspberryBot(commands.Bot):
     def __init__(self) -> None:
@@ -140,7 +145,7 @@ class RaspberryBot(commands.Bot):
 
         for extension in EXTENSIONS:
             try:
-                if extension.startswith("cogs.") and extension != "cogs.management.automation_suite":
+                if extension.startswith("cogs.") and extension not in CORE_EXTENSIONS:
                     state = await self.database.fetchone(
                         "SELECT enabled FROM plugin_state WHERE extension=?",
                         (extension,),
