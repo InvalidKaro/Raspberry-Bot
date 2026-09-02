@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Workspace Data Manager</title>
+  <link rel="stylesheet" href="/static/workspace_manage.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">RASPBERRY-BOT</p>
+        <h1>Workspace Data Manager</h1>
+        <p class="muted">Erstellen · Bearbeiten · Löschen · Duplizieren · Suchen — dieselben SQLite-Daten wie im Discord-Bot.</p>
+      </div>
+      <div class="top-actions">
+        <a href="/">Dashboard</a>
+        <a href="/workspace">Workspace</a>
+        <a href="/workspace/studio">Studio</a>
+      </div>
+    </header>
+
+    <section class="toolbar panel">
+      <label>Discord-Server
+        <select id="guildSelect"><option value="">Lade Server…</option></select>
+      </label>
+      <label>Bereich
+        <select id="resourceSelect"><option value="">Lade Bereiche…</option></select>
+      </label>
+      <label>Suche
+        <input id="searchInput" type="search" placeholder="Titel, Name, Inhalt, ID …">
+      </label>
+      <button id="searchButton" type="button">Suchen</button>
+      <button id="newButton" class="primary" type="button">+ Neu</button>
+    </section>
+
+    <section class="layout">
+      <article class="panel list-panel">
+        <div class="panel-head">
+          <div><p class="eyebrow" id="resourceGroup">WORKSPACE</p><h2 id="resourceTitle">Bereich auswählen</h2></div>
+          <span id="rowCount" class="pill">0</span>
+        </div>
+        <p id="resourceDescription" class="muted small">Wähle oben einen Bereich.</p>
+        <div id="rows" class="rows"><div class="empty">Noch keine Daten geladen.</div></div>
+      </article>
+
+      <article class="panel editor-panel">
+        <div class="panel-head">
+          <div><p class="eyebrow">EDITOR</p><h2 id="editorTitle">Neuer Eintrag</h2></div>
+          <div class="editor-actions">
+            <button id="duplicateButton" type="button" disabled>Duplizieren</button>
+            <button id="deleteButton" class="danger" type="button" disabled>Löschen</button>
+          </div>
+        </div>
+        <div id="editorHint" class="notice">Felder werden passend zur SQLite-Struktur des ausgewählten Moduls geladen.</div>
+        <form id="editorForm" autocomplete="off">
+          <div id="fields" class="fields"></div>
+          <div class="form-actions">
+            <button id="resetButton" type="button">Zurücksetzen</button>
+            <button id="saveButton" class="primary" type="submit" disabled>Speichern</button>
+          </div>
+        </form>
+      </article>
+    </section>
+  </main>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script src="/static/workspace_manage.js"></script>
+</body>
+</html>
