@@ -50,7 +50,6 @@ EXTENSIONS: tuple[str, ...] = (
     "cogs.management.workspace_suite",
     "cogs.management.md_weekly_planner",
     "cogs.management.automation_suite",
-    "cogs.management.github_bridge",
     "tasks.cache_cleanup",
     "tasks.system_monitor",
     "tasks.dashboard_commands",
