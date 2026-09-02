@@ -5,6 +5,8 @@ Workspace Suite extends that app here so dashboard/app.py can stay focused on
 the existing Control Center while the project remains modular.
 """
 
+from aiohttp import web
+
 from . import app_legacy as _app_legacy
 from .workspace_plus_routes import register_workspace_plus_routes
 from .workspace_routes import register_workspace_routes
@@ -55,6 +57,28 @@ _HOME_NAV_INJECT = r"""
 """
 
 
+@web.middleware
+async def _security_headers_with_workspace(request: web.Request, handler):
+    response = await handler(request)
+    allow_inline = request.path in {"/", "/workspace", "/workspace/studio"}
+    style_src = "style-src 'self' 'unsafe-inline'" if allow_inline else "style-src 'self'"
+    script_src = "script-src 'self' 'unsafe-inline'" if allow_inline else "script-src 'self'"
+    response.headers.update(
+        {
+            "X-Content-Type-Options": "nosniff",
+            "X-Frame-Options": "DENY",
+            "Referrer-Policy": "no-referrer",
+            "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+            "Content-Security-Policy": (
+                f"default-src 'self'; {style_src}; {script_src}; img-src 'self' data: http: https:; "
+                "connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+            ),
+            "Cache-Control": "no-store",
+        }
+    )
+    return response
+
+
 if not getattr(_app_legacy, "_workspace_suite_wrapped", False):
     _original_create_app = _app_legacy.create_app
     _original_index = _app_legacy.index
@@ -65,6 +89,11 @@ if not getattr(_app_legacy, "_workspace_suite_wrapped", False):
             response.text = response.text.replace("</body>", _HOME_NAV_INJECT + "</body>")
         return response
 
+    # The original dashboard CSP intentionally blocks inline script/style. The
+    # Workspace templates currently use inline assets, and the navigation launcher
+    # is injected inline on the home page. Scope the relaxed policy to only these
+    # authenticated UI pages instead of weakening the whole dashboard.
+    _app_legacy.security_headers = _security_headers_with_workspace
     _app_legacy.index = _index_with_navigation
 
     def _create_app_with_workspace(config=None):
