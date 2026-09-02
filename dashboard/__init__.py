@@ -8,13 +8,14 @@ the existing Control Center while the project remains modular.
 from aiohttp import web
 
 from . import app_legacy as _app_legacy
+from .workspace_editor_routes import register_workspace_editor_routes
 from .workspace_plus_routes import register_workspace_plus_routes
 from .workspace_routes import register_workspace_routes
 
 
 _HOME_NAV_INJECT = r"""
 <style>
-.homepi-nav-hub{position:relative;display:inline-flex}.homepi-nav-menu{position:absolute;right:0;top:calc(100% + 9px);z-index:1000;width:240px;padding:8px;background:#11151c;border:1px solid #252c38;border-radius:13px;box-shadow:0 18px 45px rgba(0,0,0,.42);display:none}.homepi-nav-hub.open .homepi-nav-menu{display:grid;gap:5px}.homepi-nav-menu a{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:40px;padding:8px 10px;border-radius:9px;color:#f4f6fa;text-decoration:none;font-size:13px}.homepi-nav-menu a:hover{background:#181324;color:#e4d8ff}.homepi-nav-menu small{color:#8e99aa;font-size:10px}.homepi-nav-title{padding:6px 10px 4px;color:#8e99aa;font-size:10px;letter-spacing:.14em;font-weight:800}.homepi-nav-launch{background:#8b5cf6;border-color:#8b5cf6;color:white}.homepi-nav-launch:hover{background:#6d43d5}@media(max-width:620px){.homepi-nav-hub{flex:1}.homepi-nav-launch{width:100%}.homepi-nav-menu{position:fixed;left:13px;right:13px;top:auto;bottom:13px;width:auto}}
+.homepi-nav-hub{position:relative;display:inline-flex}.homepi-nav-menu{position:absolute;right:0;top:calc(100% + 9px);z-index:1000;width:255px;padding:8px;background:#11151c;border:1px solid #252c38;border-radius:13px;box-shadow:0 18px 45px rgba(0,0,0,.42);display:none}.homepi-nav-hub.open .homepi-nav-menu{display:grid;gap:5px}.homepi-nav-menu a{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:40px;padding:8px 10px;border-radius:9px;color:#f4f6fa;text-decoration:none;font-size:13px}.homepi-nav-menu a:hover{background:#181324;color:#e4d8ff}.homepi-nav-menu small{color:#8e99aa;font-size:10px}.homepi-nav-title{padding:6px 10px 4px;color:#8e99aa;font-size:10px;letter-spacing:.14em;font-weight:800}.homepi-nav-launch{background:#8b5cf6;border-color:#8b5cf6;color:white}.homepi-nav-launch:hover{background:#6d43d5}@media(max-width:620px){.homepi-nav-hub{flex:1}.homepi-nav-launch{width:100%}.homepi-nav-menu{position:fixed;left:13px;right:13px;top:auto;bottom:13px;width:auto}}
 </style>
 <script>
 (()=>{
@@ -29,6 +30,7 @@ _HOME_NAV_INJECT = r"""
       <a href="/">Dashboard <small>:8080</small></a>
       <a href="/control">Control Center <small>System</small></a>
       <a href="/workspace">Workspace <small>Tools</small></a>
+      <a href="/workspace/manage">Data Manager <small>CRUD</small></a>
       <a href="/workspace/studio">Workspace Studio <small>Search · Embeds</small></a>
       <a href="/database-admin">Database Admin <small>SQLite</small></a>
     </div>`;
@@ -100,6 +102,7 @@ if not getattr(_app_legacy, "_workspace_suite_wrapped", False):
         app = _original_create_app(config)
         register_workspace_routes(app)
         register_workspace_plus_routes(app)
+        register_workspace_editor_routes(app)
         return app
 
     _app_legacy.create_app = _create_app_with_workspace
