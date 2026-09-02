@@ -2,8 +2,19 @@ from __future__ import annotations
 
 import asyncio
 import json
+
+import discord
 from discord.ext import commands
+
 from services.maintenance import collect_garbage
+
+
+def _embed_color(value: str | None) -> int:
+    raw = str(value or "").strip().lower().removeprefix("#").removeprefix("0x")
+    try:
+        return int(raw, 16)
+    except ValueError:
+        return discord.Color.blurple().value
 
 
 class DashboardCommands(commands.Cog):
@@ -58,6 +69,44 @@ class DashboardCommands(commands.Cog):
                     elif action == "database-optimize":
                         await self.bot.database.optimize()
                         result = "SQLite PRAGMA optimize completed"
+                    elif action == "send-message":
+                        channel = self.bot.get_channel(int(payload["channel_id"]))
+                        if not isinstance(channel, discord.abc.Messageable):
+                            raise ValueError("Channel not found")
+                        await channel.send(str(payload["text"])[:1900])
+                        result = f"Message sent to {payload['channel_id']}"
+                    elif action == "send-embed":
+                        channel = self.bot.get_channel(int(payload["channel_id"]))
+                        if not isinstance(channel, discord.abc.Messageable):
+                            raise ValueError("Channel not found")
+                        embed = discord.Embed(
+                            title=str(payload.get("title", ""))[:256],
+                            description=str(payload.get("text", ""))[:4096],
+                            color=_embed_color(payload.get("color")),
+                        )
+                        await channel.send(embed=embed)
+                        result = f"Embed sent to {payload['channel_id']}"
+                    elif action == "plugin-toggle":
+                        ext = str(payload["extension"])
+                        enabled = bool(payload["enabled"])
+                        if not ext.startswith("cogs."):
+                            raise ValueError("Only cogs.* plugins are supported")
+                        if ext == "cogs.management.automation_suite" and not enabled:
+                            raise ValueError("Automation Suite cannot disable itself")
+                        await self.bot.database.execute(
+                            """
+                            INSERT INTO plugin_state(extension,enabled,updated_by)
+                            VALUES(?,?,0)
+                            ON CONFLICT(extension) DO UPDATE SET
+                                enabled=excluded.enabled,updated_at=CURRENT_TIMESTAMP
+                            """,
+                            (ext, int(enabled)),
+                        )
+                        if enabled and ext not in self.bot.extensions:
+                            await self.bot.load_extension(ext)
+                        elif not enabled and ext in self.bot.extensions:
+                            await self.bot.unload_extension(ext)
+                        result = f"{ext} -> {'enabled' if enabled else 'disabled'}"
                     else:
                         raise ValueError("Unsupported dashboard bot action")
                     status = "done"

@@ -44,6 +44,10 @@ EXTENSIONS: tuple[str, ...] = (
     "cogs.management.personnel_stats",
     "cogs.management.system_monitor",
     "cogs.management.developer",
+    "cogs.community.creator_suite",
+    "cogs.community.community_plus",
+    "cogs.management.workspace_suite",
+    "cogs.management.automation_suite",
     "tasks.cache_cleanup",
     "tasks.system_monitor",
     "tasks.dashboard_commands",
@@ -100,10 +104,14 @@ class RaspberryBot(commands.Bot):
                     return True
                 if isinstance(interaction.user, discord.Member) and interaction.user.guild_permissions.administrator:
                     return True
-                embed = EmbedFactory.warning(title="Maintenance Mode", description=str(row["reason"] or "Raspberry-Bot is temporarily in maintenance mode."))
+                embed = EmbedFactory.warning(
+                    title="Maintenance Mode",
+                    description=str(row["reason"] or "Raspberry-Bot is temporarily in maintenance mode."),
+                )
                 await interaction.response.send_message(embed=embed, ephemeral=True)
                 return False
             return True
+
         self.tree.interaction_check = _maintenance_check
         await self.system_metrics.start()
 
@@ -115,9 +123,11 @@ class RaspberryBot(commands.Bot):
         self.add_view(TicketControlsView(self))
         self.add_view(SuggestionView(self))
         from views.system_status import SystemStatusView
+
         self.add_view(SystemStatusView(self))
 
         from views.polls import PollView
+
         poll_rows = await self.database.fetchall(
             "SELECT message_id, options_json FROM polls WHERE message_id IS NOT NULL ORDER BY id DESC LIMIT 100"
         )
@@ -130,6 +140,14 @@ class RaspberryBot(commands.Bot):
 
         for extension in EXTENSIONS:
             try:
+                if extension.startswith("cogs.") and extension != "cogs.management.automation_suite":
+                    state = await self.database.fetchone(
+                        "SELECT enabled FROM plugin_state WHERE extension=?",
+                        (extension,),
+                    )
+                    if state is not None and not int(state["enabled"]):
+                        logger.info("Skipped disabled plugin: %s", extension)
+                        continue
                 await self.load_extension(extension)
                 logger.info("Loaded extension: %s", extension)
             except Exception:
@@ -175,7 +193,10 @@ class RaspberryBot(commands.Bot):
         await super().close()
 
 
-async def handle_tree_error(interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
+async def handle_tree_error(
+    interaction: discord.Interaction,
+    error: app_commands.AppCommandError,
+) -> None:
     original = getattr(error, "original", error)
     try:
         command_name = interaction.command.qualified_name if interaction.command else "unknown"
@@ -202,7 +223,10 @@ async def handle_tree_error(interaction: discord.Interaction, error: app_command
             description="Raspberry-Bot is missing one or more Discord permissions required for this action.",
         )
     elif isinstance(error, app_commands.CheckFailure):
-        embed = EmbedFactory.error(title="Check failed", description="You are not allowed to use this command here.")
+        embed = EmbedFactory.error(
+            title="Check failed",
+            description="You are not allowed to use this command here.",
+        )
     else:
         error_id = uuid.uuid4().hex[:8].upper()
         logger.exception("Application command error [%s]", error_id, exc_info=original)
