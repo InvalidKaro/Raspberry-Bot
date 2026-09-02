@@ -29,7 +29,10 @@ def _connect(config) -> sqlite3.Connection:
 def _json_row(row: sqlite3.Row | dict) -> dict:
     data = dict(row)
     for key in list(data):
-        if (key.endswith("_id") or key in {"guild_id", "user_id", "channel_id", "role_id"}) and data[key] is not None:
+        if (
+            key.endswith("_id")
+            or key in {"guild_id", "user_id", "channel_id", "role_id"}
+        ) and data[key] is not None:
             data[key] = str(data[key])
     return data
 
@@ -54,9 +57,12 @@ def _enqueue(config, action: str, payload: dict) -> int:
         con.close()
 
 
-def _search_candidates(con: sqlite3.Connection, guild_id: int, query: str) -> list[dict]:
+def _search_candidates(
+    con: sqlite3.Connection, guild_id: int, query: str
+) -> list[dict]:
     like = f"%{query.strip()}%"
     result: list[dict] = []
+
     for row in con.execute(
         """
         SELECT kind,title,entry_key AS key,content,COALESCE(tags,'') AS tags,'' AS category
@@ -64,63 +70,86 @@ def _search_candidates(con: sqlite3.Connection, guild_id: int, query: str) -> li
         WHERE guild_id=? AND (
             lower(title) LIKE lower(?) OR lower(entry_key) LIKE lower(?) OR
             lower(content) LIKE lower(?) OR lower(COALESCE(tags,'')) LIKE lower(?)
-        ) ORDER BY updated_at DESC LIMIT 80
+        )
+        ORDER BY updated_at DESC
+        LIMIT 80
         """,
         (guild_id, like, like, like, like),
     ).fetchall():
         result.append(dict(row))
+
     for row in con.execute(
         """
         SELECT 'training' AS kind,title,CAST(id AS TEXT) AS key,content,'' AS tags,category
         FROM training_library
-        WHERE guild_id=? AND (lower(title) LIKE lower(?) OR lower(content) LIKE lower(?) OR lower(category) LIKE lower(?))
-        ORDER BY updated_at DESC LIMIT 60
+        WHERE guild_id=? AND (
+            lower(title) LIKE lower(?) OR lower(content) LIKE lower(?) OR lower(category) LIKE lower(?)
+        )
+        ORDER BY updated_at DESC
+        LIMIT 60
         """,
         (guild_id, like, like, like),
     ).fetchall():
         result.append(dict(row))
+
     for row in con.execute(
         """
         SELECT 'quiz' AS kind,question AS title,CAST(id AS TEXT) AS key,
                answer || CASE WHEN COALESCE(explanation,'')='' THEN '' ELSE ' · ' || explanation END AS content,
                '' AS tags,category
         FROM quiz_questions
-        WHERE guild_id=? AND (lower(question) LIKE lower(?) OR lower(answer) LIKE lower(?) OR lower(category) LIKE lower(?))
-        ORDER BY id DESC LIMIT 50
+        WHERE guild_id=? AND (
+            lower(question) LIKE lower(?) OR lower(answer) LIKE lower(?) OR lower(category) LIKE lower(?)
+        )
+        ORDER BY id DESC
+        LIMIT 50
         """,
         (guild_id, like, like, like),
     ).fetchall():
         result.append(dict(row))
+
     for row in con.execute(
         """
         SELECT 'template' AS kind,title,name AS key,body AS content,'' AS tags,'' AS category
         FROM content_templates
-        WHERE guild_id=? AND (lower(title) LIKE lower(?) OR lower(name) LIKE lower(?) OR lower(body) LIKE lower(?))
-        ORDER BY updated_at DESC LIMIT 50
+        WHERE guild_id=? AND (
+            lower(title) LIKE lower(?) OR lower(name) LIKE lower(?) OR lower(body) LIKE lower(?)
+        )
+        ORDER BY updated_at DESC
+        LIMIT 50
         """,
         (guild_id, like, like, like),
     ).fetchall():
         result.append(dict(row))
+
     for row in con.execute(
         """
         SELECT 'form' AS kind,title,name AS key,questions_json AS content,'' AS tags,'' AS category
         FROM forms
-        WHERE guild_id=? AND (lower(title) LIKE lower(?) OR lower(name) LIKE lower(?) OR lower(questions_json) LIKE lower(?))
-        ORDER BY updated_at DESC LIMIT 50
+        WHERE guild_id=? AND (
+            lower(title) LIKE lower(?) OR lower(name) LIKE lower(?) OR lower(questions_json) LIKE lower(?)
+        )
+        ORDER BY updated_at DESC
+        LIMIT 50
         """,
         (guild_id, like, like, like),
     ).fetchall():
         result.append(dict(row))
+
     for row in con.execute(
         """
         SELECT 'command' AS kind,'!' || name AS title,name AS key,response AS content,'' AS tags,'' AS category
         FROM custom_commands
-        WHERE guild_id=? AND enabled=1 AND (lower(name) LIKE lower(?) OR lower(response) LIKE lower(?))
-        ORDER BY updated_at DESC LIMIT 50
+        WHERE guild_id=? AND enabled=1 AND (
+            lower(name) LIKE lower(?) OR lower(response) LIKE lower(?)
+        )
+        ORDER BY updated_at DESC
+        LIMIT 50
         """,
         (guild_id, like, like),
     ).fetchall():
         result.append(dict(row))
+
     return result
 
 
@@ -145,7 +174,9 @@ async def api_workspace_guilds(request: web.Request) -> web.Response:
                     UNION SELECT guild_id FROM knowledge_entries
                     UNION SELECT guild_id FROM workspace_tasks
                     UNION SELECT guild_id FROM content_templates
-                ) WHERE guild_id IS NOT NULL ORDER BY guild_id
+                )
+                WHERE guild_id IS NOT NULL
+                ORDER BY guild_id
                 """
             ).fetchall()
             return [str(row["guild_id"]) for row in rows]
@@ -162,22 +193,32 @@ async def api_workspace_search(request: web.Request) -> web.Response:
         guild_id = _guild_id(request.query.get("guild_id"))
     except ValueError as exc:
         return web.json_response({"ok": False, "message": str(exc)}, status=400)
+
     if len(query) < 2:
-        return web.json_response({"ok": True, "query": query, "results": [], "suggestions": []})
+        return web.json_response(
+            {"ok": True, "query": query, "results": [], "suggestions": []}
+        )
 
     def read() -> list[dict]:
         con = _connect(config)
         try:
-            return rank_candidates(_search_candidates(con, guild_id, query), query, limit=20)
+            return rank_candidates(
+                _search_candidates(con, guild_id, query), query, limit=20
+            )
         finally:
             con.close()
 
     rows = await asyncio.to_thread(read)
     suggestions = [
-        {"label": f"[{row['kind']}] {row['title']}", "value": str(row.get("key") or row["title"])}
+        {
+            "label": f"[{row['kind']}] {row['title']}",
+            "value": str(row.get("key") or row["title"]),
+        }
         for row in rows[:12]
     ]
-    return web.json_response({"ok": True, "query": query, "results": rows, "suggestions": suggestions})
+    return web.json_response(
+        {"ok": True, "query": query, "results": rows, "suggestions": suggestions}
+    )
 
 
 async def api_workspace_catalog(request: web.Request) -> web.Response:
@@ -200,13 +241,18 @@ async def api_workspace_catalog(request: web.Request) -> web.Response:
                 "quiz": "SELECT id,category,question,answer,explanation FROM quiz_questions WHERE guild_id=? ORDER BY id DESC LIMIT 30",
             }
             return {
-                key: [_json_row(row) for row in con.execute(sql, (guild_id,)).fetchall()]
+                key: [
+                    _json_row(row)
+                    for row in con.execute(sql, (guild_id,)).fetchall()
+                ]
                 for key, sql in queries.items()
             }
         finally:
             con.close()
 
-    return web.json_response({"ok": True, "guild_id": str(guild_id), **await asyncio.to_thread(read)})
+    return web.json_response(
+        {"ok": True, "guild_id": str(guild_id), **await asyncio.to_thread(read)}
+    )
 
 
 def _valid_url(value: object) -> str:
@@ -221,16 +267,25 @@ async def api_workspace_embed_send(request: web.Request) -> web.Response:
     data = await request.json()
     channel_id = str(data.get("channel_id", "")).strip()
     if not channel_id.isdigit():
-        return web.json_response({"ok": False, "message": "Channel-ID fehlt oder ist ungültig."}, status=400)
+        return web.json_response(
+            {"ok": False, "message": "Channel-ID fehlt oder ist ungültig."},
+            status=400,
+        )
+
     title = str(data.get("title", "")).strip()[:256]
     text = str(data.get("text", "")).strip()[:4096]
     if not title and not text:
-        return web.json_response({"ok": False, "message": "Titel oder Beschreibung ist erforderlich."}, status=400)
+        return web.json_response(
+            {"ok": False, "message": "Titel oder Beschreibung ist erforderlich."},
+            status=400,
+        )
+
     try:
         thumbnail = _valid_url(data.get("thumbnail"))
         image = _valid_url(data.get("image"))
     except ValueError as exc:
         return web.json_response({"ok": False, "message": str(exc)}, status=400)
+
     raw_fields = data.get("fields") or []
     fields: list[dict] = []
     if isinstance(raw_fields, list):
@@ -240,7 +295,14 @@ async def api_workspace_embed_send(request: web.Request) -> web.Response:
             name = str(item.get("name", "")).strip()[:256]
             value = str(item.get("value", "")).strip()[:1024]
             if name and value:
-                fields.append({"name": name, "value": value, "inline": bool(item.get("inline"))})
+                fields.append(
+                    {
+                        "name": name,
+                        "value": value,
+                        "inline": bool(item.get("inline")),
+                    }
+                )
+
     payload = {
         "channel_id": channel_id,
         "title": title,
@@ -252,69 +314,16 @@ async def api_workspace_embed_send(request: web.Request) -> web.Response:
         "image": image,
         "fields": fields,
     }
-    command_id = await asyncio.to_thread(_enqueue, config, "send-embed-v2", payload)
+    command_id = await asyncio.to_thread(
+        _enqueue, config, "send-embed-v2", payload
+    )
     return web.json_response({"ok": True, "command_id": command_id})
 
 
-def _list_endpoint(config, sql: str, params: tuple = ()) -> list[dict]:
-    con = _connect(config)
-    try:
-        return [_json_row(row) for row in con.execute(sql, params).fetchall()]
-    finally:
-        con.close()
-
-
-async def _api_list(request: web.Request, table: str) -> web.Response:
-    config = request.app["config"]
-    guild_raw = str(request.query.get("guild_id", "")).strip()
-    guild_id = int(guild_raw) if guild_raw.isdigit() else None
-    spec = {
-        "trainings": ("training_library", "id,guild_id,title,category,content,source_url,updated_at", "updated_at DESC"),
-        "templates": ("content_templates", "id,guild_id,name,title,body,color,updated_at", "updated_at DESC"),
-        "forms": ("forms", "id,guild_id,name,title,questions_json,updated_at", "updated_at DESC"),
-        "quiz": ("quiz_questions", "id,guild_id,category,question,answer,explanation,created_at", "id DESC"),
-        "commands": ("custom_commands", "guild_id,name,response,enabled,updated_at", "updated_at DESC"),
-    }[table]
-    where = " WHERE guild_id=?" if guild_id is not None else ""
-    params = (guild_id,) if guild_id is not None else ()
-    sql = f"SELECT {spec[1]} FROM {spec[0]}{where} ORDER BY {spec[2]} LIMIT 100"
-    rows = await asyncio.to_thread(_list_endpoint, config, sql, params)
-    return web.json_response({"ok": True, table: rows})
-
-
-async def api_v1_search(request: web.Request) -> web.Response:
-    return await api_workspace_search(request)
-
-
-async def api_v1_trainings(request: web.Request) -> web.Response:
-    return await _api_list(request, "trainings")
-
-
-async def api_v1_templates(request: web.Request) -> web.Response:
-    return await _api_list(request, "templates")
-
-
-async def api_v1_forms(request: web.Request) -> web.Response:
-    return await _api_list(request, "forms")
-
-
-async def api_v1_quiz(request: web.Request) -> web.Response:
-    return await _api_list(request, "quiz")
-
-
-async def api_v1_commands(request: web.Request) -> web.Response:
-    return await _api_list(request, "commands")
-
-
 def register_workspace_plus_routes(app: web.Application) -> None:
+    # Dashboard-only routes. Public /api/v1 endpoints were intentionally removed.
     app.router.add_get("/workspace/studio", workspace_studio_page)
     app.router.add_get("/api/workspace/guilds", api_workspace_guilds)
     app.router.add_get("/api/workspace/search", api_workspace_search)
     app.router.add_get("/api/workspace/catalog", api_workspace_catalog)
     app.router.add_post("/api/workspace/embed-send", api_workspace_embed_send)
-    app.router.add_get("/api/v1/search", api_v1_search)
-    app.router.add_get("/api/v1/trainings", api_v1_trainings)
-    app.router.add_get("/api/v1/templates", api_v1_templates)
-    app.router.add_get("/api/v1/forms", api_v1_forms)
-    app.router.add_get("/api/v1/quiz", api_v1_quiz)
-    app.router.add_get("/api/v1/commands", api_v1_commands)
