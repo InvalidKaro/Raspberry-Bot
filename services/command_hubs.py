@@ -153,6 +153,21 @@ def _root_group(tree: app_commands.CommandTree, name: str) -> app_commands.Group
     return command if isinstance(command, app_commands.Group) else None
 
 
+def _detach_child(group: app_commands.Group, name: str) -> app_commands.Command | app_commands.Group | None:
+    """Remove one child and explicitly clear its parent.
+
+    discord.py's Group.remove_command currently mutates the child mapping but
+    intentionally does not clear ``command.parent``. We do that here because a
+    command restored to the root must no longer resolve through the old hub.
+    """
+    command = group.get_command(name)
+    if command is None:
+        return None
+    group.remove_command(name)
+    command.parent = None
+    return command
+
+
 def _create_hub_from_first(
     tree: app_commands.CommandTree,
     spec: HubSpec,
@@ -168,11 +183,8 @@ def _create_hub_from_first(
         group.add_command(first)
         tree.add_command(group)
     except Exception:
-        # Keep startup atomic if Discord.py rejects the group for any reason.
-        try:
-            group.remove_command(first.name)
-        except Exception:
-            pass
+        # Keep startup atomic if discord.py rejects the group for any reason.
+        _detach_child(group, first.name)
         tree.add_command(first)
         raise
     return group
@@ -215,10 +227,11 @@ def compact_command_tree(tree: app_commands.CommandTree) -> dict[str, int]:
                 continue
             old_child = group.get_command(command.name)
             if old_child is not None:
-                group.remove_command(command.name)
+                _detach_child(group, command.name)
             try:
                 group.add_command(command)
             except Exception:
+                command.parent = None
                 tree.add_command(command)
                 raise
             moved += 1
@@ -249,7 +262,7 @@ def prepare_extension_unload(tree: app_commands.CommandTree, extension: str) -> 
             module = _command_module(child)
             if module != wanted and not module.startswith(wanted + "."):
                 continue
-            command = group.remove_command(child.name)
+            command = _detach_child(group, child.name)
             if command is None:
                 continue
             tree.add_command(command)
