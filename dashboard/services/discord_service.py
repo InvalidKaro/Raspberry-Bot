@@ -85,41 +85,59 @@ class DiscordService:
         return self._guild_payload(row)
 
     async def guilds(self, guild_ids: list[int]) -> list[dict]:
-        """Resolve guild metadata quickly without serial Discord requests.
-
-        The old implementation created a fresh HTTP session and waited for each
-        guild one after another. With historical guild IDs in SQLite that could
-        turn one dashboard dropdown request into a minute-long operation. Resolve
-        a bounded number concurrently over one keep-alive connection pool and
-        cache the result briefly because every dashboard page asks for the same
-        guild list during bootstrap.
-        """
-        normalized = tuple(dict.fromkeys(int(value) for value in guild_ids if int(value) > 0))[:100]
-        if not normalized:
-            return []
-
+        """Resolve the bot's guild list with one Discord API call when possible."""
+        normalized = tuple(dict.fromkeys(int(value) for value in guild_ids if int(value) > 0))[:200]
         now = time.monotonic()
         if normalized == self._guild_cache_key and now < self._guild_cache_until:
             return [dict(item) for item in self._guild_cache]
 
+        # Discord exposes the current bot user's guilds in one bulk request.
+        # This avoids up to 100 sequential/per-guild REST calls just to populate
+        # a dashboard dropdown.
+        try:
+            rows = await self._get("/users/@me/guilds?limit=200&with_counts=true")
+            if not isinstance(rows, list):
+                raise DiscordServiceError("Discord API returned an invalid guild list.")
+            wanted = set(normalized)
+            if wanted:
+                rows = [row for row in rows if int(row.get("id", 0) or 0) in wanted]
+            result = sorted((self._guild_payload(row) for row in rows), key=lambda item: item["name"].lower())
+            self._guild_cache_key = normalized
+            self._guild_cache_until = time.monotonic() + 30.0
+            self._guild_cache = [dict(item) for item in result]
+            return result
+        except (DiscordServiceError, aiohttp.ClientError, asyncio.TimeoutError):
+            pass
+
+        # Compatibility fallback: still concurrent, but with one hard overall
+        # deadline so a broken network can never make the dashboard hang for a minute.
+        if not normalized:
+            return []
         headers = {"Authorization": f"Bot {self._token()}", "User-Agent": "HomePiDashboard/4.0"}
-        timeout = aiohttp.ClientTimeout(total=7, connect=3, sock_read=5)
-        connector = aiohttp.TCPConnector(limit=10, ttl_dns_cache=300)
-        semaphore = asyncio.Semaphore(8)
+        timeout = aiohttp.ClientTimeout(total=4, connect=2, sock_read=3)
+        connector = aiohttp.TCPConnector(limit=12, ttl_dns_cache=300)
+        semaphore = asyncio.Semaphore(12)
 
-        async with aiohttp.ClientSession(timeout=timeout, headers=headers, connector=connector) as session:
-            async def fetch_one(guild_id: int) -> dict | None:
-                try:
-                    async with semaphore:
-                        async with session.get(self.base + f"/guilds/{guild_id}?with_counts=true") as response:
-                            row = await self._decode_response(response)
-                    return self._guild_payload(row)
-                except (DiscordServiceError, aiohttp.ClientError, asyncio.TimeoutError):
-                    return None
+        async def run_fallback() -> list[dict]:
+            async with aiohttp.ClientSession(timeout=timeout, headers=headers, connector=connector) as session:
+                async def fetch_one(guild_id: int) -> dict | None:
+                    try:
+                        async with semaphore:
+                            async with session.get(self.base + f"/guilds/{guild_id}?with_counts=true") as response:
+                                row = await self._decode_response(response)
+                        return self._guild_payload(row)
+                    except (DiscordServiceError, aiohttp.ClientError, asyncio.TimeoutError):
+                        return None
+                rows = await asyncio.gather(*(fetch_one(guild_id) for guild_id in normalized))
+                return [row for row in rows if row is not None]
 
-            rows = await asyncio.gather(*(fetch_one(guild_id) for guild_id in normalized))
+        try:
+            async with asyncio.timeout(8):
+                fallback_rows = await run_fallback()
+        except TimeoutError:
+            fallback_rows = []
 
-        result = sorted((row for row in rows if row is not None), key=lambda item: item["name"].lower())
+        result = sorted(fallback_rows, key=lambda item: item["name"].lower())
         self._guild_cache_key = normalized
         self._guild_cache_until = time.monotonic() + 30.0
         self._guild_cache = [dict(item) for item in result]
@@ -139,7 +157,7 @@ class DiscordService:
                 "nsfw": bool(row.get("nsfw", False)),
                 "rate_limit_per_user": int(row.get("rate_limit_per_user") or 0),
                 "bitrate": int(row.get("bitrate") or 0) or None,
-                "user_limit": int(row.get("user_limit") or 0) or None,
+                "user_limit": int(row.get("user_limit", 0) or 0) or None,
                 "permission_overwrites": [
                     {
                         "id": str(item.get("id") or ""),
