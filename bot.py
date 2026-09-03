@@ -23,6 +23,7 @@ from services.system_metrics import SystemMetricsSampler
 from services.audit import AuditService
 from services.access_control import AccessControl
 from services.command_hubs import compact_command_tree, prepare_extension_unload
+from services.feature_flags import FeatureFlagService
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +112,9 @@ class RaspberryBot(commands.Bot):
         self.started_at = datetime.now(UTC)
         self.audit = AuditService(self.database)
         self.access = AccessControl(self)
+        self.feature_flags = FeatureFlagService(self.database)
         self._command_started: dict[int, float] = {}
+        self._handled_check_interactions: set[int] = set()
 
     async def load_extension(self, name: str, *, package: str | None = None) -> None:
         """Load an extension and immediately fold eligible roots into hubs."""
@@ -136,19 +139,42 @@ class RaspberryBot(commands.Bot):
 
     async def setup_hook(self) -> None:
         await self.database.connect()
+        await self.feature_flags.ensure_schema()
 
         async def _maintenance_check(interaction: discord.Interaction) -> bool:
             self._command_started[interaction.id] = time.perf_counter()
             row = await self.database.fetchone("SELECT enabled, reason FROM maintenance_state WHERE id=1")
             if row and int(row["enabled"]):
-                if interaction.user.id in self.settings.owner_ids:
-                    return True
+                bypass = interaction.user.id in self.settings.owner_ids
                 if isinstance(interaction.user, discord.Member) and interaction.user.guild_permissions.administrator:
-                    return True
+                    bypass = True
+                if not bypass:
+                    embed = EmbedFactory.warning(
+                        title="Maintenance Mode",
+                        description=str(row["reason"] or "Raspberry-Bot is temporarily in maintenance mode."),
+                    )
+                    self._handled_check_interactions.add(interaction.id)
+                    self._command_started.pop(interaction.id, None)
+                    await interaction.response.send_message(embed=embed, ephemeral=True)
+                    return False
+
+            command_name = interaction.command.qualified_name if interaction.command else ""
+            decision = await self.feature_flags.decision(
+                interaction.guild_id,
+                interaction.user.id,
+                command_name,
+            )
+            if not decision.allowed:
+                scope_text = "für dich" if decision.scope == "user" else "auf diesem Server"
                 embed = EmbedFactory.warning(
-                    title="Maintenance Mode",
-                    description=str(row["reason"] or "Raspberry-Bot is temporarily in maintenance mode."),
+                    title="Feature Lab",
+                    description=(
+                        f"Dieses Feature ist {scope_text} deaktiviert.\n\n"
+                        f"Feature-Key: `{decision.matched_key or command_name}`"
+                    ),
                 )
+                self._handled_check_interactions.add(interaction.id)
+                self._command_started.pop(interaction.id, None)
                 await interaction.response.send_message(embed=embed, ephemeral=True)
                 return False
             return True
@@ -241,6 +267,12 @@ async def handle_tree_error(
     interaction: discord.Interaction,
     error: app_commands.AppCommandError,
 ) -> None:
+    handled_checks = getattr(interaction.client, "_handled_check_interactions", set())
+    if interaction.id in handled_checks:
+        handled_checks.discard(interaction.id)
+        getattr(interaction.client, "_command_started", {}).pop(interaction.id, None)
+        return
+
     original = getattr(error, "original", error)
     command_name = interaction.command.qualified_name if interaction.command else "unknown"
     try:
