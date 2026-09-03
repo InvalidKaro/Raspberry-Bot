@@ -2,6 +2,7 @@
   'use strict';
 
   const GUILD_ID = '1162733312226361454';
+  const BLUE_OLED = '#27b8ff';
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
 
@@ -17,23 +18,23 @@
   ];
 
   const PROFILES = {
-    oled096: {label:'0.96″ OLED', width:128, height:64, micro:true},
-    tft097: {label:'0.96–0.97″ TFT', width:160, height:80, micro:true},
-    oled13: {label:'1.3″ OLED', width:128, height:64, micro:true},
-    tft114: {label:'1.14″ TFT', width:240, height:135, micro:true},
-    tft28: {label:'2.8″ TFT', width:320, height:240},
-    tft35: {label:'3.5″ TFT', width:480, height:320}
+    oled096: {label:'0.96″ Blue OLED', width:128, height:64, micro:true, panel:'blue-oled'},
+    tft097: {label:'0.96–0.97″ TFT', width:160, height:80, micro:true, panel:'color'},
+    oled13: {label:'1.3″ Blue OLED', width:128, height:64, micro:true, panel:'blue-oled'},
+    tft114: {label:'1.14″ TFT', width:240, height:135, micro:true, panel:'color'},
+    tft28: {label:'2.8″ TFT', width:320, height:240, panel:'color'},
+    tft35: {label:'3.5″ TFT', width:480, height:320, panel:'color'}
   };
 
   const DEFAULT_LAYOUT = {
-    version: 3,
+    version: 4,
     profile: 'oled096',
     rotation: 0,
     refresh_seconds: 10,
     theme: 'obsidian',
-    accent: '#7c5cff',
+    accent: BLUE_OLED,
     density: 'compact',
-    brightness: 85,
+    brightness: 90,
     widgets: ['clock','temperature','ram']
   };
 
@@ -61,20 +62,23 @@
     return `${m}m`;
   }
   function safeColor(value){return /^#[0-9a-f]{6}$/i.test(String(value||''))?String(value):DEFAULT_LAYOUT.accent;}
+  function activeProfile(){return PROFILES[layout.profile]||PROFILES.oled096;}
+  function isBlueOled(){return activeProfile().panel==='blue-oled';}
 
   function normalize(raw){
     const next={...clone(DEFAULT_LAYOUT), ...(raw && typeof raw==='object'?raw:{})};
     if(!PROFILES[next.profile])next.profile=DEFAULT_LAYOUT.profile;
     next.rotation=[0,90,180,270].includes(Number(next.rotation))?Number(next.rotation):0;
     next.refresh_seconds=clamp(next.refresh_seconds,5,300,10);
-    next.brightness=clamp(next.brightness,10,100,85);
+    next.brightness=clamp(next.brightness,10,100,90);
     next.theme=['aurora','obsidian','cyber','minimal'].includes(next.theme)?next.theme:'obsidian';
     next.density=['compact','comfortable','spacious'].includes(next.density)?next.density:'compact';
     next.accent=safeColor(next.accent);
+    if((PROFILES[next.profile]||{}).panel==='blue-oled')next.accent=BLUE_OLED;
     const allowed=new Set(WIDGETS.map(x=>x.key));
     next.widgets=Array.isArray(next.widgets)?next.widgets.filter((x,i,a)=>allowed.has(x)&&a.indexOf(x)===i):clone(DEFAULT_LAYOUT.widgets);
     if(!next.widgets.length)next.widgets=['clock'];
-    next.version=3;
+    next.version=4;
     return next;
   }
 
@@ -86,7 +90,7 @@
     card.classList.remove('half');
     card.classList.add('full','ops-display-studio-card');
     const head=$('.head',card);
-    if(head)head.innerHTML='<div><h2>Pi Micro Display Studio</h2><div class="tiny">0.96–0.97″ Layout Composer · OLED / TFT</div></div><div class="ops-display-head-actions"><span class="ops-display-save-state" id="displaySaveState">Local preview</span><button type="button" id="displayRefreshLive">↻ Live</button></div>';
+    if(head)head.innerHTML='<div><h2>Pi Micro Display Studio</h2><div class="tiny">0.96″ Blue OLED · I²C · 128×64</div></div><div class="ops-display-head-actions"><span class="ops-display-save-state" id="displaySaveState">Local preview</span><button type="button" id="displayRefreshLive">↻ Live</button></div>';
     const body=$('.body',card);
     if(!body)return false;
     body.innerHTML=`
@@ -95,9 +99,9 @@
           <div class="ops-display-control-section">
             <div class="ops-display-control-title"><span>01</span><b>Micro canvas</b></div>
             <label>Device profile<select id="displayProfile">
-              <option value="oled096">0.96″ OLED · 128×64</option>
+              <option value="oled096">0.96″ Blue OLED · 128×64</option>
               <option value="tft097">0.96–0.97″ TFT · 160×80</option>
-              <option value="oled13">1.3″ OLED · 128×64</option>
+              <option value="oled13">1.3″ Blue OLED · 128×64</option>
               <option value="tft114">1.14″ TFT · 240×135</option>
               <option value="tft28">2.8″ TFT · 320×240</option>
               <option value="tft35">3.5″ TFT · 480×320</option>
@@ -106,8 +110,9 @@
               <label>Rotation<select id="displayRotation"><option value="0">0°</option><option value="90">90°</option><option value="180">180°</option><option value="270">270°</option></select></label>
               <label>Refresh<input id="displayRefresh" type="number" min="5" max="300" step="1" value="10"></label>
             </div>
-            <label>Brightness <span id="displayBrightnessValue">85%</span><input id="displayBrightness" type="range" min="10" max="100" value="85"></label>
-            <div class="tiny ops-display-hint">Die Vorschau wird vergrößert dargestellt. Auf 0.96″ zählt jeder Pixel – deshalb sind kompakte Layouts Standard.</div>
+            <label>Brightness <span id="displayBrightnessValue">90%</span><input id="displayBrightness" type="range" min="10" max="100" value="90"></label>
+            <div class="ops-display-panel-note" id="displayPanelNote"><b>BLUE OLED</b><span>Schwarzer Hintergrund · blaue Pixel · 128×64 · I²C</span></div>
+            <div class="tiny ops-display-hint">Die Vorschau wird vergrößert dargestellt. Auf dem echten 0.96″ OLED sind die Pixel blau und der Hintergrund schwarz.</div>
           </div>
 
           <div class="ops-display-control-section">
@@ -119,9 +124,10 @@
               <button type="button" data-theme="minimal"><i class="minimal"></i><span>Minimal</span></button>
             </div>
             <div class="ops-display-two">
-              <label>Accent<input id="displayAccent" type="color" value="#7c5cff"></label>
+              <label>Accent<input id="displayAccent" type="color" value="${BLUE_OLED}"></label>
               <label>Density<select id="displayDensity"><option value="compact">Compact</option><option value="comfortable">Comfortable</option><option value="spacious">Spacious</option></select></label>
             </div>
+            <div class="tiny" id="displayAccentHint">Beim Blue-OLED-Profil ist die Pixelfarbe hardwarebedingt blau und wird im Preview fest simuliert.</div>
           </div>
 
           <div class="ops-display-control-section">
@@ -140,13 +146,13 @@
 
         <section class="ops-display-workbench">
           <div class="ops-display-workbench-bar">
-            <div><b>Magnified device preview</b><span id="displayResolution">128 × 64 px · 0.96″ OLED</span></div>
+            <div><b>Magnified device preview</b><span id="displayResolution">128 × 64 px · 0.96″ Blue OLED</span></div>
             <div class="ops-display-workbench-actions"><span class="ops-display-live-dot"></span><span>Preview</span><button type="button" id="displayFullscreen">⛶</button></div>
           </div>
           <div class="ops-display-stage" id="displayStage">
-            <div class="ops-display-device" id="displayDevice">
+            <div class="ops-display-device" id="displayDevice" data-profile="oled096" data-micro="true">
               <div class="ops-display-bezel">
-                <div id="displayPreview" class="ops-display-screen" data-theme="obsidian">
+                <div id="displayPreview" class="ops-display-screen" data-theme="obsidian" data-panel="blue-oled">
                   <div class="ops-display-screen-grid" id="displayScreenGrid"></div>
                   <div class="ops-display-screen-footer"><span>HOMEPI</span><span id="displayScreenMeta">LIVE · 10s</span></div>
                 </div>
@@ -154,11 +160,11 @@
             </div>
           </div>
           <div class="ops-display-inspector">
-            <div><span>Panel</span><b id="displayInspectorProfile">0.96″</b></div>
-            <div><span>Theme</span><b id="displayInspectorTheme">Obsidian</b></div>
+            <div><span>Panel</span><b id="displayInspectorProfile">0.96″ Blue OLED</b></div>
+            <div><span>Pixel</span><b id="displayInspectorColor">Blue</b></div>
             <div><span>Widgets</span><b id="displayInspectorWidgets">3</b></div>
             <div><span>Refresh</span><b id="displayInspectorRefresh">10s</b></div>
-            <div><span>Brightness</span><b id="displayInspectorBrightness">85%</b></div>
+            <div><span>Brightness</span><b id="displayInspectorBrightness">90%</b></div>
           </div>
         </section>
       </div>`;
@@ -185,9 +191,9 @@
     layout.profile=$('#displayProfile')?.value||layout.profile;
     layout.rotation=Number($('#displayRotation')?.value||0);
     layout.refresh_seconds=clamp($('#displayRefresh')?.value,5,300,10);
-    layout.brightness=clamp($('#displayBrightness')?.value,10,100,85);
+    layout.brightness=clamp($('#displayBrightness')?.value,10,100,90);
     layout.theme=$('#displayThemes button.active')?.dataset.theme||layout.theme;
-    layout.accent=safeColor($('#displayAccent')?.value);
+    layout.accent=isBlueOled()?BLUE_OLED:safeColor($('#displayAccent')?.value);
     layout.density=$('#displayDensity')?.value||layout.density;
     render();
   }
@@ -198,9 +204,17 @@
     if($('#displayRefresh'))$('#displayRefresh').value=String(layout.refresh_seconds);
     if($('#displayBrightness'))$('#displayBrightness').value=String(layout.brightness);
     if($('#displayBrightnessValue'))$('#displayBrightnessValue').textContent=`${layout.brightness}%`;
-    if($('#displayAccent'))$('#displayAccent').value=layout.accent;
+    const accent=$('#displayAccent');
+    if(accent){accent.value=isBlueOled()?BLUE_OLED:layout.accent;accent.disabled=isBlueOled();accent.title=isBlueOled()?'Blue OLED: Pixelfarbe ist hardwarebedingt blau.':'';}
     if($('#displayDensity'))$('#displayDensity').value=layout.density;
     $$('#displayThemes button').forEach(btn=>btn.classList.toggle('active',btn.dataset.theme===layout.theme));
+    const note=$('#displayPanelNote');
+    if(note){
+      const p=activeProfile();
+      note.classList.toggle('color-panel',p.panel!=='blue-oled');
+      note.innerHTML=p.panel==='blue-oled'?'<b>BLUE OLED</b><span>Schwarzer Hintergrund · blaue Pixel · 128×64 · I²C</span>':'<b>COLOR PANEL</b><span>Farben werden entsprechend Theme und Accent simuliert.</span>';
+    }
+    const hint=$('#displayAccentHint');if(hint)hint.textContent=isBlueOled()?'Beim Blue-OLED-Profil ist die Pixelfarbe hardwarebedingt blau und wird im Preview fest simuliert.':'Accent-Farbe steuert die Vorschau des Farbdisplays.';
   }
 
   function toggleWidget(key){
@@ -265,11 +279,12 @@
     const grid=$('#displayScreenGrid');
     const screen=$('#displayPreview');
     if(!grid||!screen)return;
-    const profile=PROFILES[layout.profile]||PROFILES.oled096;
+    const profile=activeProfile();
     screen.dataset.theme=layout.theme;
     screen.dataset.density=layout.density;
     screen.dataset.micro=profile.micro?'true':'false';
-    screen.style.setProperty('--display-accent',layout.accent);
+    screen.dataset.panel=profile.panel||'color';
+    screen.style.setProperty('--display-accent',profile.panel==='blue-oled'?BLUE_OLED:layout.accent);
     screen.style.setProperty('--display-brightness',String(layout.brightness/100));
     const visibleWidgets=profile.micro?layout.widgets.slice(0,3):layout.widgets;
     grid.innerHTML=visibleWidgets.map(key=>{
@@ -286,7 +301,7 @@
   }
 
   function renderDevice(){
-    const profile=PROFILES[layout.profile]||PROFILES.oled096;
+    const profile=activeProfile();
     const rotated=layout.rotation===90||layout.rotation===270;
     const width=rotated?profile.height:profile.width;
     const height=rotated?profile.width:profile.height;
@@ -300,13 +315,14 @@
     device.dataset.profile=layout.profile;
     device.dataset.rotation=String(layout.rotation);
     device.dataset.micro=profile.micro?'true':'false';
+    device.dataset.panel=profile.panel||'color';
     const resolution=$('#displayResolution');if(resolution)resolution.textContent=`${width} × ${height} px · ${profile.label}${profile.micro?' · magnified':''}`;
   }
 
   function renderInspector(){
-    const profile=PROFILES[layout.profile]||PROFILES.oled096;
+    const profile=activeProfile();
     const panel=$('#displayInspectorProfile');if(panel)panel.textContent=profile.label;
-    const theme=$('#displayInspectorTheme');if(theme)theme.textContent=layout.theme.charAt(0).toUpperCase()+layout.theme.slice(1);
+    const color=$('#displayInspectorColor');if(color)color.textContent=profile.panel==='blue-oled'?'Blue mono':'Color';
     const widgets=$('#displayInspectorWidgets');if(widgets)widgets.textContent=String(layout.widgets.length);
     const refresh=$('#displayInspectorRefresh');if(refresh)refresh.textContent=`${layout.refresh_seconds}s`;
     const brightness=$('#displayInspectorBrightness');if(brightness)brightness.textContent=`${layout.brightness}%`;
@@ -314,6 +330,7 @@
 
   function render(){
     if(!mounted)return;
+    if(isBlueOled())layout.accent=BLUE_OLED;
     syncControls();
     renderWidgetControls();
     renderDevice();
@@ -376,10 +393,10 @@
   }
 
   function resetLayout(){
-    if(!confirm('Display Layout auf den 0.96″ Standard zurücksetzen?'))return;
+    if(!confirm('Display Layout auf den blauen 0.96″ OLED-Standard zurücksetzen?'))return;
     layout=clone(DEFAULT_LAYOUT);
     render();
-    notify('0.96″ Standardlayout geladen. Noch nicht gespeichert.');
+    notify('Blaues 0.96″ OLED-Standardlayout geladen. Noch nicht gespeichert.');
   }
 
   async function copyLayout(){
