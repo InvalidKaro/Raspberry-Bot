@@ -9,8 +9,6 @@ project remains modular.
 from __future__ import annotations
 
 import asyncio
-import sqlite3
-from pathlib import Path
 
 from aiohttp import web
 
@@ -20,6 +18,9 @@ from .ops_routes import register_ops_routes
 from .workspace_editor_routes import register_workspace_editor_routes
 from .workspace_plus_routes import register_workspace_plus_routes
 from .workspace_routes import register_workspace_routes
+
+
+OPS_GUILD_ID = 1162733312226361454
 
 
 _HOME_NAV_INJECT = r"""
@@ -72,112 +73,155 @@ _HOME_NAV_INJECT = r"""
 """
 
 
-def _dashboard_db_path(config) -> Path:
-    path = Path(config.database_path)
-    return path if path.is_absolute() else Path(config.repo_path) / path
+_OPS_DEBUG_INJECT = r"""
+<style>
+#ops-debug-stack{position:fixed;right:16px;top:76px;z-index:10000;width:min(520px,calc(100vw - 28px));display:grid;gap:10px;pointer-events:none}
+.ops-debug-window{pointer-events:auto;background:rgba(37,15,20,.98);border:1px solid #8d3542;border-radius:14px;box-shadow:0 22px 60px rgba(0,0,0,.5);overflow:hidden;animation:opsDebugIn .16s ease-out}
+.ops-debug-window .ops-debug-head{display:flex;gap:10px;align-items:center;padding:10px 12px;background:#35171d;border-bottom:1px solid #6f2e38}
+.ops-debug-window .ops-debug-head strong{flex:1;font-size:12px;color:#ffd6da}
+.ops-debug-window .ops-debug-head button{background:transparent;border:0;color:#ffb8bf;padding:2px 6px;font-size:17px}
+.ops-debug-window .ops-debug-body{padding:10px 12px}
+.ops-debug-window .ops-debug-body pre{margin:0;max-height:260px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;color:#ffdfe2}
+.ops-debug-window .ops-debug-meta{margin-top:8px;color:#d9979e;font-size:10px}
+@keyframes opsDebugIn{from{opacity:0;transform:translateY(-8px) scale(.98)}to{opacity:1;transform:none}}
+@media(max-width:720px){#ops-debug-stack{top:12px;right:12px;width:calc(100vw - 24px)}}
+</style>
+<div id="ops-debug-stack" aria-live="assertive"></div>
+<script>
+(()=>{
+  const FIXED_GUILD='1162733312226361454';
+  let seq=0;
+  const stack=document.getElementById('ops-debug-stack');
+
+  function safeText(value){
+    if(value instanceof Error)return `${value.name}: ${value.message}\n${value.stack||''}`;
+    if(typeof value==='string')return value;
+    try{return JSON.stringify(value,null,2)}catch{return String(value)}
+  }
+
+  window.showOpsDebug=(title,details,meta='')=>{
+    if(!stack)return;
+    const box=document.createElement('div');
+    box.className='ops-debug-window';
+    const id=++seq;
+    box.innerHTML=`<div class="ops-debug-head"><strong>Dashboard Pro Error #${id} · ${String(title||'Fehler')}</strong><button type="button" aria-label="Schließen">×</button></div><div class="ops-debug-body"><pre></pre><div class="ops-debug-meta"></div></div>`;
+    box.querySelector('pre').textContent=safeText(details);
+    box.querySelector('.ops-debug-meta').textContent=`Guild ${FIXED_GUILD}${meta?' · '+meta:''} · ${new Date().toLocaleTimeString()}`;
+    box.querySelector('button').onclick=()=>box.remove();
+    stack.prepend(box);
+    while(stack.children.length>5)stack.lastElementChild.remove();
+  };
+
+  const rawFetch=window.fetch.bind(window);
+  window.fetch=async function(input,init={}){
+    const url=typeof input==='string'?input:(input&&input.url)||String(input);
+    const method=(init&&init.method)||'GET';
+    try{
+      const response=await rawFetch(input,init);
+      if(!response.ok){
+        let body='';
+        try{body=await response.clone().text()}catch{}
+        showOpsDebug(
+          `HTTP ${response.status}`,
+          `${method} ${url}\n\n${body.slice(0,4000)||response.statusText||'Keine Response-Daten'}`,
+          'HTTP'
+        );
+      }
+      return response;
+    }catch(error){
+      showOpsDebug('Fetch fehlgeschlagen',`${method} ${url}\n\n${safeText(error)}`,'Network');
+      throw error;
+    }
+  };
+
+  window.addEventListener('error',event=>{
+    showOpsDebug('JavaScript Error',event.error||`${event.message}\n${event.filename||''}:${event.lineno||0}:${event.colno||0}`,'JS');
+  });
+  window.addEventListener('unhandledrejection',event=>{
+    showOpsDebug('Unhandled Promise',event.reason||'Unbekannter Promise-Fehler','Promise');
+  });
+
+  const guildSelect=document.getElementById('guild');
+  if(guildSelect){
+    guildSelect.disabled=true;
+    guildSelect.title=`Dashboard Pro ist fest auf Guild ${FIXED_GUILD} begrenzt`;
+  }
+
+  if(typeof window.note==='function'){
+    const originalNote=window.note;
+    window.note=function(text,ok=true){
+      if(!ok)showOpsDebug('Dashboard Meldung',text,'UI');
+      return originalNote.apply(this,arguments);
+    };
+  }
+})();
+</script>
+"""
 
 
-def _select_ops_guild_id(config) -> int | None:
-    """Return the guild in which the bot was active most recently.
-
-    Command activity and dashboard telemetry are compared by their timestamps.
-    Runtime state and guild settings are only fallbacks for a fresh database.
-    """
+async def _ops_fixed_guild_response(request: web.Request) -> web.Response:
+    """Return only the one guild Dashboard Pro is allowed to use."""
 
     try:
-        con = sqlite3.connect(_dashboard_db_path(config), timeout=1.0)
-    except sqlite3.Error:
-        return None
+        guild = await asyncio.wait_for(
+            request.app["discord"].guild(OPS_GUILD_ID),
+            timeout=4.0,
+        )
+    except asyncio.TimeoutError:
+        return web.json_response(
+            {
+                "ok": False,
+                "guilds": [],
+                "fixed_guild_id": str(OPS_GUILD_ID),
+                "message": f"Discord-Abfrage für Guild {OPS_GUILD_ID} lief in ein Timeout.",
+                "debug": {"type": "TimeoutError", "route": "/api/ops/fixed-guild"},
+            },
+            status=504,
+        )
+    except Exception as exc:
+        return web.json_response(
+            {
+                "ok": False,
+                "guilds": [],
+                "fixed_guild_id": str(OPS_GUILD_ID),
+                "message": f"Guild {OPS_GUILD_ID} konnte nicht geladen werden: {exc}",
+                "debug": {
+                    "type": type(exc).__name__,
+                    "route": "/api/ops/fixed-guild",
+                },
+            },
+            status=502,
+        )
 
-    try:
-        queries = [
-            """
-            SELECT guild_id
-            FROM (
-                SELECT guild_id, created_at AS active_at
-                FROM dashboard_activity
-                WHERE guild_id IS NOT NULL
-                UNION ALL
-                SELECT guild_id, created_at AS active_at
-                FROM command_analytics
-                WHERE guild_id IS NOT NULL
-            )
-            ORDER BY active_at DESC
-            LIMIT 1
-            """,
-            """
-            SELECT guild_id
-            FROM dashboard_activity
-            WHERE guild_id IS NOT NULL
-            ORDER BY id DESC
-            LIMIT 1
-            """,
-            """
-            SELECT guild_id
-            FROM command_analytics
-            WHERE guild_id IS NOT NULL
-            ORDER BY id DESC
-            LIMIT 1
-            """,
-            """
-            SELECT guild_id
-            FROM dashboard_runtime_state
-            WHERE guild_id IS NOT NULL
-            ORDER BY updated_at DESC
-            LIMIT 1
-            """,
-            """
-            SELECT guild_id
-            FROM guild_settings
-            WHERE guild_id IS NOT NULL
-            ORDER BY updated_at DESC
-            LIMIT 1
-            """,
-        ]
-        for query in queries:
-            try:
-                row = con.execute(query).fetchone()
-            except sqlite3.Error:
-                continue
-            if row and row[0] is not None:
-                value = int(row[0])
-                if value > 0:
-                    return value
-    finally:
-        con.close()
-    return None
-
-
-async def _ops_last_guild_response(request: web.Request) -> web.Response:
-    """Return only the locally selected guild ID; never call Discord here."""
-
-    guild_id = await asyncio.to_thread(_select_ops_guild_id, request.app["config"])
     return web.json_response(
         {
             "ok": True,
-            "guild_id": str(guild_id) if guild_id is not None else None,
+            "guilds": [guild],
+            "fixed_guild_id": str(OPS_GUILD_ID),
         }
     )
 
 
 def _patch_ops_html(text: str) -> str:
-    """Reuse the working guild list from Now Playing and auto-select one guild."""
+    """Hard-pin Dashboard Pro to one guild and add visible client-side debugging."""
 
-    # /now-playing already proves that the normal /api/discord/guilds endpoint
-    # works on this installation. Dashboard Pro uses exactly the same endpoint
-    # now; a tiny local endpoint only chooses which returned guild is selected.
+    text = text.replace(
+        "api('/api/discord/guilds')",
+        "api('/api/ops/fixed-guild')",
+        1,
+    )
     text = text.replace(
         "if((g.guilds||[]).length===1){sel.value=g.guilds[0].id;guildId=sel.value;await onGuild()}openTab",
-        "if((g.guilds||[]).length){let pick=g.guilds[0];try{const last=await api('/api/ops/last-guild');pick=(g.guilds||[]).find(x=>String(x.id)===String(last.guild_id))||pick}catch{}sel.value=pick.id;guildId=sel.value;onGuild().catch(e=>note(e.message,false))}openTab",
+        "if((g.guilds||[]).length===1){sel.value='1162733312226361454';guildId=sel.value;sel.disabled=true;await onGuild()}else{throw new Error('Feste Guild 1162733312226361454 wurde nicht geladen.')}openTab",
         1,
     )
-
-    # Do not let the first Discord resource/overview requests block the shell.
     text = text.replace(
         "async function onGuild(){if(!guildId)return;await loadDiscordResources();await loadOverview();if(currentTab!=='overview')lazyLoad(currentTab);startLive()}",
-        "async function onGuild(){if(!guildId)return;startLive();await Promise.allSettled([loadDiscordResources(),loadOverview()]);if(currentTab!=='overview')lazyLoad(currentTab)}",
+        "async function onGuild(){guildId='1162733312226361454';const sel=$('#guild');if(sel){sel.value=guildId;sel.disabled=true}startLive();const results=await Promise.allSettled([loadDiscordResources(),loadOverview()]);for(const r of results){if(r.status==='rejected'&&window.showOpsDebug)showOpsDebug('Initialer Guild-Load',r.reason,'Bootstrap')}if(currentTab!=='overview')lazyLoad(currentTab)}",
         1,
     )
+    if "</body>" in text:
+        text = text.replace("</body>", _OPS_DEBUG_INJECT + "</body>", 1)
     return text
 
 
@@ -245,7 +289,7 @@ if not getattr(_app_legacy, "_workspace_suite_wrapped", False):
         register_workspace_editor_routes(app)
         register_media_routes(app)
         register_ops_routes(app)
-        app.router.add_get("/api/ops/last-guild", _ops_last_guild_response)
+        app.router.add_get("/api/ops/fixed-guild", _ops_fixed_guild_response)
         return app
 
     _app_legacy.create_app = _create_app_with_workspace
