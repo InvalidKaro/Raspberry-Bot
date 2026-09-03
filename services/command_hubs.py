@@ -84,6 +84,7 @@ HUB_SPECS: tuple[HubSpec, ...] = (
         (
             "soundboard",
             "radio",
+            "youtube",
             "ambientsource",
             "ambient",
             "ambientcatalog",
@@ -183,7 +184,7 @@ def _create_hub_from_first(
         group.add_command(first)
         tree.add_command(group)
     except Exception:
-        # Keep startup atomic if discord.py rejects the group for any reason.
+        # Keep startup atomic if Discord.py rejects the group for any reason.
         _detach_child(group, first.name)
         tree.add_command(first)
         raise
