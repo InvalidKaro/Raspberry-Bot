@@ -17,22 +17,24 @@
   ];
 
   const PROFILES = {
-    tft35: {label:'3.5″ TFT', width:480, height:320},
+    oled096: {label:'0.96″ OLED', width:128, height:64, micro:true},
+    tft097: {label:'0.96–0.97″ TFT', width:160, height:80, micro:true},
+    oled13: {label:'1.3″ OLED', width:128, height:64, micro:true},
+    tft114: {label:'1.14″ TFT', width:240, height:135, micro:true},
     tft28: {label:'2.8″ TFT', width:320, height:240},
-    portrait: {label:'Portrait', width:320, height:480},
-    hdmi7: {label:'7″ HDMI', width:1024, height:600}
+    tft35: {label:'3.5″ TFT', width:480, height:320}
   };
 
   const DEFAULT_LAYOUT = {
-    version: 2,
-    profile: 'tft35',
+    version: 3,
+    profile: 'oled096',
     rotation: 0,
     refresh_seconds: 10,
-    theme: 'aurora',
+    theme: 'obsidian',
     accent: '#7c5cff',
-    density: 'comfortable',
+    density: 'compact',
     brightness: 85,
-    widgets: ['clock','temperature','ram','cpu','nowplaying','pihole']
+    widgets: ['clock','temperature','ram']
   };
 
   let layout = clone(DEFAULT_LAYOUT);
@@ -66,13 +68,13 @@
     next.rotation=[0,90,180,270].includes(Number(next.rotation))?Number(next.rotation):0;
     next.refresh_seconds=clamp(next.refresh_seconds,5,300,10);
     next.brightness=clamp(next.brightness,10,100,85);
-    next.theme=['aurora','obsidian','cyber','minimal'].includes(next.theme)?next.theme:'aurora';
-    next.density=['compact','comfortable','spacious'].includes(next.density)?next.density:'comfortable';
+    next.theme=['aurora','obsidian','cyber','minimal'].includes(next.theme)?next.theme:'obsidian';
+    next.density=['compact','comfortable','spacious'].includes(next.density)?next.density:'compact';
     next.accent=safeColor(next.accent);
     const allowed=new Set(WIDGETS.map(x=>x.key));
     next.widgets=Array.isArray(next.widgets)?next.widgets.filter((x,i,a)=>allowed.has(x)&&a.indexOf(x)===i):clone(DEFAULT_LAYOUT.widgets);
     if(!next.widgets.length)next.widgets=['clock'];
-    next.version=2;
+    next.version=3;
     return next;
   }
 
@@ -84,25 +86,28 @@
     card.classList.remove('half');
     card.classList.add('full','ops-display-studio-card');
     const head=$('.head',card);
-    if(head)head.innerHTML='<div><h2>Pi Display Studio</h2><div class="tiny">Realtime Layout Composer · Raspberry Pi Display</div></div><div class="ops-display-head-actions"><span class="ops-display-save-state" id="displaySaveState">Local preview</span><button type="button" id="displayRefreshLive">↻ Live</button></div>';
+    if(head)head.innerHTML='<div><h2>Pi Micro Display Studio</h2><div class="tiny">0.96–0.97″ Layout Composer · OLED / TFT</div></div><div class="ops-display-head-actions"><span class="ops-display-save-state" id="displaySaveState">Local preview</span><button type="button" id="displayRefreshLive">↻ Live</button></div>';
     const body=$('.body',card);
     if(!body)return false;
     body.innerHTML=`
       <div class="ops-display-studio">
         <aside class="ops-display-controls">
           <div class="ops-display-control-section">
-            <div class="ops-display-control-title"><span>01</span><b>Canvas</b></div>
+            <div class="ops-display-control-title"><span>01</span><b>Micro canvas</b></div>
             <label>Device profile<select id="displayProfile">
-              <option value="tft35">3.5″ TFT · 480×320</option>
+              <option value="oled096">0.96″ OLED · 128×64</option>
+              <option value="tft097">0.96–0.97″ TFT · 160×80</option>
+              <option value="oled13">1.3″ OLED · 128×64</option>
+              <option value="tft114">1.14″ TFT · 240×135</option>
               <option value="tft28">2.8″ TFT · 320×240</option>
-              <option value="portrait">Portrait · 320×480</option>
-              <option value="hdmi7">7″ HDMI · 1024×600</option>
+              <option value="tft35">3.5″ TFT · 480×320</option>
             </select></label>
             <div class="ops-display-two">
               <label>Rotation<select id="displayRotation"><option value="0">0°</option><option value="90">90°</option><option value="180">180°</option><option value="270">270°</option></select></label>
               <label>Refresh<input id="displayRefresh" type="number" min="5" max="300" step="1" value="10"></label>
             </div>
             <label>Brightness <span id="displayBrightnessValue">85%</span><input id="displayBrightness" type="range" min="10" max="100" value="85"></label>
+            <div class="tiny ops-display-hint">Die Vorschau wird vergrößert dargestellt. Auf 0.96″ zählt jeder Pixel – deshalb sind kompakte Layouts Standard.</div>
           </div>
 
           <div class="ops-display-control-section">
@@ -122,7 +127,7 @@
           <div class="ops-display-control-section">
             <div class="ops-display-control-title"><span>03</span><b>Widget library</b></div>
             <div id="displayWidgets" class="ops-display-widget-library"></div>
-            <div class="tiny ops-display-hint">Aktive Widgets unten per Drag & Drop sortieren.</div>
+            <div class="tiny ops-display-hint">Für 128×64 sind 1–3 Widgets pro Ansicht sinnvoll. Aktive Widgets per Drag & Drop sortieren.</div>
             <div id="displayWidgetOrder" class="ops-display-widget-order"></div>
           </div>
 
@@ -135,13 +140,13 @@
 
         <section class="ops-display-workbench">
           <div class="ops-display-workbench-bar">
-            <div><b>Live device preview</b><span id="displayResolution">480 × 320 px</span></div>
+            <div><b>Magnified device preview</b><span id="displayResolution">128 × 64 px · 0.96″ OLED</span></div>
             <div class="ops-display-workbench-actions"><span class="ops-display-live-dot"></span><span>Preview</span><button type="button" id="displayFullscreen">⛶</button></div>
           </div>
           <div class="ops-display-stage" id="displayStage">
             <div class="ops-display-device" id="displayDevice">
               <div class="ops-display-bezel">
-                <div id="displayPreview" class="ops-display-screen" data-theme="aurora">
+                <div id="displayPreview" class="ops-display-screen" data-theme="obsidian">
                   <div class="ops-display-screen-grid" id="displayScreenGrid"></div>
                   <div class="ops-display-screen-footer"><span>HOMEPI</span><span id="displayScreenMeta">LIVE · 10s</span></div>
                 </div>
@@ -149,8 +154,9 @@
             </div>
           </div>
           <div class="ops-display-inspector">
-            <div><span>Theme</span><b id="displayInspectorTheme">Aurora</b></div>
-            <div><span>Widgets</span><b id="displayInspectorWidgets">6</b></div>
+            <div><span>Panel</span><b id="displayInspectorProfile">0.96″</b></div>
+            <div><span>Theme</span><b id="displayInspectorTheme">Obsidian</b></div>
+            <div><span>Widgets</span><b id="displayInspectorWidgets">3</b></div>
             <div><span>Refresh</span><b id="displayInspectorRefresh">10s</b></div>
             <div><span>Brightness</span><b id="displayInspectorBrightness">85%</b></div>
           </div>
@@ -259,22 +265,28 @@
     const grid=$('#displayScreenGrid');
     const screen=$('#displayPreview');
     if(!grid||!screen)return;
+    const profile=PROFILES[layout.profile]||PROFILES.oled096;
     screen.dataset.theme=layout.theme;
     screen.dataset.density=layout.density;
+    screen.dataset.micro=profile.micro?'true':'false';
     screen.style.setProperty('--display-accent',layout.accent);
     screen.style.setProperty('--display-brightness',String(layout.brightness/100));
-    grid.innerHTML=layout.widgets.map(key=>{
+    const visibleWidgets=profile.micro?layout.widgets.slice(0,3):layout.widgets;
+    grid.innerHTML=visibleWidgets.map(key=>{
       const def=WIDGETS.find(x=>x.key===key)||{label:key,icon:'◇'};
       const data=widgetData(key);
       const wide=def.wide?' wide':'';
       const playing=key==='nowplaying'&&String(data.value)!=='Nothing playing';
       return `<article class="ops-screen-widget${wide}${playing?' playing':''}" data-widget="${key}"><div class="ops-screen-widget-top"><span>${def.icon}</span><small>${esc(def.label)}</small></div><strong>${esc(data.value)}</strong><em>${esc(data.sub)}</em>${key==='cpu'||key==='ram'?`<div class="ops-screen-meter"><i style="width:${parseFloat(data.value)||0}%"></i></div>`:''}</article>`;
     }).join('');
+    if(profile.micro&&layout.widgets.length>3){
+      grid.insertAdjacentHTML('beforeend',`<div class="ops-screen-overflow">+${layout.widgets.length-3} weitere · nächste Seite</div>`);
+    }
     const meta=$('#displayScreenMeta');if(meta)meta.textContent=`LIVE · ${layout.refresh_seconds}s`;
   }
 
   function renderDevice(){
-    const profile=PROFILES[layout.profile]||PROFILES.tft35;
+    const profile=PROFILES[layout.profile]||PROFILES.oled096;
     const rotated=layout.rotation===90||layout.rotation===270;
     const width=rotated?profile.height:profile.width;
     const height=rotated?profile.width:profile.height;
@@ -282,15 +294,18 @@
     if(!stage||!device)return;
     const maxW=Math.min(760,Math.max(260,stage.clientWidth-56));
     const maxH=520;
-    const scale=Math.min(maxW/width,maxH/height,1.45);
-    device.style.width=`${Math.max(240,width*scale)}px`;
+    const scale=profile.micro?Math.min(maxW/width,maxH/height,4.2):Math.min(maxW/width,maxH/height,1.45);
+    device.style.width=`${Math.max(profile.micro?320:240,width*scale)}px`;
     device.style.aspectRatio=`${width}/${height}`;
     device.dataset.profile=layout.profile;
     device.dataset.rotation=String(layout.rotation);
-    const resolution=$('#displayResolution');if(resolution)resolution.textContent=`${width} × ${height} px · ${profile.label}`;
+    device.dataset.micro=profile.micro?'true':'false';
+    const resolution=$('#displayResolution');if(resolution)resolution.textContent=`${width} × ${height} px · ${profile.label}${profile.micro?' · magnified':''}`;
   }
 
   function renderInspector(){
+    const profile=PROFILES[layout.profile]||PROFILES.oled096;
+    const panel=$('#displayInspectorProfile');if(panel)panel.textContent=profile.label;
     const theme=$('#displayInspectorTheme');if(theme)theme.textContent=layout.theme.charAt(0).toUpperCase()+layout.theme.slice(1);
     const widgets=$('#displayInspectorWidgets');if(widgets)widgets.textContent=String(layout.widgets.length);
     const refresh=$('#displayInspectorRefresh');if(refresh)refresh.textContent=`${layout.refresh_seconds}s`;
@@ -361,10 +376,10 @@
   }
 
   function resetLayout(){
-    if(!confirm('Display Layout auf den modernen Standard zurücksetzen?'))return;
+    if(!confirm('Display Layout auf den 0.96″ Standard zurücksetzen?'))return;
     layout=clone(DEFAULT_LAYOUT);
     render();
-    notify('Standardlayout geladen. Noch nicht gespeichert.');
+    notify('0.96″ Standardlayout geladen. Noch nicht gespeichert.');
   }
 
   async function copyLayout(){
