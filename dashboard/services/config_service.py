@@ -137,13 +137,16 @@ class BotConfigService:
         return await self.get(guild_id)
 
     async def list_guild_ids(self) -> list[int]:
-        # Dashboard Pro runs in a separate process from discord.py, so it cannot
-        # read bot.guilds directly. dashboard_runtime_state is maintained by the
-        # bot's DashboardTelemetry cog for every connected guild and is therefore
-        # the most reliable guild registry for the dashboard. The additional
-        # tables remain useful fallbacks for older databases and startup timing.
-        queries = [
-            "SELECT guild_id FROM dashboard_runtime_state",
+        """Return currently connected guilds whenever live telemetry is available.
+
+        Older versions merged every historical guild ID from tickets, command logs,
+        moderation data and settings. On databases with lots of old server data this
+        made the dashboard call Discord once per historical guild and could take a
+        very long time. dashboard_runtime_state is written by the running bot for
+        connected guilds, so it is the authoritative fast path. Historical tables
+        are consulted only during the short startup window before telemetry exists.
+        """
+        fallback_queries = [
             "SELECT DISTINCT guild_id FROM dashboard_activity WHERE guild_id IS NOT NULL",
             "SELECT guild_id FROM guild_settings",
             "SELECT guild_id FROM system_monitor_config",
@@ -154,8 +157,19 @@ class BotConfigService:
         ]
         db = await self._connect()
         try:
+            try:
+                cursor = await db.execute("SELECT guild_id FROM dashboard_runtime_state ORDER BY guild_id")
+                rows = await cursor.fetchall()
+                await cursor.close()
+            except aiosqlite.OperationalError:
+                rows = []
+
+            live_ids = sorted({int(row[0]) for row in rows if row[0] is not None})
+            if live_ids:
+                return live_ids
+
             values: set[int] = set()
-            for query in queries:
+            for query in fallback_queries:
                 try:
                     cursor = await db.execute(query)
                     rows = await cursor.fetchall()
