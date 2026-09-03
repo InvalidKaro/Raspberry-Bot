@@ -1,13 +1,14 @@
 """Dashboard package bootstrap.
 
 The legacy dashboard owns authentication/middleware and the main aiohttp app.
-Workspace Suite extends that app here so dashboard/app.py can stay focused on
-the existing Control Center while the project remains modular.
+Workspace Suite and Media Hub extend that app here so dashboard/app.py can stay
+focused on the existing Control Center while the project remains modular.
 """
 
 from aiohttp import web
 
 from . import app_legacy as _app_legacy
+from .media_routes import register_media_routes
 from .workspace_editor_routes import register_workspace_editor_routes
 from .workspace_plus_routes import register_workspace_plus_routes
 from .workspace_routes import register_workspace_routes
@@ -29,6 +30,7 @@ _HOME_NAV_INJECT = r"""
       <div class="homepi-nav-title">HOMEPI PAGES</div>
       <a href="/">Dashboard <small>:8080</small></a>
       <a href="/control">Control Center <small>System</small></a>
+      <a href="/media">Media Hub <small>Voice · Radio</small></a>
       <a href="/workspace">Workspace <small>Tools</small></a>
       <a href="/workspace/manage">Data Manager <small>CRUD</small></a>
       <a href="/workspace/studio">Workspace Studio <small>Search · Embeds</small></a>
@@ -62,7 +64,7 @@ _HOME_NAV_INJECT = r"""
 @web.middleware
 async def _security_headers_with_workspace(request: web.Request, handler):
     response = await handler(request)
-    allow_inline = request.path in {"/", "/workspace", "/workspace/studio", "/workspace/manage"}
+    allow_inline = request.path in {"/", "/workspace", "/workspace/studio", "/workspace/manage", "/media"}
     style_src = "style-src 'self' 'unsafe-inline'" if allow_inline else "style-src 'self'"
     script_src = "script-src 'self' 'unsafe-inline'" if allow_inline else "script-src 'self'"
     response.headers.update(
@@ -99,6 +101,7 @@ if not getattr(_app_legacy, "_workspace_suite_wrapped", False):
         register_workspace_routes(app)
         register_workspace_plus_routes(app)
         register_workspace_editor_routes(app)
+        register_media_routes(app)
         return app
 
     _app_legacy.create_app = _create_app_with_workspace
