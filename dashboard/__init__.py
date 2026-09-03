@@ -93,7 +93,7 @@ _OPS_DEBUG_INJECT = r"""
   function safeText(value){
     if(value instanceof Error)return `${value.name}: ${value.message}\n${value.stack||''}`;
     if(typeof value==='string')return value;
-    try{return JSON.stringify(value,null,2)}catch{return String(value)}
+    try{return JSON.stringify(value,null,2)}catch(error){return String(value)}
   }
   window.showOpsDebug=(title,details,meta='')=>{
     if(!stack)return;
@@ -107,83 +107,82 @@ _OPS_DEBUG_INJECT = r"""
     stack.prepend(box);
     while(stack.children.length>5)stack.lastElementChild.remove();
   };
+
   const rawFetch=window.fetch.bind(window);
   window.fetch=async function(input,init={}){
-    const url=typeof input==='string'?input:(input&&input.url)||String(input);
+    const rawUrl=typeof input==='string'?input:(input&&input.url)||String(input);
     const method=(init&&init.method)||'GET';
+    let requestUrl;
+    try{requestUrl=new URL(rawUrl,window.location.href)}catch(error){requestUrl=null}
+
+    // Dashboard Pro is intentionally single-guild. Do not ask Discord for the
+    // full bot guild list at all; give the existing Dashboard Pro bootstrap one
+    // synthetic guild so its original, tested JavaScript stays untouched.
+    if(requestUrl&&requestUrl.pathname==='/api/discord/guilds'&&method.toUpperCase()==='GET'){
+      return new Response(JSON.stringify({
+        ok:true,
+        guilds:[{
+          id:FIXED_GUILD,
+          name:`Server ${FIXED_GUILD}`,
+          icon:null,
+          owner_id:'',
+          member_count:0,
+          presence_count:0,
+          description:null,
+          features:[]
+        }],
+        fixed_guild:true
+      }),{status:200,headers:{'Content-Type':'application/json'}});
+    }
+
+    let nextInput=input;
+    if(requestUrl){
+      // Hard guard: even if a stale UI value exists, Discord resource calls and
+      // Dashboard Pro query parameters are forced back to the configured guild.
+      const guildPath=requestUrl.pathname.match(/^\/api\/discord\/guilds\/(\d+)(\/.*)?$/);
+      if(guildPath&&guildPath[1]!==FIXED_GUILD){
+        requestUrl.pathname=`/api/discord/guilds/${FIXED_GUILD}${guildPath[2]||''}`;
+      }
+      if(requestUrl.pathname.startsWith('/api/ops/')&&requestUrl.searchParams.has('guild_id')){
+        requestUrl.searchParams.set('guild_id',FIXED_GUILD);
+      }
+      if(typeof input==='string')nextInput=requestUrl.pathname+requestUrl.search+requestUrl.hash;
+    }
+
     try{
-      const response=await rawFetch(input,init);
+      const response=await rawFetch(nextInput,init);
       if(!response.ok){
         let body='';
-        try{body=await response.clone().text()}catch{}
-        showOpsDebug(`HTTP ${response.status}`,`${method} ${url}\n\n${body.slice(0,4000)||response.statusText||'Keine Response-Daten'}`,'HTTP');
+        try{body=await response.clone().text()}catch(error){}
+        window.showOpsDebug(
+          `HTTP ${response.status}`,
+          `${method} ${requestUrl?requestUrl.pathname+requestUrl.search:rawUrl}\n\n${body.slice(0,4000)||response.statusText||'Keine Response-Daten'}`,
+          'HTTP'
+        );
       }
       return response;
     }catch(error){
-      showOpsDebug('Fetch fehlgeschlagen',`${method} ${url}\n\n${safeText(error)}`,'Network');
+      window.showOpsDebug('Fetch fehlgeschlagen',`${method} ${rawUrl}\n\n${safeText(error)}`,'Network');
       throw error;
     }
   };
-  window.addEventListener('error',event=>showOpsDebug('JavaScript Error',event.error||`${event.message}\n${event.filename||''}:${event.lineno||0}:${event.colno||0}`,'JS'));
-  window.addEventListener('unhandledrejection',event=>showOpsDebug('Unhandled Promise',event.reason||'Unbekannter Promise-Fehler','Promise'));
+
+  window.addEventListener('error',event=>window.showOpsDebug('JavaScript Error',event.error||`${event.message}\n${event.filename||''}:${event.lineno||0}:${event.colno||0}`,'JS'));
+  window.addEventListener('unhandledrejection',event=>window.showOpsDebug('Unhandled Promise',event.reason||'Unbekannter Promise-Fehler','Promise'));
 })();
 </script>
 """
 
 
 def _patch_ops_html(text: str) -> str:
-    """Run Dashboard Pro exclusively against one guild and surface all failures."""
+    """Pin Dashboard Pro without rewriting its application JavaScript.
 
-    fixed_select = (
-        '<select id="guild">'
-        '<option value="1162733312226361454">Server 1162733312226361454</option>'
-        '</select>'
-    )
-    text = text.replace(
-        '<select id="guild"><option value="">Server wählen …</option></select>',
-        fixed_select,
-        1,
-    )
+    Previous revisions modified minified inline functions with string
+    replacements. That was fragile and caused Safari to parse a broken script.
+    This version leaves the original Dashboard Pro script byte-for-byte intact
+    and intercepts only its guild-list fetch before that script executes.
+    """
 
-    original_bootstrap = (
-        "async function bootstrap(){const b=await api('/api/bootstrap');csrf=b.csrf;"
-        "const g=await api('/api/discord/guilds');const sel=$('#guild');"
-        "for(const item of g.guilds||[]){const o=document.createElement('option');"
-        "o.value=item.id;o.textContent=item.name;sel.appendChild(o)}"
-        "if((g.guilds||[]).length===1){sel.value=g.guilds[0].id;guildId=sel.value;await onGuild()}"
-        "openTab(location.hash.slice(1)||'overview');setupQuick();setupPreview()}"
-    )
-    fixed_bootstrap = (
-        "async function bootstrap(){const b=await api('/api/bootstrap');csrf=b.csrf;"
-        "const sel=$('#guild');guildId='1162733312226361454';sel.value=guildId;"
-        "openTab(location.hash.slice(1)||'overview');setupQuick();setupPreview();"
-        "onGuild().catch(e=>{if(window.showOpsDebug)showOpsDebug('Guild Bootstrap',e,'Bootstrap');note(e.message,false)})}"
-    )
-    text = text.replace(original_bootstrap, fixed_bootstrap, 1)
-
-    text = text.replace(
-        "$('#guild').onchange=async()=>{guildId=$('#guild').value;await onGuild()};",
-        "$('#guild').onchange=async()=>{guildId='1162733312226361454';$('#guild').value=guildId;await onGuild()};",
-        1,
-    )
-    text = text.replace(
-        "async function onGuild(){if(!guildId)return;await loadDiscordResources();await loadOverview();if(currentTab!=='overview')lazyLoad(currentTab);startLive()}",
-        "async function onGuild(){guildId='1162733312226361454';const sel=$('#guild');if(sel)sel.value=guildId;startLive();const jobs=[['Discord Ressourcen',loadDiscordResources()],['Overview',loadOverview()]];const results=await Promise.allSettled(jobs.map(x=>x[1]));results.forEach((r,i)=>{if(r.status==='rejected'&&window.showOpsDebug)showOpsDebug(jobs[i][0],r.reason,'Initial Load')});if(currentTab!=='overview')lazyLoad(currentTab)}",
-        1,
-    )
-    text = text.replace(
-        "function note(text,ok=true){const n=$('#notice');n.textContent=text;n.className='notice '+(ok?'':'bad')+' show';clearTimeout(n._t);n._t=setTimeout(()=>n.classList.remove('show'),4500)}",
-        "function note(text,ok=true){const n=$('#notice');n.textContent=text;n.className='notice '+(ok?'':'bad')+' show';clearTimeout(n._t);n._t=setTimeout(()=>n.classList.remove('show'),4500);if(!ok&&window.showOpsDebug)window.showOpsDebug('Dashboard Meldung',text,'UI')}",
-        1,
-    )
-    text = text.replace(
-        "bootstrap().catch(e=>note(e.message,false));",
-        "bootstrap().catch(e=>{if(window.showOpsDebug)window.showOpsDebug('Bootstrap fehlgeschlagen',e,'Bootstrap');note(e.message,false)});",
-        1,
-    )
-
-    # Install the fetch/error instrumentation before Dashboard Pro's own script
-    # executes, otherwise a bootstrap failure can happen before the popup exists.
     text = text.replace("<body>", "<body>" + _OPS_DEBUG_INJECT, 1)
     return text
 
