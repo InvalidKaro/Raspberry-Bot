@@ -107,13 +107,28 @@ async def _ops_fixed_guild(_: web.Request) -> web.Response:
 
 
 def _patch_ops_html(text: str) -> str:
-    """Use one fixed guild without rewriting Dashboard Pro functions."""
+    """Use one fixed guild and repair two parser bugs in the original inline JS."""
 
     # Only change the guild-list endpoint. This keeps Media/Now Playing on the
     # normal multi-guild endpoint and avoids the expensive full guild scan here.
     text = text.replace(
         "api('/api/discord/guilds')",
         "api('/api/ops/fixed-guild')",
+        1,
+    )
+
+    # The original ops.html has two function-expression assignments immediately
+    # followed by a new function declaration on the same physical line. Safari
+    # cannot apply ASI there and reports "Unexpected identifier 'async'". Add
+    # the missing statement terminators before the page is sent.
+    text = text.replace(
+        "}async function saveWorkflow()",
+        "};async function saveWorkflow()",
+        1,
+    )
+    text = text.replace(
+        "}function renderDisplayPreview()",
+        "};function renderDisplayPreview()",
         1,
     )
 
