@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -74,6 +75,32 @@ def _components(raw: object) -> list[dict[str, Any]]:
     return [{"type": 1, "components": buttons}] if buttons else []
 
 
+def _record_direct_delivery(config, guild_id: int, channel_id: int, message_id: str) -> None:
+    db_path = _db_path(config)
+    now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+    con = sqlite3.connect(db_path)
+    try:
+        con.execute(
+            """INSERT INTO dashboard_scheduled_messages
+               (guild_id,channel_id,send_at,content,embed_json,buttons_json,status,result,processed_at)
+               VALUES(?,?,?,?,?,?,?,?,?)""",
+            (
+                guild_id,
+                channel_id,
+                now,
+                "",
+                "{}",
+                "[]",
+                "done",
+                f"direct:{message_id}" if message_id else "direct:sent",
+                now,
+            ),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+
 async def api_message_send(request: web.Request) -> web.Response:
     try:
         data = await request.json()
@@ -96,9 +123,7 @@ async def api_message_send(request: web.Request) -> web.Response:
         if int(channel.get("type", -1)) not in TEXT_CHANNEL_TYPES:
             raise ValueError("Der gewählte Channel unterstützt keine normalen Nachrichten.")
 
-        payload: dict[str, Any] = {
-            "allowed_mentions": {"parse": []},
-        }
+        payload: dict[str, Any] = {"allowed_mentions": {"parse": []}}
         if content:
             payload["content"] = content
         if embed:
@@ -111,6 +136,13 @@ async def api_message_send(request: web.Request) -> web.Response:
             timeout=8.0,
         )
         message_id = str(result.get("id") or "")
+        await asyncio.to_thread(
+            _record_direct_delivery,
+            request.app["config"],
+            guild_id,
+            channel_id,
+            message_id,
+        )
         return web.json_response(
             {
                 "ok": True,
@@ -127,6 +159,8 @@ async def api_message_send(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "message": str(exc)}, status=400)
     except DiscordServiceError as exc:
         return web.json_response({"ok": False, "message": str(exc)}, status=502)
+    except sqlite3.Error as exc:
+        return web.json_response({"ok": False, "message": f"SQLite: {exc}"}, status=500)
     except Exception as exc:
         return web.json_response({"ok": False, "message": f"{type(exc).__name__}: {exc}"}, status=500)
 
