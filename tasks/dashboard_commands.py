@@ -38,6 +38,104 @@ class DashboardCommands(commands.Cog):
         if self.task:
             self.task.cancel()
 
+    async def _youtube_action(self, action: str, payload: dict) -> str:
+        youtube = self.bot.get_cog("YouTubeSuite")
+        voice_cog = self.bot.get_cog("VoiceSuite")
+        if youtube is None or voice_cog is None:
+            raise RuntimeError("YouTubeSuite/VoiceSuite is not loaded")
+        guild_id = int(payload["guild_id"])
+        guild = self.bot.get_guild(guild_id)
+        if guild is None:
+            raise ValueError("Guild not found")
+
+        if action == "ops-youtube-play":
+            channel = guild.get_channel(int(payload["channel_id"]))
+            if not isinstance(channel, (discord.VoiceChannel, discord.StageChannel)):
+                raise ValueError("Voice channel not found")
+            resolved = await youtube._resolve(str(payload["query"]), 0)
+            voice = await voice_cog._connect_channel(guild, channel)
+            await voice_cog._start_on_voice(
+                voice,
+                youtube._audio_source(resolved),
+                guild_id=guild_id,
+                title=resolved.track.title,
+                kind="YouTube",
+                started_by=0,
+                source_name=resolved.track.webpage_url,
+                volume=max(10, min(120, int(payload.get("volume", 65)))),
+            )
+            youtube.current[guild_id] = resolved.track
+            youtube.session_active.add(guild_id)
+            return f"YouTube started: {resolved.track.title}"
+
+        if action == "ops-youtube-add":
+            queue = youtube.queues[guild_id]
+            if len(queue) >= 25:
+                raise ValueError("YouTube queue is full")
+            requested_raw = str(payload.get("requested_by") or "0")
+            requested_by = int(requested_raw) if requested_raw.isdigit() else 0
+            resolved = await youtube._resolve(str(payload["query"]), requested_by)
+            queue.append(resolved.track)
+            return f"Queued: {resolved.track.title} ({len(queue)})"
+
+        voice = guild.voice_client
+        if action == "ops-youtube-skip":
+            if voice is None or not (voice.is_playing() or voice.is_paused()):
+                raise ValueError("Nothing is playing")
+            voice.stop()
+            youtube.current.pop(guild_id, None)
+            return "Skipped current YouTube track"
+        if action == "ops-youtube-stop":
+            youtube.session_active.discard(guild_id)
+            youtube.current.pop(guild_id, None)
+            if voice and (voice.is_playing() or voice.is_paused()):
+                voice.stop()
+            return "YouTube session stopped"
+        if action == "ops-youtube-pause":
+            if voice is None or not voice.is_playing():
+                raise ValueError("Nothing is playing")
+            voice.pause()
+            return "YouTube paused"
+        if action == "ops-youtube-resume":
+            if voice is None or not voice.is_paused():
+                raise ValueError("Nothing is paused")
+            voice.resume()
+            return "YouTube resumed"
+        if action == "ops-youtube-volume":
+            value = voice_cog.set_session_volume(guild_id, int(payload.get("volume", 65)))
+            return f"Voice volume -> {value}%"
+        if action == "ops-youtube-reorder":
+            queue = youtube.queues[guild_id]
+            items = list(queue)
+            if not items:
+                raise ValueError("Queue is empty")
+            source = max(0, min(len(items) - 1, int(payload.get("from", 0))))
+            target = max(0, min(len(items) - 1, int(payload.get("to", 0))))
+            item = items.pop(source)
+            items.insert(target, item)
+            queue.clear()
+            queue.extend(items)
+            return f"Queue item moved {source + 1} -> {target + 1}"
+        if action == "ops-youtube-clear":
+            count = len(youtube.queues[guild_id])
+            youtube.queues[guild_id].clear()
+            return f"Cleared {count} YouTube queue items"
+        if action == "ops-youtube-mod":
+            user_id = int(payload["user_id"])
+            enabled = bool(payload.get("enabled", True))
+            if enabled:
+                await self.bot.database.execute(
+                    "INSERT OR REPLACE INTO youtube_queue_mods(guild_id,user_id,added_by,created_at) VALUES(?,?,0,CURRENT_TIMESTAMP)",
+                    (guild_id, user_id),
+                )
+            else:
+                await self.bot.database.execute(
+                    "DELETE FROM youtube_queue_mods WHERE guild_id=? AND user_id=?",
+                    (guild_id, user_id),
+                )
+            return f"YouTube mod {user_id} -> {'enabled' if enabled else 'disabled'}"
+        raise ValueError("Unsupported YouTube dashboard action")
+
     async def loop(self):
         await self.bot.wait_until_ready()
         while not self.bot.is_closed():
@@ -176,12 +274,23 @@ class DashboardCommands(commands.Cog):
                             result = await voice_cog.dashboard_disconnect(guild_id)
                         else:
                             raise ValueError("Unsupported media action")
+                    elif action.startswith("ops-youtube-"):
+                        result = await self._youtube_action(action, payload)
                     else:
                         raise ValueError("Unsupported dashboard bot action")
                     status = "done"
                 except Exception as exc:
                     status = "failed"
                     result = f"{type(exc).__name__}: {exc}"
+                    telemetry = self.bot.get_cog("DashboardTelemetry")
+                    if telemetry is not None:
+                        await telemetry.activity(
+                            None,
+                            "dashboard_error",
+                            action if 'action' in locals() else "dashboard-command",
+                            detail=result,
+                            source="tasks.dashboard_commands",
+                        )
                 await self.bot.database.execute(
                     "UPDATE dashboard_commands SET status=?,result=?,processed_at=CURRENT_TIMESTAMP WHERE id=?",
                     (status, result, row["id"]),
