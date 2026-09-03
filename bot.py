@@ -46,6 +46,7 @@ EXTENSIONS: tuple[str, ...] = (
     "cogs.management.developer",
     "cogs.community.creator_suite",
     "cogs.community.community_plus",
+    "cogs.community.wizard_suite",
     "cogs.community.games_plus",
     "cogs.community.games_update",
     "cogs.community.community_tools_plus",
