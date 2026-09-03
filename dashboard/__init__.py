@@ -100,6 +100,7 @@ async def _security_headers_with_workspace(request: web.Request, handler):
 if not getattr(_app_legacy, "_workspace_suite_wrapped", False):
     _original_create_app = _app_legacy.create_app
     _original_index = _app_legacy.index
+    _original_auth_middleware = _app_legacy.auth_middleware
 
     async def _index_with_navigation(request):
         response = await _original_index(request)
@@ -107,7 +108,16 @@ if not getattr(_app_legacy, "_workspace_suite_wrapped", False):
             response.text = response.text.replace("</body>", _HOME_NAV_INJECT + "</body>")
         return response
 
+    @web.middleware
+    async def _auth_with_public_status(request: web.Request, handler):
+        # Only this deliberately reduced status surface is public. Every other
+        # Dashboard Pro API still inherits the dashboard session + CSRF policy.
+        if request.path in {"/status", "/api/public/status"}:
+            return await handler(request)
+        return await _original_auth_middleware(request, handler)
+
     _app_legacy.security_headers = _security_headers_with_workspace
+    _app_legacy.auth_middleware = _auth_with_public_status
     _app_legacy.index = _index_with_navigation
 
     def _create_app_with_workspace(config=None):
