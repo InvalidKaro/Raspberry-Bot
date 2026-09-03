@@ -43,8 +43,6 @@ class AmbientScene:
     graph: str
 
 
-# Multi-layered procedural scenes: several filtered/noise/tonal layers instead of
-# one flat white-noise source. They remain lightweight enough for the Pi 3 B+.
 AMBIENT_SCENES: dict[str, AmbientScene] = {
     "rain": AmbientScene(
         "Regen am Fenster", "🌧️", "Breitbandiger Regen, feine Tropfen und tiefer Raum-Rumble.",
@@ -594,7 +592,8 @@ class VoiceSuite(commands.Cog):
         if interaction.guild_id is None:
             return
         rows = await self.bot.database.fetchall("SELECT name,COALESCE(genre,'') genre FROM voice_radio_stations WHERE guild_id=? AND enabled=1 ORDER BY name COLLATE NOCASE LIMIT 50", (interaction.guild_id,))
-        text = "\n".join(f"📻 **{row['name']}**{f' · {row[\"genre\"]}' if row['genre'] else ''}" for row in rows) or "Noch keine Sender. Admins können `/radio add` verwenden."
+        lines = [f"📻 **{row['name']}**" + (f" · {row['genre']}" if row["genre"] else "") for row in rows]
+        text = "\n".join(lines) or "Noch keine Sender. Admins können `/radio add` verwenden."
         await interaction.response.send_message(embed=_embed("📻 Sender", text, 0xE91E63), ephemeral=True)
 
     @radio.command(name="favorite", description="Fügt einen Sender zu deinen Favoriten hinzu.")
@@ -620,7 +619,8 @@ class VoiceSuite(commands.Cog):
         if interaction.guild_id is None:
             return
         rows = await self.bot.database.fetchall("SELECT f.station_name,COALESCE(s.genre,'') genre FROM voice_radio_favorites f LEFT JOIN voice_radio_stations s ON s.guild_id=f.guild_id AND lower(s.name)=lower(f.station_name) WHERE f.guild_id=? AND f.user_id=? ORDER BY f.station_name COLLATE NOCASE LIMIT 50", (interaction.guild_id, interaction.user.id))
-        text = "\n".join(f"⭐ **{row['station_name']}**{f' · {row[\"genre\"]}' if row['genre'] else ''}" for row in rows) or "Noch keine Favoriten."
+        lines = [f"⭐ **{row['station_name']}**" + (f" · {row['genre']}" if row["genre"] else "") for row in rows]
+        text = "\n".join(lines) or "Noch keine Favoriten."
         await interaction.response.send_message(embed=_embed("⭐ Radio-Favoriten", text, 0xF1C40F), ephemeral=True)
 
     @radio.command(name="history", description="Zeigt die letzten Radio-/Ambient-Wiedergaben.")
