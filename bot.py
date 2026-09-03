@@ -21,6 +21,7 @@ from services.tickets import TicketService
 from services.system_metrics import SystemMetricsSampler
 from services.audit import AuditService
 from services.access_control import AccessControl
+from services.command_hubs import compact_command_tree, prepare_extension_unload
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,27 @@ class RaspberryBot(commands.Bot):
         self.access = AccessControl(self)
         self._command_started: dict[int, float] = {}
 
+    async def load_extension(self, name: str, *, package: str | None = None) -> None:
+        """Load an extension and immediately fold eligible roots into hubs."""
+        await super().load_extension(name, package=package)
+        compact_command_tree(self.tree)
+
+    async def unload_extension(self, name: str, *, package: str | None = None) -> None:
+        """Restore only this extension's roots so discord.py can eject its Cogs cleanly."""
+        prepare_extension_unload(self.tree, name)
+        try:
+            await super().unload_extension(name, package=package)
+        finally:
+            compact_command_tree(self.tree)
+
+    async def reload_extension(self, name: str, *, package: str | None = None) -> None:
+        """Keep command hubs consistent across owner-triggered hot reloads."""
+        prepare_extension_unload(self.tree, name)
+        try:
+            await super().reload_extension(name, package=package)
+        finally:
+            compact_command_tree(self.tree)
+
     async def setup_hook(self) -> None:
         await self.database.connect()
 
@@ -168,6 +190,9 @@ class RaspberryBot(commands.Bot):
             except Exception:
                 logger.exception("Failed loading extension: %s", extension)
                 raise
+
+        hub_stats = compact_command_tree(self.tree)
+        logger.info("Final slash-command root count after hubs: %s", hub_stats["roots"])
 
         if settings.dev_guild_id:
             guild = discord.Object(id=settings.dev_guild_id)
