@@ -66,6 +66,66 @@ _HOME_NAV_INJECT = r"""
 """
 
 
+_CONNECT_PROXY_INJECT = r"""
+<script>
+(()=>{
+  // Raspberry Pi Connect exposes local HTTP services below a path prefix.
+  // Root-absolute URLs such as /api/... otherwise escape that prefix and hit
+  // Connect itself, which returns {key:not_found}. Keep normal LAN access
+  // unchanged while transparently preserving the Connect service prefix.
+  const knownRoutes=[
+    '/workspace/manage','/workspace/studio','/now-playing','/database-admin',
+    '/workspace','/control','/media','/ops','/status','/login'
+  ];
+  const cleanPath=location.pathname.replace(/\/+$/,'')||'/';
+  const route=knownRoutes.find(item=>cleanPath===item||cleanPath.endsWith(item));
+  const prefix=route&&cleanPath!==route?cleanPath.slice(0,-route.length):'';
+  if(!prefix)return;
+
+  const rewrite=url=>{
+    if(typeof url!=='string'||!url.startsWith('/')||url.startsWith('//'))return url;
+    if(url===prefix||url.startsWith(prefix+'/'))return url;
+    return prefix+url;
+  };
+
+  const nativeFetch=window.fetch.bind(window);
+  window.fetch=(input,init)=>{
+    if(typeof input==='string')return nativeFetch(rewrite(input),init);
+    if(input instanceof Request){
+      const u=new URL(input.url,location.href);
+      if(u.origin===location.origin&&!u.pathname.startsWith(prefix+'/')){
+        u.pathname=prefix+u.pathname;
+        input=new Request(u.toString(),input);
+      }
+    }
+    return nativeFetch(input,init);
+  };
+
+  const NativeEventSource=window.EventSource;
+  if(NativeEventSource){
+    const ProxyEventSource=function(url,options){return new NativeEventSource(rewrite(url),options)};
+    ProxyEventSource.prototype=NativeEventSource.prototype;
+    Object.setPrototypeOf(ProxyEventSource,NativeEventSource);
+    window.EventSource=ProxyEventSource;
+  }
+
+  const rewriteLinks=()=>{
+    document.querySelectorAll('a[href^="/"]').forEach(link=>{
+      const href=link.getAttribute('href');
+      if(href)link.setAttribute('href',rewrite(href));
+    });
+    document.querySelectorAll('form[action^="/"]').forEach(form=>{
+      const action=form.getAttribute('action');
+      if(action)form.setAttribute('action',rewrite(action));
+    });
+  };
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',rewriteLinks,{once:true});
+  else rewriteLinks();
+})();
+</script>
+"""
+
+
 @web.middleware
 async def _security_headers_with_workspace(request: web.Request, handler):
     response = await handler(request)
@@ -79,6 +139,11 @@ async def _security_headers_with_workspace(request: web.Request, handler):
         "/now-playing",
         "/status",
     }
+    if allow_inline and response.content_type == "text/html" and response.text:
+        # Inject before page scripts so fetch/EventSource are already proxy-safe
+        # when Dashboard Pro bootstraps its first /api/... request.
+        if "</head>" in response.text and "Raspberry Pi Connect exposes" not in response.text:
+            response.text = response.text.replace("</head>", _CONNECT_PROXY_INJECT + "</head>", 1)
     style_src = "style-src 'self' 'unsafe-inline'" if allow_inline else "style-src 'self'"
     script_src = "script-src 'self' 'unsafe-inline'" if allow_inline else "script-src 'self'"
     response.headers.update(
