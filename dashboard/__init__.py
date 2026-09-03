@@ -6,11 +6,19 @@ Workspace Suite, Media Hub and Dashboard Pro extend that app here so
 project remains modular.
 """
 
+from __future__ import annotations
+
+import asyncio
+import os
+import sqlite3
+from pathlib import Path
+
 from aiohttp import web
 
 from . import app_legacy as _app_legacy
 from .media_routes import register_media_routes
 from .ops_routes import register_ops_routes
+from .services.discord_service import DiscordServiceError
 from .workspace_editor_routes import register_workspace_editor_routes
 from .workspace_plus_routes import register_workspace_plus_routes
 from .workspace_routes import register_workspace_routes
@@ -66,6 +74,133 @@ _HOME_NAV_INJECT = r"""
 """
 
 
+def _dashboard_db_path(config) -> Path:
+    path = Path(config.database_path)
+    return path if path.is_absolute() else Path(config.repo_path) / path
+
+
+def _select_ops_guild_id(config) -> int | None:
+    """Pick one Dashboard Pro guild without asking Discord for every guild.
+
+    An explicit DASHBOARD_PRO_GUILD_ID wins. Otherwise prefer the guild that
+    currently has an active voice/YouTube session, then the most recently active
+    telemetry guild. This keeps Dashboard Pro deliberately single-guild for now.
+    """
+
+    explicit = os.getenv("DASHBOARD_PRO_GUILD_ID", "").strip()
+    if explicit.isdigit() and int(explicit) > 0:
+        return int(explicit)
+
+    try:
+        con = sqlite3.connect(_dashboard_db_path(config), timeout=1.0)
+    except sqlite3.Error:
+        return None
+
+    try:
+        queries = [
+            """
+            SELECT r.guild_id
+            FROM dashboard_runtime_state r
+            WHERE r.guild_id IS NOT NULL
+            ORDER BY
+              CASE
+                WHEN r.state_json LIKE '%\"connected\":true%'
+                  OR r.state_json LIKE '%\"active\":true%'
+                THEN 0 ELSE 1
+              END,
+              COALESCE(
+                (SELECT MAX(a.id) FROM dashboard_activity a WHERE a.guild_id = r.guild_id),
+                0
+              ) DESC,
+              r.updated_at DESC
+            LIMIT 1
+            """,
+            """
+            SELECT guild_id
+            FROM dashboard_activity
+            WHERE guild_id IS NOT NULL
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            """
+            SELECT guild_id
+            FROM guild_settings
+            WHERE guild_id IS NOT NULL
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """,
+        ]
+        for query in queries:
+            try:
+                row = con.execute(query).fetchone()
+            except sqlite3.Error:
+                continue
+            if row and row[0] is not None:
+                value = int(row[0])
+                if value > 0:
+                    return value
+    finally:
+        con.close()
+    return None
+
+
+async def _ops_single_guild_response(request: web.Request) -> web.Response:
+    """Fast single-guild bootstrap used only by Dashboard Pro."""
+
+    guild_id = await asyncio.to_thread(_select_ops_guild_id, request.app["config"])
+    if guild_id is None:
+        return web.json_response(
+            {
+                "ok": True,
+                "guilds": [],
+                "single_guild": True,
+                "message": "No Dashboard Pro guild is available yet.",
+            }
+        )
+
+    # One direct Discord lookup gives the proper name/counts. It is optional:
+    # Dashboard Pro still opens from SQLite immediately if Discord is slow.
+    try:
+        guild = await asyncio.wait_for(request.app["discord"].guild(guild_id), timeout=2.5)
+    except (DiscordServiceError, asyncio.TimeoutError, OSError):
+        guild = {
+            "id": str(guild_id),
+            "name": f"Server {guild_id}",
+            "icon": None,
+            "owner_id": "",
+            "member_count": 0,
+            "presence_count": 0,
+            "description": None,
+            "features": [],
+        }
+
+    return web.json_response({"ok": True, "guilds": [guild], "single_guild": True})
+
+
+def _patch_ops_html(text: str) -> str:
+    """Make /ops single-guild and non-blocking without changing other pages."""
+
+    text = text.replace(
+        "api('/api/discord/guilds')",
+        "api('/api/discord/guilds?ops_single=1')",
+        1,
+    )
+
+    # Dashboard Pro used to wait for channel/role/overview REST calls before it
+    # even rendered the first tab. Start those in the background instead.
+    text = text.replace(
+        "if((g.guilds||[]).length===1){sel.value=g.guilds[0].id;guildId=sel.value;await onGuild()}openTab",
+        "if((g.guilds||[]).length===1){sel.value=g.guilds[0].id;guildId=sel.value;onGuild().catch(e=>note(e.message,false))}openTab",
+        1,
+    )
+    text = text.replace(
+        "async function onGuild(){if(!guildId)return;await loadDiscordResources();await loadOverview();if(currentTab!=='overview')lazyLoad(currentTab);startLive()}",
+        "async function onGuild(){if(!guildId)return;startLive();await Promise.allSettled([loadDiscordResources(),loadOverview()]);if(currentTab!=='overview')lazyLoad(currentTab)}",
+        1,
+    )
+    return text
+
+
 @web.middleware
 async def _security_headers_with_workspace(request: web.Request, handler):
     response = await handler(request)
@@ -79,6 +214,9 @@ async def _security_headers_with_workspace(request: web.Request, handler):
         "/now-playing",
         "/status",
     }
+    if request.path == "/ops" and response.content_type == "text/html" and response.text:
+        response.text = _patch_ops_html(response.text)
+
     style_src = "style-src 'self' 'unsafe-inline'" if allow_inline else "style-src 'self'"
     script_src = "script-src 'self' 'unsafe-inline'" if allow_inline else "script-src 'self'"
     response.headers.update(
@@ -114,6 +252,13 @@ if not getattr(_app_legacy, "_workspace_suite_wrapped", False):
         # Dashboard Pro API still inherits the dashboard session + CSRF policy.
         if request.path in {"/status", "/api/public/status"}:
             return await handler(request)
+
+        if request.path == "/api/discord/guilds" and request.query.get("ops_single") == "1":
+            async def single_guild_handler(inner_request: web.Request):
+                return await _ops_single_guild_response(inner_request)
+
+            return await _original_auth_middleware(request, single_guild_handler)
+
         return await _original_auth_middleware(request, handler)
 
     _app_legacy.security_headers = _security_headers_with_workspace
