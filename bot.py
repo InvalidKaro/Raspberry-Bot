@@ -4,6 +4,7 @@ import json
 import logging
 import sys
 import time
+import traceback
 import uuid
 from datetime import UTC, datetime
 
@@ -241,8 +242,8 @@ async def handle_tree_error(
     error: app_commands.AppCommandError,
 ) -> None:
     original = getattr(error, "original", error)
+    command_name = interaction.command.qualified_name if interaction.command else "unknown"
     try:
-        command_name = interaction.command.qualified_name if interaction.command else "unknown"
         started = getattr(interaction.client, "_command_started", {}).pop(interaction.id, None)
         duration_ms = (time.perf_counter() - started) * 1000 if started else None
         await interaction.client.database.execute(
@@ -251,6 +252,40 @@ async def handle_tree_error(
         )
     except Exception:
         pass
+
+    expected_error = isinstance(
+        error,
+        (
+            app_commands.CommandOnCooldown,
+            app_commands.MissingPermissions,
+            app_commands.BotMissingPermissions,
+            app_commands.CheckFailure,
+        ),
+    )
+    if not expected_error:
+        try:
+            callback = getattr(interaction.command, "callback", None) if interaction.command else None
+            source = str(getattr(callback, "__module__", "discord.app_commands") or "discord.app_commands")[:200]
+            trace = "".join(
+                traceback.format_exception(type(original), original, original.__traceback__)
+            )[-12000:]
+            await interaction.client.database.execute(
+                """INSERT INTO dashboard_error_events
+                (guild_id,source,error_type,message,traceback,command_name)
+                VALUES(?,?,?,?,?,?)""",
+                (
+                    interaction.guild_id,
+                    source,
+                    type(original).__name__,
+                    str(original)[:2000],
+                    trace,
+                    command_name[:200],
+                ),
+            )
+        except Exception:
+            # Dashboard telemetry is optional and must never interfere with the
+            # bot's normal command error handling.
+            pass
 
     if isinstance(error, app_commands.CommandOnCooldown):
         embed = EmbedFactory.warning(
