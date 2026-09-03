@@ -107,20 +107,15 @@ async def _ops_fixed_guild(_: web.Request) -> web.Response:
 
 
 def _patch_ops_html(text: str) -> str:
-    """Use one fixed guild and repair two parser bugs in the original inline JS."""
+    """Use one fixed guild and repair Dashboard Pro's inline JS."""
 
-    # Only change the guild-list endpoint. This keeps Media/Now Playing on the
-    # normal multi-guild endpoint and avoids the expensive full guild scan here.
     text = text.replace(
         "api('/api/discord/guilds')",
         "api('/api/ops/fixed-guild')",
         1,
     )
 
-    # The original ops.html has two function-expression assignments immediately
-    # followed by a new function declaration on the same physical line. Safari
-    # cannot apply ASI there and reports "Unexpected identifier 'async'". Add
-    # the missing statement terminators before the page is sent.
+    # Safari parser repairs for two adjacent declarations in the original page.
     text = text.replace(
         "}async function saveWorkflow()",
         "};async function saveWorkflow()",
@@ -132,22 +127,55 @@ def _patch_ops_html(text: str) -> str:
         1,
     )
 
-    # The original bootstrap waited for channels + overview before rendering the
-    # selected tab. Start that load in the background so the UI appears at once.
-    text = text.replace("await onGuild()", "onGuild()", 1)
+    # A number of tabs intentionally perform synchronous UI work and returned
+    # undefined. The old `map[tab]().catch?.(...)` dereferenced `.catch` on
+    # undefined, producing the screenshots' unhandled promise errors.
+    old_lazy = "async function lazyLoad(tab){if(!guildId&&tab!=='overview')return;const map={overview:loadOverview,analytics:()=>loadAnalytics(7),activity:()=>{startLive();loadActivity()},discord:loadServerMap,member:()=>{},org:loadOrg,media:loadMedia,history:()=>loadHistory(24),reliability:loadReliability,tickets:()=>{loadTickets();calendarToday()},workflows:loadWorkflows,messages:()=>{loadPanels();updatePreview()},hardware:()=>{loadDisplay();loadGpio();loadNetwork()},lab:loadFeatures};if(map[tab])map[tab]().catch?.(e=>note(e.message,false))}"
+    new_lazy = "async function lazyLoad(tab){if(!guildId&&tab!=='overview')return;const map={overview:loadOverview,analytics:()=>loadAnalytics(7),activity:()=>{startLive();return loadActivity()},discord:loadServerMap,member:()=>Promise.resolve(),org:loadOrg,media:loadMedia,history:()=>loadHistory(24),reliability:loadReliability,tickets:()=>Promise.all([loadTickets(),calendarToday()]),workflows:loadWorkflows,messages:()=>{updatePreview();return loadPanels()},hardware:()=>Promise.all([loadDisplay(),loadGpio(),loadNetwork()]),lab:loadFeatures};const fn=map[tab];if(!fn)return;try{await Promise.resolve(fn())}catch(e){note(e.message,false)}}"
+    text = text.replace(old_lazy, new_lazy, 1)
+    text = text.replace(
+        "function calendarToday(){calOffset=0;loadCalendar()}function calendarShift(x){calOffset+=x;loadCalendar()}",
+        "function calendarToday(){calOffset=0;return loadCalendar()}function calendarShift(x){calOffset+=x;return loadCalendar()}",
+        1,
+    )
 
-    # Debug listener is synchronous ES5-style code and therefore cannot create
-    # another Safari async-parser failure itself.
+    # Do not hold bootstrap hostage to Discord/overview I/O, but always attach a
+    # rejection handler so a failed initial load does not become unhandled.
+    text = text.replace(
+        "await onGuild()",
+        "onGuild().catch(e=>note(e.message,false))",
+        1,
+    )
+
+    # Radio playback has no YouTube thumbnail. Use a clear radio cover instead
+    # of the empty square in Dashboard Pro's Media Center.
+    text = text.replace(
+        "${r.youtube_thumbnail?`<img class=\"cover\" src=\"${esc(r.youtube_thumbnail)}\">`:'<div class=\"cover\"></div>'}",
+        "${r.youtube_thumbnail?`<img class=\"cover\" src=\"${esc(r.youtube_thumbnail)}\">`:(String(v.kind||'').toLowerCase()==='radio'?'<div class=\"cover\" style=\"display:grid;place-items:center;font-size:42px\">📻</div>':'<div class=\"cover\"></div>')}",
+        1,
+    )
+
     text = text.replace("<body>", "<body>" + _OPS_DEBUG_INJECT, 1)
     return text
+
+
+def _patch_now_playing_html(text: str) -> str:
+    """Show a radio icon as the fullscreen cover for radio streams."""
+
+    old_cover = "if(r.youtube_thumbnail){$('#cover').src=r.youtube_thumbnail;$('#cover').style.visibility='visible'}else{$('#cover').removeAttribute('src');$('#cover').style.visibility='visible'}"
+    new_cover = "if(r.youtube_thumbnail){$('#cover').src=r.youtube_thumbnail;$('#cover').style.visibility='visible'}else if(String(v.kind||'').toLowerCase()==='radio'){const radioSvg='<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 512 512\"><rect width=\"512\" height=\"512\" rx=\"64\" fill=\"%23101620\"/><text x=\"256\" y=\"315\" text-anchor=\"middle\" font-size=\"230\">📻</text></svg>';$('#cover').src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(radioSvg);$('#cover').style.visibility='visible'}else{$('#cover').removeAttribute('src');$('#cover').style.visibility='visible'}"
+    return text.replace(old_cover, new_cover, 1)
 
 
 @web.middleware
 async def _security_headers_with_workspace(request: web.Request, handler):
     response = await handler(request)
     allow_inline = request.path in {"/","/workspace","/workspace/studio","/workspace/manage","/media","/ops","/now-playing","/status"}
-    if request.path == "/ops" and response.content_type == "text/html" and response.text:
-        response.text = _patch_ops_html(response.text)
+    if response.content_type == "text/html" and response.text:
+        if request.path == "/ops":
+            response.text = _patch_ops_html(response.text)
+        elif request.path == "/now-playing":
+            response.text = _patch_now_playing_html(response.text)
     style_src = "style-src 'self' 'unsafe-inline'" if allow_inline else "style-src 'self'"
     script_src = "script-src 'self' 'unsafe-inline'" if allow_inline else "script-src 'self'"
     response.headers.update({"X-Content-Type-Options":"nosniff","X-Frame-Options":"DENY","Referrer-Policy":"no-referrer","Permissions-Policy":"camera=(), microphone=(), geolocation=(), payment=(), usb=()","Content-Security-Policy":f"default-src 'self'; {style_src}; {script_src}; img-src 'self' data: http: https:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'","Cache-Control":"no-store"})
