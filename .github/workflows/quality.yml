@@ -21,3 +21,4 @@ jobs:
       - run: python -m compileall -q .
       - run: python scripts/import_smoke.py
       - run: python scripts/command_hub_smoke.py
+      - run: python scripts/dashboard_smoke.py
