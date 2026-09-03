@@ -30,42 +30,12 @@ _HOME_NAV_INJECT = r"""
   const top=document.querySelector('.top-actions');
   if(!top||document.getElementById('homepi-nav-hub'))return;
   const hub=document.createElement('div');
-  hub.id='homepi-nav-hub';
-  hub.className='homepi-nav-hub';
-  hub.innerHTML=`<button type="button" class="homepi-nav-launch" aria-expanded="false">Navigation ▾</button>
-    <div class="homepi-nav-menu" role="menu">
-      <div class="homepi-nav-title">HOMEPI PAGES</div>
-      <a href="/">Dashboard <small>:8080</small></a>
-      <a class="pro" href="/ops">Dashboard Pro <small>Operations</small></a>
-      <a href="/now-playing">Now Playing <small>Fullscreen</small></a>
-      <a href="/control">Control Center <small>System</small></a>
-      <a href="/media">Media Hub <small>Voice · Radio</small></a>
-      <a href="/workspace">Workspace <small>Tools</small></a>
-      <a href="/workspace/manage">Data Manager <small>CRUD</small></a>
-      <a href="/workspace/studio">Workspace Studio <small>Search · Embeds</small></a>
-      <a href="/database-admin">Database Admin <small>SQLite</small></a>
-      <a href="/status" target="_blank">Public Status <small>Sanitized</small></a>
-    </div>`;
-  const refresh=document.getElementById('refresh-button');
-  top.insertBefore(hub,refresh||null);
+  hub.id='homepi-nav-hub';hub.className='homepi-nav-hub';
+  hub.innerHTML=`<button type="button" class="homepi-nav-launch" aria-expanded="false">Navigation ▾</button><div class="homepi-nav-menu" role="menu"><div class="homepi-nav-title">HOMEPI PAGES</div><a href="/">Dashboard <small>:8080</small></a><a class="pro" href="/ops">Dashboard Pro <small>Operations</small></a><a href="/now-playing">Now Playing <small>Fullscreen</small></a><a href="/control">Control Center <small>System</small></a><a href="/media">Media Hub <small>Voice · Radio</small></a><a href="/workspace">Workspace <small>Tools</small></a><a href="/workspace/manage">Data Manager <small>CRUD</small></a><a href="/workspace/studio">Workspace Studio <small>Search · Embeds</small></a><a href="/database-admin">Database Admin <small>SQLite</small></a><a href="/status" target="_blank">Public Status <small>Sanitized</small></a></div>`;
+  const refresh=document.getElementById('refresh-button');top.insertBefore(hub,refresh||null);
   const button=hub.querySelector('.homepi-nav-launch');
-  button.addEventListener('click',event=>{
-    event.stopPropagation();
-    const open=hub.classList.toggle('open');
-    button.setAttribute('aria-expanded',String(open));
-  });
-  document.addEventListener('click',event=>{
-    if(!hub.contains(event.target)){
-      hub.classList.remove('open');
-      button.setAttribute('aria-expanded','false');
-    }
-  });
-  document.addEventListener('keydown',event=>{
-    if(event.key==='Escape'){
-      hub.classList.remove('open');
-      button.setAttribute('aria-expanded','false');
-    }
-  });
+  button.addEventListener('click',event=>{event.stopPropagation();const open=hub.classList.toggle('open');button.setAttribute('aria-expanded',String(open))});
+  document.addEventListener('click',event=>{if(!hub.contains(event.target)){hub.classList.remove('open');button.setAttribute('aria-expanded','false')}});
 })();
 </script>
 """
@@ -73,100 +43,24 @@ _HOME_NAV_INJECT = r"""
 
 _OPS_DEBUG_INJECT = r"""
 <style>
-#ops-debug-stack{position:fixed;right:16px;top:76px;z-index:10000;width:min(520px,calc(100vw - 28px));display:grid;gap:10px;pointer-events:none}
-.ops-debug-window{pointer-events:auto;background:rgba(37,15,20,.98);border:1px solid #8d3542;border-radius:14px;box-shadow:0 22px 60px rgba(0,0,0,.5);overflow:hidden;animation:opsDebugIn .16s ease-out}
-.ops-debug-window .ops-debug-head{display:flex;gap:10px;align-items:center;padding:10px 12px;background:#35171d;border-bottom:1px solid #6f2e38}
-.ops-debug-window .ops-debug-head strong{flex:1;font-size:12px;color:#ffd6da}
-.ops-debug-window .ops-debug-head button{background:transparent;border:0;color:#ffb8bf;padding:2px 6px;font-size:17px}
-.ops-debug-window .ops-debug-body{padding:10px 12px}
-.ops-debug-window .ops-debug-body pre{margin:0;max-height:260px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;color:#ffdfe2}
-.ops-debug-window .ops-debug-meta{margin-top:8px;color:#d9979e;font-size:10px}
-@keyframes opsDebugIn{from{opacity:0;transform:translateY(-8px) scale(.98)}to{opacity:1;transform:none}}
-@media(max-width:720px){#ops-debug-stack{top:12px;right:12px;width:calc(100vw - 24px)}}
+#ops-debug-stack{position:fixed;right:16px;top:76px;z-index:10000;width:min(520px,calc(100vw - 28px));display:grid;gap:10px;pointer-events:none}.ops-debug-window{pointer-events:auto;background:rgba(37,15,20,.98);border:1px solid #8d3542;border-radius:14px;box-shadow:0 22px 60px rgba(0,0,0,.5);overflow:hidden}.ops-debug-window .ops-debug-head{display:flex;gap:10px;align-items:center;padding:10px 12px;background:#35171d;border-bottom:1px solid #6f2e38}.ops-debug-window .ops-debug-head strong{flex:1;font-size:12px;color:#ffd6da}.ops-debug-window .ops-debug-head button{background:transparent;border:0;color:#ffb8bf;padding:2px 6px;font-size:17px}.ops-debug-window .ops-debug-body{padding:10px 12px}.ops-debug-window .ops-debug-body pre{margin:0;max-height:260px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;color:#ffdfe2}.ops-debug-window .ops-debug-meta{margin-top:8px;color:#d9979e;font-size:10px}@media(max-width:720px){#ops-debug-stack{top:12px;right:12px;width:calc(100vw - 24px)}}
 </style>
 <div id="ops-debug-stack" aria-live="assertive"></div>
 <script>
 (()=>{
   const FIXED_GUILD='1162733312226361454';
-  let seq=0;
-  const stack=document.getElementById('ops-debug-stack');
-  function safeText(value){
-    if(value instanceof Error)return `${value.name}: ${value.message}\n${value.stack||''}`;
-    if(typeof value==='string')return value;
-    try{return JSON.stringify(value,null,2)}catch(error){return String(value)}
-  }
-  window.showOpsDebug=(title,details,meta='')=>{
-    if(!stack)return;
-    const box=document.createElement('div');
-    box.className='ops-debug-window';
-    const id=++seq;
-    box.innerHTML=`<div class="ops-debug-head"><strong>Dashboard Pro Error #${id} · ${String(title||'Fehler')}</strong><button type="button" aria-label="Schließen">×</button></div><div class="ops-debug-body"><pre></pre><div class="ops-debug-meta"></div></div>`;
-    box.querySelector('pre').textContent=safeText(details);
-    box.querySelector('.ops-debug-meta').textContent=`Guild ${FIXED_GUILD}${meta?' · '+meta:''} · ${new Date().toLocaleTimeString()}`;
-    box.querySelector('button').onclick=()=>box.remove();
-    stack.prepend(box);
-    while(stack.children.length>5)stack.lastElementChild.remove();
-  };
-
+  let seq=0;const stack=document.getElementById('ops-debug-stack');
+  function safeText(value){if(value instanceof Error)return `${value.name}: ${value.message}\n${value.stack||''}`;if(typeof value==='string')return value;try{return JSON.stringify(value,null,2)}catch(error){return String(value)}}
+  window.showOpsDebug=(title,details,meta='')=>{if(!stack)return;const box=document.createElement('div');box.className='ops-debug-window';const id=++seq;box.innerHTML=`<div class="ops-debug-head"><strong>Dashboard Pro Error #${id} · ${String(title||'Fehler')}</strong><button type="button" aria-label="Schließen">×</button></div><div class="ops-debug-body"><pre></pre><div class="ops-debug-meta"></div></div>`;box.querySelector('pre').textContent=safeText(details);box.querySelector('.ops-debug-meta').textContent=`Guild ${FIXED_GUILD}${meta?' · '+meta:''} · ${new Date().toLocaleTimeString()}`;box.querySelector('button').onclick=()=>box.remove();stack.prepend(box);while(stack.children.length>5)stack.lastElementChild.remove()};
   const rawFetch=window.fetch.bind(window);
   window.fetch=async function(input,init={}){
-    const rawUrl=typeof input==='string'?input:(input&&input.url)||String(input);
-    const method=(init&&init.method)||'GET';
-    let requestUrl;
-    try{requestUrl=new URL(rawUrl,window.location.href)}catch(error){requestUrl=null}
-
-    // Dashboard Pro is intentionally single-guild. Do not ask Discord for the
-    // full bot guild list at all; give the existing Dashboard Pro bootstrap one
-    // synthetic guild so its original, tested JavaScript stays untouched.
-    if(requestUrl&&requestUrl.pathname==='/api/discord/guilds'&&method.toUpperCase()==='GET'){
-      return new Response(JSON.stringify({
-        ok:true,
-        guilds:[{
-          id:FIXED_GUILD,
-          name:`Server ${FIXED_GUILD}`,
-          icon:null,
-          owner_id:'',
-          member_count:0,
-          presence_count:0,
-          description:null,
-          features:[]
-        }],
-        fixed_guild:true
-      }),{status:200,headers:{'Content-Type':'application/json'}});
-    }
-
+    const rawUrl=typeof input==='string'?input:(input&&input.url)||String(input);const method=((init&&init.method)||'GET').toUpperCase();let requestUrl;try{requestUrl=new URL(rawUrl,window.location.href)}catch(error){requestUrl=null}
+    if(requestUrl&&requestUrl.pathname==='/api/discord/guilds'&&method==='GET')return new Response(JSON.stringify({ok:true,guilds:[{id:FIXED_GUILD,name:`Server ${FIXED_GUILD}`,icon:null,owner_id:'',member_count:0,presence_count:0,description:null,features:[]}],fixed_guild:true}),{status:200,headers:{'Content-Type':'application/json'}});
     let nextInput=input;
-    if(requestUrl){
-      // Hard guard: even if a stale UI value exists, Discord resource calls and
-      // Dashboard Pro query parameters are forced back to the configured guild.
-      const guildPath=requestUrl.pathname.match(/^\/api\/discord\/guilds\/(\d+)(\/.*)?$/);
-      if(guildPath&&guildPath[1]!==FIXED_GUILD){
-        requestUrl.pathname=`/api/discord/guilds/${FIXED_GUILD}${guildPath[2]||''}`;
-      }
-      if(requestUrl.pathname.startsWith('/api/ops/')&&requestUrl.searchParams.has('guild_id')){
-        requestUrl.searchParams.set('guild_id',FIXED_GUILD);
-      }
-      if(typeof input==='string')nextInput=requestUrl.pathname+requestUrl.search+requestUrl.hash;
-    }
-
-    try{
-      const response=await rawFetch(nextInput,init);
-      if(!response.ok){
-        let body='';
-        try{body=await response.clone().text()}catch(error){}
-        window.showOpsDebug(
-          `HTTP ${response.status}`,
-          `${method} ${requestUrl?requestUrl.pathname+requestUrl.search:rawUrl}\n\n${body.slice(0,4000)||response.statusText||'Keine Response-Daten'}`,
-          'HTTP'
-        );
-      }
-      return response;
-    }catch(error){
-      window.showOpsDebug('Fetch fehlgeschlagen',`${method} ${rawUrl}\n\n${safeText(error)}`,'Network');
-      throw error;
-    }
-  };
-
+    if(requestUrl){const guildPath=requestUrl.pathname.match(/^\/api\/discord\/guilds\/(\d+)(\/.*)?$/);if(guildPath&&guildPath[1]!==FIXED_GUILD)requestUrl.pathname=`/api/discord/guilds/${FIXED_GUILD}${guildPath[2]||''}`;if(requestUrl.pathname.startsWith('/api/ops/')&&requestUrl.searchParams.has('guild_id'))requestUrl.searchParams.set('guild_id',FIXED_GUILD);if(typeof input==='string')nextInput=requestUrl.pathname+requestUrl.search+requestUrl.hash}
+    const shouldTimeout=requestUrl&&method==='GET'&&(requestUrl.pathname.startsWith('/api/discord/')||requestUrl.pathname.startsWith('/api/ops/'));let timer=null;let controller=null;let nextInit=init;
+    if(shouldTimeout&&!init.signal){controller=new AbortController();nextInit={...init,signal:controller.signal};timer=setTimeout(()=>controller.abort(),10000)}
+    try{const response=await rawFetch(nextInput,nextInit);if(!response.ok){let body='';try{body=await response.clone().text()}catch(error){}window.showOpsDebug(`HTTP ${response.status}`,`${method} ${requestUrl?requestUrl.pathname+requestUrl.search:rawUrl}\n\n${body.slice(0,4000)||response.statusText||'Keine Response-Daten'}`,'HTTP')}return response}catch(error){window.showOpsDebug(error&&error.name==='AbortError'?'Request Timeout':'Fetch fehlgeschlagen',`${method} ${rawUrl}\n\n${safeText(error)}`,error&&error.name==='AbortError'?'Timeout':'Network');throw error}finally{if(timer)clearTimeout(timer)}};
   window.addEventListener('error',event=>window.showOpsDebug('JavaScript Error',event.error||`${event.message}\n${event.filename||''}:${event.lineno||0}:${event.colno||0}`,'JS'));
   window.addEventListener('unhandledrejection',event=>window.showOpsDebug('Unhandled Promise',event.reason||'Unbekannter Promise-Fehler','Promise'));
 })();
@@ -174,50 +68,42 @@ _OPS_DEBUG_INJECT = r"""
 """
 
 
+_OPS_RESCUE_INJECT = r"""
+<script>
+(()=>{
+  const FIXED_GUILD='1162733312226361454';
+  try{
+    const sel=document.getElementById('guild');
+    if(sel){sel.innerHTML='';const option=document.createElement('option');option.value=FIXED_GUILD;option.textContent=`Server ${FIXED_GUILD}`;sel.appendChild(option);sel.value=FIXED_GUILD}
+    guildId=FIXED_GUILD;
+    const tab=(location.hash.slice(1)||'overview');
+    if(typeof openTab==='function')openTab(tab);
+    if(typeof setupQuick==='function')setupQuick();
+    if(typeof setupPreview==='function')setupPreview();
+    if(typeof loadDiscordResources==='function')loadDiscordResources().catch(error=>window.showOpsDebug&&window.showOpsDebug('Discord Ressourcen',error,'Rescue'));
+    if(typeof startLive==='function')startLive();
+  }catch(error){if(window.showOpsDebug)window.showOpsDebug('Dashboard Rescue',error,'Startup')}
+})();
+</script>
+"""
+
+
 def _patch_ops_html(text: str) -> str:
-    """Pin Dashboard Pro without rewriting its application JavaScript.
-
-    Previous revisions modified minified inline functions with string
-    replacements. That was fragile and caused Safari to parse a broken script.
-    This version leaves the original Dashboard Pro script byte-for-byte intact
-    and intercepts only its guild-list fetch before that script executes.
-    """
-
+    """Pin Dashboard Pro to one guild and render the shell without waiting for API calls."""
     text = text.replace("<body>", "<body>" + _OPS_DEBUG_INJECT, 1)
+    text = text.replace("</body>", _OPS_RESCUE_INJECT + "</body>", 1)
     return text
 
 
 @web.middleware
 async def _security_headers_with_workspace(request: web.Request, handler):
     response = await handler(request)
-    allow_inline = request.path in {
-        "/",
-        "/workspace",
-        "/workspace/studio",
-        "/workspace/manage",
-        "/media",
-        "/ops",
-        "/now-playing",
-        "/status",
-    }
+    allow_inline = request.path in {"/","/workspace","/workspace/studio","/workspace/manage","/media","/ops","/now-playing","/status"}
     if request.path == "/ops" and response.content_type == "text/html" and response.text:
         response.text = _patch_ops_html(response.text)
-
     style_src = "style-src 'self' 'unsafe-inline'" if allow_inline else "style-src 'self'"
     script_src = "script-src 'self' 'unsafe-inline'" if allow_inline else "script-src 'self'"
-    response.headers.update(
-        {
-            "X-Content-Type-Options": "nosniff",
-            "X-Frame-Options": "DENY",
-            "Referrer-Policy": "no-referrer",
-            "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
-            "Content-Security-Policy": (
-                f"default-src 'self'; {style_src}; {script_src}; img-src 'self' data: http: https:; "
-                "connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
-            ),
-            "Cache-Control": "no-store",
-        }
-    )
+    response.headers.update({"X-Content-Type-Options":"nosniff","X-Frame-Options":"DENY","Referrer-Policy":"no-referrer","Permissions-Policy":"camera=(), microphone=(), geolocation=(), payment=(), usb=()","Content-Security-Policy":f"default-src 'self'; {style_src}; {script_src}; img-src 'self' data: http: https:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'","Cache-Control":"no-store"})
     return response
 
 
