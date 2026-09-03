@@ -80,6 +80,7 @@ def _record_direct_delivery(config, guild_id: int, channel_id: int, message_id: 
     now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
     con = sqlite3.connect(db_path)
     try:
+        con.execute("PRAGMA busy_timeout=3000")
         con.execute(
             """INSERT INTO dashboard_scheduled_messages
                (guild_id,channel_id,send_at,content,embed_json,buttons_json,status,result,processed_at)
@@ -136,13 +137,22 @@ async def api_message_send(request: web.Request) -> web.Response:
             timeout=8.0,
         )
         message_id = str(result.get("id") or "")
-        await asyncio.to_thread(
-            _record_direct_delivery,
-            request.app["config"],
-            guild_id,
-            channel_id,
-            message_id,
-        )
+
+        # A successful Discord send must never be reported as failed just
+        # because the optional local delivery-history write was temporarily
+        # locked. Otherwise a retry could create a duplicate Discord message.
+        status_warning = None
+        try:
+            await asyncio.to_thread(
+                _record_direct_delivery,
+                request.app["config"],
+                guild_id,
+                channel_id,
+                message_id,
+            )
+        except sqlite3.Error as exc:
+            status_warning = f"Versand erfolgreich; Statusprotokoll konnte nicht gespeichert werden: {exc}"
+
         return web.json_response(
             {
                 "ok": True,
@@ -151,6 +161,7 @@ async def api_message_send(request: web.Request) -> web.Response:
                 "channel_id": str(channel_id),
                 "guild_id": str(guild_id),
                 "discord_url": f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}" if message_id else None,
+                "status_warning": status_warning,
             }
         )
     except asyncio.TimeoutError:
@@ -159,8 +170,6 @@ async def api_message_send(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "message": str(exc)}, status=400)
     except DiscordServiceError as exc:
         return web.json_response({"ok": False, "message": str(exc)}, status=502)
-    except sqlite3.Error as exc:
-        return web.json_response({"ok": False, "message": f"SQLite: {exc}"}, status=500)
     except Exception as exc:
         return web.json_response({"ok": False, "message": f"{type(exc).__name__}: {exc}"}, status=500)
 
@@ -177,6 +186,7 @@ async def api_message_status(request: web.Request) -> web.Response:
             con = sqlite3.connect(db_path)
             con.row_factory = sqlite3.Row
             try:
+                con.execute("PRAGMA busy_timeout=3000")
                 rows = con.execute(
                     """SELECT id,channel_id,send_at,status,result,created_at,processed_at
                        FROM dashboard_scheduled_messages
