@@ -210,6 +210,25 @@
     }
   }
 
+  function loadDisplayDesigner() {
+    if (document.getElementById('ops-display-designer-script')) return;
+    if (!document.getElementById('ops-display-designer-style')) {
+      const link = document.createElement('link');
+      link.id = 'ops-display-designer-style';
+      link.rel = 'stylesheet';
+      link.href = '/static/display_designer.css';
+      document.head.appendChild(link);
+    }
+    const script = document.createElement('script');
+    script.id = 'ops-display-designer-script';
+    script.src = '/static/display_designer.js';
+    script.defer = true;
+    script.onerror = () => {
+      if (typeof window.showOpsDebug === 'function') window.showOpsDebug('Pi Display Studio', 'display_designer.js konnte nicht geladen werden.', 'Asset');
+    };
+    document.body.appendChild(script);
+  }
+
   function installFetchDiagnostics() {
     if (window.__opsProFetchDiagnostics) return;
     window.__opsProFetchDiagnostics = true;
@@ -240,6 +259,7 @@
     wrapOpenTab();
     setupMessageStudio();
     installFetchDiagnostics();
+    loadDisplayDesigner();
     updateDocumentTitle(location.hash.slice(1) || 'overview');
     if ((location.hash.slice(1) || 'overview') === 'messages') setTimeout(loadMessageStatus, 200);
   }
