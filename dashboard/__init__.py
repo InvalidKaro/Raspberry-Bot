@@ -12,6 +12,7 @@ from aiohttp import web
 
 from . import app_legacy as _app_legacy
 from .media_routes import register_media_routes
+from .message_studio_routes import register_message_studio_routes
 from .ops_routes import register_ops_routes
 from .workspace_editor_routes import register_workspace_editor_routes
 from .workspace_plus_routes import register_workspace_plus_routes
@@ -155,7 +156,19 @@ def _patch_ops_html(text: str) -> str:
         1,
     )
 
+    # Keep presentation/interaction overrides outside the large inline page so
+    # Dashboard Pro can evolve without more fragile string rewrites.
+    text = text.replace(
+        "</head>",
+        '<link rel="stylesheet" href="/static/ops_pro.css"></head>',
+        1,
+    )
     text = text.replace("<body>", "<body>" + _OPS_DEBUG_INJECT, 1)
+    text = text.replace(
+        "</body>",
+        '<script src="/static/ops_pro.js"></script></body>',
+        1,
+    )
     return text
 
 
@@ -210,6 +223,7 @@ if not getattr(_app_legacy, "_workspace_suite_wrapped", False):
         register_workspace_editor_routes(app)
         register_media_routes(app)
         register_ops_routes(app)
+        register_message_studio_routes(app)
         app.router.add_get("/api/ops/fixed-guild", _ops_fixed_guild)
         return app
 
