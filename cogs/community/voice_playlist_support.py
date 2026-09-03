@@ -15,6 +15,13 @@ PLAYLIST_TIMEOUT_SECONDS = 7
 PLAYLIST_MAX_BYTES = 64 * 1024
 USER_AGENT = "Raspberry-Bot-Radio/1.0"
 
+# Some Icecast endpoints work in browsers but terminate quickly with certain
+# FFmpeg builds on Raspberry Pi. WDR publishes an official HLS endpoint for the
+# same programme, so transparently prefer it for the affected DIGGI stream.
+WDR_1LIVE_DIGGI_MP3_HOST = "wdr-1live-diggi.icecastssl.wdr.de"
+WDR_1LIVE_DIGGI_MP3_PATH = "/wdr/1live/diggi/mp3/128/stream.mp3"
+WDR_1LIVE_DIGGI_HLS = "https://wdrhf.akamaized.net/hls/live/2027963/1livediggi/master.m3u8"
+
 
 def _validate_public_https(value: str) -> str:
     url = value.strip()
@@ -59,6 +66,16 @@ def _validate_public_https(value: str) -> str:
     return url
 
 
+def _provider_fallback(url: str) -> str:
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    path = parsed.path.rstrip("/") or "/"
+    if host == WDR_1LIVE_DIGGI_MP3_HOST and path == WDR_1LIVE_DIGGI_MP3_PATH:
+        logger.info("Using official WDR HLS fallback for 1LIVE DIGGI")
+        return WDR_1LIVE_DIGGI_HLS
+    return url
+
+
 def _playlist_kind(url: str) -> str | None:
     path = urlparse(url).path.lower()
     if path.endswith(".m3u8"):
@@ -96,19 +113,20 @@ def _parse_playlist(body: str, *, base_url: str, kind: str) -> str:
 
 
 def resolve_radio_url(url: str) -> str:
-    """Resolve simple M3U/PLS indirection before FFmpeg sees the input.
-
-    FFmpeg handles HLS (.m3u8) itself, but classic internet-radio .m3u/.pls
-    files are often only text files containing the real MP3 stream URL. Feeding
-    those text files to FFmpeg as audio can result in AVERROR_INVALIDDATA, which
-    appears in the shell as return code 183.
-    """
-    source = _validate_public_https(url)
+    """Resolve provider fallbacks and simple M3U/PLS indirection for FFmpeg."""
+    source = _provider_fallback(_validate_public_https(url))
+    source = _validate_public_https(source)
     kind = _playlist_kind(source)
     if kind is None:
         return source
 
-    request = Request(source, headers={"User-Agent": USER_AGENT, "Accept": "audio/x-mpegurl,audio/x-scpls,text/plain,*/*"})
+    request = Request(
+        source,
+        headers={
+            "User-Agent": USER_AGENT,
+            "Accept": "audio/x-mpegurl,audio/x-scpls,text/plain,*/*",
+        },
+    )
     try:
         with urlopen(request, timeout=PLAYLIST_TIMEOUT_SECONDS) as response:  # noqa: S310 - URL is validated above
             final_url = _validate_public_https(response.geturl())
