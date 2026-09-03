@@ -67,8 +67,8 @@
   }
 
   function updateDocumentTitle(tab) {
-    const section = qs(`#${CSS.escape(tab)}`);
-    const title = qs('.section-title h1', section);
+    const section = qs(`#${tab}`);
+    const title = section ? qs('.section-title h1', section) : null;
     document.title = title ? `${title.textContent} · HomePi Pro` : 'HomePi Dashboard Pro';
   }
 
@@ -161,7 +161,6 @@
 
       if (button) {
         button.disabled = true;
-        button.dataset.originalText ||= button.textContent;
         button.textContent = sendAt ? 'Wird geplant …' : 'Wird gesendet …';
       }
 
@@ -178,7 +177,7 @@
     } catch (error) {
       note(error.message || String(error), false);
       if (typeof window.showOpsDebug === 'function') window.showOpsDebug('Message Studio', error, 'Send');
-      throw error;
+      return null;
     } finally {
       if (button) {
         button.disabled = false;
