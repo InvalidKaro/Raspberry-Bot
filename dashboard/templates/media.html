@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>HomePi Media Hub</title>
+<style>
+:root{color-scheme:dark;--bg:#090b10;--card:#11151c;--card2:#151a23;--line:#252c38;--text:#f5f7fb;--muted:#8f9bad;--accent:#8b5cf6;--pink:#e91e63;--green:#31c48d;--danger:#ef4444;--shadow:0 18px 50px rgba(0,0,0,.32)}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 20% 0,#171027 0,transparent 34%),var(--bg);font:14px/1.45 Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--text)}button,input,select{font:inherit}.shell{max-width:1280px;margin:0 auto;padding:24px}.top{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:22px}.brand h1{margin:0;font-size:27px;letter-spacing:-.03em}.brand p{margin:5px 0 0;color:var(--muted)}.top a{color:#ddd3ff;text-decoration:none;border:1px solid var(--line);padding:9px 13px;border-radius:10px;background:#11151c}.toolbar{display:grid;grid-template-columns:1.1fr 1.3fr .7fr .7fr;gap:10px;padding:14px;background:rgba(17,21,28,.92);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);position:sticky;top:10px;z-index:20}.toolbar label,.field label{display:block;color:var(--muted);font-size:11px;font-weight:750;letter-spacing:.07em;text-transform:uppercase;margin-bottom:6px}input,select{width:100%;background:#0c1016;border:1px solid #2a3240;color:var(--text);border-radius:10px;padding:10px 11px;outline:none}input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(139,92,246,.13)}button{border:0;border-radius:10px;padding:10px 13px;color:white;background:#2a3140;font-weight:700;cursor:pointer}button:hover{filter:brightness(1.1)}button.primary{background:var(--accent)}button.radio{background:var(--pink)}button.good{background:#13795b}button.danger{background:#8f2630}.grid{display:grid;grid-template-columns:1.25fr .75fr;gap:18px;margin-top:18px}.card{background:rgba(17,21,28,.94);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);overflow:hidden}.head{padding:16px 17px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:10px;align-items:center}.head h2{margin:0;font-size:16px}.head small{color:var(--muted)}.body{padding:15px 17px}.ambient-grid,.station-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.tile{border:1px solid var(--line);background:var(--card2);border-radius:13px;padding:13px}.tile h3{margin:0 0 5px;font-size:14px}.tile p{margin:0 0 10px;color:var(--muted);font-size:12px}.tile .actions{display:flex;gap:7px;flex-wrap:wrap}.tile button{padding:7px 10px;font-size:12px}.forms{display:grid;grid-template-columns:1fr 1fr;gap:14px}.formbox{border:1px solid var(--line);border-radius:13px;padding:13px;background:#0d1118}.formbox h3{margin:0 0 11px}.field{margin-bottom:9px}.row{display:grid;grid-template-columns:1fr 1fr;gap:8px}.history{display:grid;gap:7px}.history .item{display:flex;justify-content:space-between;gap:12px;padding:9px 10px;border:1px solid #202734;border-radius:10px;background:#0c1016}.item b{font-size:12px}.item small{color:var(--muted)}.queue{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:#b9c2cf;white-space:pre-wrap;max-height:240px;overflow:auto}.status{min-height:20px;margin-top:10px;color:#c8d1de}.status.ok{color:#75e0b9}.status.bad{color:#ff8a95}.empty{color:var(--muted);padding:12px 2px}.section-gap{margin-top:18px}@media(max-width:900px){.toolbar{grid-template-columns:1fr 1fr}.grid{grid-template-columns:1fr}.forms{grid-template-columns:1fr}}@media(max-width:600px){.shell{padding:13px}.top{align-items:flex-start}.toolbar{position:static;grid-template-columns:1fr}.ambient-grid,.station-grid{grid-template-columns:1fr}.row{grid-template-columns:1fr}.brand h1{font-size:23px}}
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="top"><div class="brand"><h1>🎧 HomePi Media Hub</h1><p>Voice, Ambient, Internet-Radio und Media-Library direkt vom Dashboard.</p></div><a href="/">← Dashboard</a></div>
+  <div class="toolbar">
+    <div><label>Server</label><select id="guild"><option value="">Server wählen …</option></select></div>
+    <div><label>Voice-Channel</label><select id="channel"><option value="">Voice-Channel wählen …</option></select></div>
+    <div><label>Lautstärke</label><input id="volume" type="number" min="10" max="120" value="65"></div>
+    <div><label>Sleep-Timer (Min.)</label><input id="minutes" type="number" min="0" max="480" value="0"></div>
+  </div>
+
+  <div class="grid">
+    <main>
+      <section class="card">
+        <div class="head"><h2>🌌 Ambient Scenes</h2><small>Layered · Pi-friendly</small></div>
+        <div class="body"><div id="ambientGrid" class="ambient-grid"><div class="empty">Server wählen …</div></div></div>
+      </section>
+
+      <section class="card section-gap">
+        <div class="head"><h2>📻 Internet Radio</h2><small>Gespeicherte HTTPS-Streams</small></div>
+        <div class="body"><div id="stationGrid" class="station-grid"><div class="empty">Noch keine Sender geladen.</div></div></div>
+      </section>
+
+      <section class="card section-gap">
+        <div class="head"><h2>🎧 Real Ambient Library</h2><small>Echte Aufnahmen / Streams statt nur Synthese</small></div>
+        <div class="body"><div id="sourceGrid" class="station-grid"><div class="empty">Noch keine Quellen geladen.</div></div></div>
+      </section>
+
+      <section class="card section-gap">
+        <div class="head"><h2>🕘 Playback History</h2><small>Letzte 30 Starts</small></div>
+        <div class="body"><div id="history" class="history"></div></div>
+      </section>
+    </main>
+
+    <aside>
+      <section class="card">
+        <div class="head"><h2>🎛️ Live Controls</h2><small>Bot Queue</small></div>
+        <div class="body">
+          <div class="row"><button class="primary" id="setVolume">Lautstärke setzen</button><button id="stop">⏹ Stop</button></div>
+          <div class="row" style="margin-top:8px"><button class="danger" id="disconnect">🔌 Disconnect</button><button id="refresh">↻ Refresh</button></div>
+          <div id="status" class="status"></div>
+        </div>
+      </section>
+
+      <section class="card section-gap">
+        <div class="head"><h2>➕ Media Library</h2><small>CRUD</small></div>
+        <div class="body forms" style="grid-template-columns:1fr">
+          <form id="stationForm" class="formbox">
+            <h3>Radiosender</h3>
+            <div class="field"><label>Name</label><input name="name" required maxlength="48"></div>
+            <div class="field"><label>HTTPS Stream URL</label><input name="stream_url" required placeholder="https://…"></div>
+            <div class="row"><div class="field"><label>Genre</label><input name="genre" maxlength="60"></div><div class="field"><label>Homepage</label><input name="homepage" placeholder="https://…"></div></div>
+            <button class="radio" type="submit">Sender speichern</button>
+          </form>
+          <form id="sourceForm" class="formbox">
+            <h3>Echte Ambient-Quelle</h3>
+            <div class="field"><label>Name</label><input name="name" required maxlength="48"></div>
+            <div class="field"><label>HTTPS Audio URL</label><input name="audio_url" required placeholder="https://…mp3 / stream"></div>
+            <div class="field"><label>Kategorie</label><input name="category" value="Nature" maxlength="40"></div>
+            <button class="good" type="submit">Quelle speichern</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="card section-gap">
+        <div class="head"><h2>⚙️ Media Queue</h2><small>Dashboard → Bot</small></div>
+        <div class="body"><div id="queue" class="queue">—</div></div>
+      </section>
+    </aside>
+  </div>
+</div>
+<script>
+let csrf='';let state=null;
+const $=s=>document.querySelector(s);const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const guild=()=>$('#guild').value;const channel=()=>$('#channel').value;const volume=()=>Math.max(10,Math.min(120,Number($('#volume').value)||65));const minutes=()=>Math.max(0,Math.min(480,Number($('#minutes').value)||0));
+function note(text,ok=true){const n=$('#status');n.textContent=text;n.className='status '+(ok?'ok':'bad');}
+async function json(url,opts={}){const r=await fetch(url,opts);const data=await r.json().catch(()=>({ok:false,message:'Ungültige Serverantwort'}));if(!r.ok||data.ok===false)throw new Error(data.message||`HTTP ${r.status}`);return data}
+async function post(url,data){return json(url,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify(data)})}
+async function bootstrap(){const b=await json('/api/bootstrap');csrf=b.csrf;const g=await json('/api/discord/guilds');const sel=$('#guild');for(const item of g.guilds||[]){const o=document.createElement('option');o.value=item.id;o.textContent=item.name+' · '+item.id;sel.appendChild(o)}if((g.guilds||[]).length===1){sel.value=g.guilds[0].id;await loadChannels();await loadState()}}
+async function loadChannels(){const gid=guild();const sel=$('#channel');sel.innerHTML='<option value="">Voice-Channel wählen …</option>';if(!gid)return;try{const r=await json('/api/discord/resources/'+gid);for(const c of (r.channels||[]).filter(x=>x.type===2||x.type===13)){const o=document.createElement('option');o.value=c.id;o.textContent=(c.type===13?'Stage · ':'🔊 ')+c.name;sel.appendChild(o)}}catch(e){note(e.message,false)}}
+async function loadState(){if(!guild())return;try{state=await json('/api/media/state?guild_id='+encodeURIComponent(guild()));render();note('Media Hub aktualisiert.')}catch(e){note(e.message,false)}}
+function render(){renderAmbient();renderStations();renderSources();renderHistory();renderQueue()}
+function renderAmbient(){const root=$('#ambientGrid');root.innerHTML='';for(const s of state.ambient_catalog||[]){const el=document.createElement('div');el.className='tile';el.innerHTML=`<h3>${esc(s.icon)} ${esc(s.label)}</h3><p>${esc(s.description)}</p><div class="actions"><button class="primary">▶ Play</button></div>`;el.querySelector('button').onclick=()=>mediaAction('ambient-play',{scene:s.key});root.appendChild(el)}if(!root.children.length)root.innerHTML='<div class="empty">Keine Szenen.</div>'}
+function renderStations(){const root=$('#stationGrid');root.innerHTML='';for(const s of state.stations||[]){const el=document.createElement('div');el.className='tile';el.innerHTML=`<h3>📻 ${esc(s.name)}</h3><p>${esc(s.genre||'Kein Genre')} · ${s.enabled?'aktiv':'deaktiviert'}</p><div class="actions"><button class="radio">▶ Play</button><button data-del>Delete</button></div>`;el.querySelector('.radio').onclick=()=>mediaAction('radio-play',{station:s.name});el.querySelector('[data-del]').onclick=()=>deleteStation(s.name);root.appendChild(el)}if(!root.children.length)root.innerHTML='<div class="empty">Noch keine Sender. Rechts kannst du einen HTTPS-Stream hinzufügen.</div>'}
+function renderSources(){const root=$('#sourceGrid');root.innerHTML='';for(const s of state.ambient_sources||[]){const el=document.createElement('div');el.className='tile';el.innerHTML=`<h3>🎧 ${esc(s.name)}</h3><p>${esc(s.category||'Custom')} · reale Audioquelle</p><div class="actions"><button class="good">▶ Play</button><button data-del>Delete</button></div>`;el.querySelector('.good').onclick=()=>mediaAction('ambient-source-play',{source:s.name});el.querySelector('[data-del]').onclick=()=>deleteSource(s.name);root.appendChild(el)}if(!root.children.length)root.innerHTML='<div class="empty">Keine echten Ambient-Quellen gespeichert.</div>'}
+function renderHistory(){const root=$('#history');root.innerHTML='';for(const h of state.history||[]){const el=document.createElement('div');el.className='item';el.innerHTML=`<div><b>${esc(h.title)}</b><br><small>${esc(h.kind)} · ${esc(h.source_name||'')}</small></div><small>${esc(h.started_at)}</small>`;root.appendChild(el)}if(!root.children.length)root.innerHTML='<div class="empty">Noch keine Wiedergabe-Historie.</div>'}
+function renderQueue(){const rows=(state.queue||[]).map(q=>`#${q.id} ${q.action} · ${q.status}${q.result?'\n  '+q.result:''}`);$('#queue').textContent=rows.join('\n')||'—'}
+async function mediaAction(action,extra={}){if(!guild())return note('Server wählen.',false);if(['radio-play','ambient-play','ambient-source-play'].includes(action)&&!channel())return note('Voice-Channel wählen.',false);try{const data=await post('/api/media/action',{action,guild_id:guild(),channel_id:channel(),volume:volume(),minutes:minutes(),...extra});note(`Queue #${data.command_id}: ${data.message}`);setTimeout(loadState,2200)}catch(e){note(e.message,false)}}
+async function deleteStation(name){if(!confirm(`Sender ${name} löschen?`))return;try{await post('/api/media/station',{action:'delete',guild_id:guild(),name});await loadState()}catch(e){note(e.message,false)}}
+async function deleteSource(name){if(!confirm(`Ambient-Quelle ${name} löschen?`))return;try{await post('/api/media/ambient-source',{action:'delete',guild_id:guild(),name});await loadState()}catch(e){note(e.message,false)}}
+$('#guild').addEventListener('change',async()=>{await loadChannels();await loadState()});$('#refresh').onclick=loadState;$('#stop').onclick=()=>mediaAction('stop');$('#disconnect').onclick=()=>mediaAction('disconnect');$('#setVolume').onclick=()=>mediaAction('volume');
+$('#stationForm').addEventListener('submit',async e=>{e.preventDefault();if(!guild())return note('Server wählen.',false);const f=new FormData(e.currentTarget);try{await post('/api/media/station',{action:'save',guild_id:guild(),name:f.get('name'),stream_url:f.get('stream_url'),genre:f.get('genre'),homepage:f.get('homepage')});e.currentTarget.reset();await loadState();note('Sender gespeichert.')}catch(err){note(err.message,false)}});
+$('#sourceForm').addEventListener('submit',async e=>{e.preventDefault();if(!guild())return note('Server wählen.',false);const f=new FormData(e.currentTarget);try{await post('/api/media/ambient-source',{action:'save',guild_id:guild(),name:f.get('name'),audio_url:f.get('audio_url'),category:f.get('category')});e.currentTarget.reset();await loadState();note('Ambient-Quelle gespeichert.')}catch(err){note(err.message,false)}});
+bootstrap().catch(e=>note(e.message,false));
+</script>
+</body>
+</html>
