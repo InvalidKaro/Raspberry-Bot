@@ -137,7 +137,14 @@ class BotConfigService:
         return await self.get(guild_id)
 
     async def list_guild_ids(self) -> list[int]:
+        # Dashboard Pro runs in a separate process from discord.py, so it cannot
+        # read bot.guilds directly. dashboard_runtime_state is maintained by the
+        # bot's DashboardTelemetry cog for every connected guild and is therefore
+        # the most reliable guild registry for the dashboard. The additional
+        # tables remain useful fallbacks for older databases and startup timing.
         queries = [
+            "SELECT guild_id FROM dashboard_runtime_state",
+            "SELECT DISTINCT guild_id FROM dashboard_activity WHERE guild_id IS NOT NULL",
             "SELECT guild_id FROM guild_settings",
             "SELECT guild_id FROM system_monitor_config",
             "SELECT DISTINCT guild_id FROM tickets",
