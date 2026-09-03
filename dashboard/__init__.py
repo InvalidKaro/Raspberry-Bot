@@ -82,9 +82,9 @@ def _dashboard_db_path(config) -> Path:
 def _select_ops_guild_id(config) -> int | None:
     """Pick one Dashboard Pro guild without asking Discord for every guild.
 
-    An explicit DASHBOARD_PRO_GUILD_ID wins. Otherwise prefer the guild that
-    currently has an active voice/YouTube session, then the most recently active
-    telemetry guild. This keeps Dashboard Pro deliberately single-guild for now.
+    An explicit DASHBOARD_PRO_GUILD_ID wins. Otherwise use the guild with the
+    newest recorded dashboard activity. Runtime telemetry and guild settings are
+    only fallbacks when no activity event has been recorded yet.
     """
 
     explicit = os.getenv("DASHBOARD_PRO_GUILD_ID", "").strip()
@@ -99,27 +99,17 @@ def _select_ops_guild_id(config) -> int | None:
     try:
         queries = [
             """
-            SELECT r.guild_id
-            FROM dashboard_runtime_state r
-            WHERE r.guild_id IS NOT NULL
-            ORDER BY
-              CASE
-                WHEN r.state_json LIKE '%\"connected\":true%'
-                  OR r.state_json LIKE '%\"active\":true%'
-                THEN 0 ELSE 1
-              END,
-              COALESCE(
-                (SELECT MAX(a.id) FROM dashboard_activity a WHERE a.guild_id = r.guild_id),
-                0
-              ) DESC,
-              r.updated_at DESC
-            LIMIT 1
-            """,
-            """
             SELECT guild_id
             FROM dashboard_activity
             WHERE guild_id IS NOT NULL
             ORDER BY id DESC
+            LIMIT 1
+            """,
+            """
+            SELECT guild_id
+            FROM dashboard_runtime_state
+            WHERE guild_id IS NOT NULL
+            ORDER BY updated_at DESC
             LIMIT 1
             """,
             """
