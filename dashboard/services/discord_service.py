@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import time
 from pathlib import Path
 from urllib.parse import quote
 
@@ -30,6 +32,9 @@ class DiscordService:
     def __init__(self, env_path: Path) -> None:
         self.env_path = env_path
         self.base = "https://discord.com/api/v10"
+        self._guild_cache_key: tuple[int, ...] = ()
+        self._guild_cache_until = 0.0
+        self._guild_cache: list[dict] = []
 
     def _token(self) -> str:
         token = read_env_value(self.env_path, "DISCORD_TOKEN")
@@ -37,29 +42,33 @@ class DiscordService:
             raise DiscordServiceError("DISCORD_TOKEN is empty.")
         return token
 
+    @staticmethod
+    async def _decode_response(response: aiohttp.ClientResponse):
+        if response.status >= 400:
+            text = await response.text()
+            raise DiscordServiceError(f"Discord API returned HTTP {response.status}: {text[:300]}")
+        if response.status == 204:
+            return {}
+        text = await response.text()
+        if not text:
+            return {}
+        try:
+            return await response.json()
+        except (aiohttp.ContentTypeError, ValueError) as exc:
+            raise DiscordServiceError("Discord API returned an invalid JSON response.") from exc
+
     async def _request(self, method: str, route: str, *, payload: dict | None = None):
         headers = {"Authorization": f"Bot {self._token()}", "User-Agent": "HomePiDashboard/4.0"}
         timeout = aiohttp.ClientTimeout(total=12)
         async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
             async with session.request(method, self.base + route, json=payload) as response:
-                if response.status >= 400:
-                    text = await response.text()
-                    raise DiscordServiceError(f"Discord API returned HTTP {response.status}: {text[:300]}")
-                if response.status == 204:
-                    return {}
-                text = await response.text()
-                if not text:
-                    return {}
-                try:
-                    return await response.json()
-                except (aiohttp.ContentTypeError, ValueError) as exc:
-                    raise DiscordServiceError("Discord API returned an invalid JSON response.") from exc
+                return await self._decode_response(response)
 
     async def _get(self, route: str):
         return await self._request("GET", route)
 
-    async def guild(self, guild_id: int) -> dict:
-        row = await self._get(f"/guilds/{guild_id}?with_counts=true")
+    @staticmethod
+    def _guild_payload(row: dict) -> dict:
         return {
             "id": str(row["id"]),
             "name": str(row.get("name") or row["id"]),
@@ -71,14 +80,50 @@ class DiscordService:
             "features": list(row.get("features") or []),
         }
 
+    async def guild(self, guild_id: int) -> dict:
+        row = await self._get(f"/guilds/{guild_id}?with_counts=true")
+        return self._guild_payload(row)
+
     async def guilds(self, guild_ids: list[int]) -> list[dict]:
-        result: list[dict] = []
-        for guild_id in guild_ids[:100]:
-            try:
-                result.append(await self.guild(guild_id))
-            except DiscordServiceError:
-                continue
-        return sorted(result, key=lambda item: item["name"].lower())
+        """Resolve guild metadata quickly without serial Discord requests.
+
+        The old implementation created a fresh HTTP session and waited for each
+        guild one after another. With historical guild IDs in SQLite that could
+        turn one dashboard dropdown request into a minute-long operation. Resolve
+        a bounded number concurrently over one keep-alive connection pool and
+        cache the result briefly because every dashboard page asks for the same
+        guild list during bootstrap.
+        """
+        normalized = tuple(dict.fromkeys(int(value) for value in guild_ids if int(value) > 0))[:100]
+        if not normalized:
+            return []
+
+        now = time.monotonic()
+        if normalized == self._guild_cache_key and now < self._guild_cache_until:
+            return [dict(item) for item in self._guild_cache]
+
+        headers = {"Authorization": f"Bot {self._token()}", "User-Agent": "HomePiDashboard/4.0"}
+        timeout = aiohttp.ClientTimeout(total=7, connect=3, sock_read=5)
+        connector = aiohttp.TCPConnector(limit=10, ttl_dns_cache=300)
+        semaphore = asyncio.Semaphore(8)
+
+        async with aiohttp.ClientSession(timeout=timeout, headers=headers, connector=connector) as session:
+            async def fetch_one(guild_id: int) -> dict | None:
+                try:
+                    async with semaphore:
+                        async with session.get(self.base + f"/guilds/{guild_id}?with_counts=true") as response:
+                            row = await self._decode_response(response)
+                    return self._guild_payload(row)
+                except (DiscordServiceError, aiohttp.ClientError, asyncio.TimeoutError):
+                    return None
+
+            rows = await asyncio.gather(*(fetch_one(guild_id) for guild_id in normalized))
+
+        result = sorted((row for row in rows if row is not None), key=lambda item: item["name"].lower())
+        self._guild_cache_key = normalized
+        self._guild_cache_until = time.monotonic() + 30.0
+        self._guild_cache = [dict(item) for item in result]
+        return result
 
     async def channels_detailed(self, guild_id: int) -> list[dict]:
         rows = await self._get(f"/guilds/{guild_id}/channels")
