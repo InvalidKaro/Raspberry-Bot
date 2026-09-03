@@ -8,8 +8,6 @@ project remains modular.
 
 from __future__ import annotations
 
-import asyncio
-
 from aiohttp import web
 
 from . import app_legacy as _app_legacy
@@ -20,7 +18,7 @@ from .workspace_plus_routes import register_workspace_plus_routes
 from .workspace_routes import register_workspace_routes
 
 
-OPS_GUILD_ID = 1162733312226361454
+OPS_GUILD_ID = "1162733312226361454"
 
 
 _HOME_NAV_INJECT = r"""
@@ -92,13 +90,11 @@ _OPS_DEBUG_INJECT = r"""
   const FIXED_GUILD='1162733312226361454';
   let seq=0;
   const stack=document.getElementById('ops-debug-stack');
-
   function safeText(value){
     if(value instanceof Error)return `${value.name}: ${value.message}\n${value.stack||''}`;
     if(typeof value==='string')return value;
     try{return JSON.stringify(value,null,2)}catch{return String(value)}
   }
-
   window.showOpsDebug=(title,details,meta='')=>{
     if(!stack)return;
     const box=document.createElement('div');
@@ -111,7 +107,6 @@ _OPS_DEBUG_INJECT = r"""
     stack.prepend(box);
     while(stack.children.length>5)stack.lastElementChild.remove();
   };
-
   const rawFetch=window.fetch.bind(window);
   window.fetch=async function(input,init={}){
     const url=typeof input==='string'?input:(input&&input.url)||String(input);
@@ -121,11 +116,7 @@ _OPS_DEBUG_INJECT = r"""
       if(!response.ok){
         let body='';
         try{body=await response.clone().text()}catch{}
-        showOpsDebug(
-          `HTTP ${response.status}`,
-          `${method} ${url}\n\n${body.slice(0,4000)||response.statusText||'Keine Response-Daten'}`,
-          'HTTP'
-        );
+        showOpsDebug(`HTTP ${response.status}`,`${method} ${url}\n\n${body.slice(0,4000)||response.statusText||'Keine Response-Daten'}`,'HTTP');
       }
       return response;
     }catch(error){
@@ -133,95 +124,67 @@ _OPS_DEBUG_INJECT = r"""
       throw error;
     }
   };
-
-  window.addEventListener('error',event=>{
-    showOpsDebug('JavaScript Error',event.error||`${event.message}\n${event.filename||''}:${event.lineno||0}:${event.colno||0}`,'JS');
-  });
-  window.addEventListener('unhandledrejection',event=>{
-    showOpsDebug('Unhandled Promise',event.reason||'Unbekannter Promise-Fehler','Promise');
-  });
-
-  const guildSelect=document.getElementById('guild');
-  if(guildSelect){
-    guildSelect.disabled=true;
-    guildSelect.title=`Dashboard Pro ist fest auf Guild ${FIXED_GUILD} begrenzt`;
-  }
-
-  if(typeof window.note==='function'){
-    const originalNote=window.note;
-    window.note=function(text,ok=true){
-      if(!ok)showOpsDebug('Dashboard Meldung',text,'UI');
-      return originalNote.apply(this,arguments);
-    };
-  }
+  window.addEventListener('error',event=>showOpsDebug('JavaScript Error',event.error||`${event.message}\n${event.filename||''}:${event.lineno||0}:${event.colno||0}`,'JS'));
+  window.addEventListener('unhandledrejection',event=>showOpsDebug('Unhandled Promise',event.reason||'Unbekannter Promise-Fehler','Promise'));
 })();
 </script>
 """
 
 
-async def _ops_fixed_guild_response(request: web.Request) -> web.Response:
-    """Return only the one guild Dashboard Pro is allowed to use."""
-
-    try:
-        guild = await asyncio.wait_for(
-            request.app["discord"].guild(OPS_GUILD_ID),
-            timeout=4.0,
-        )
-    except asyncio.TimeoutError:
-        return web.json_response(
-            {
-                "ok": False,
-                "guilds": [],
-                "fixed_guild_id": str(OPS_GUILD_ID),
-                "message": f"Discord-Abfrage für Guild {OPS_GUILD_ID} lief in ein Timeout.",
-                "debug": {"type": "TimeoutError", "route": "/api/ops/fixed-guild"},
-            },
-            status=504,
-        )
-    except Exception as exc:
-        return web.json_response(
-            {
-                "ok": False,
-                "guilds": [],
-                "fixed_guild_id": str(OPS_GUILD_ID),
-                "message": f"Guild {OPS_GUILD_ID} konnte nicht geladen werden: {exc}",
-                "debug": {
-                    "type": type(exc).__name__,
-                    "route": "/api/ops/fixed-guild",
-                },
-            },
-            status=502,
-        )
-
-    return web.json_response(
-        {
-            "ok": True,
-            "guilds": [guild],
-            "fixed_guild_id": str(OPS_GUILD_ID),
-        }
-    )
-
-
 def _patch_ops_html(text: str) -> str:
-    """Hard-pin Dashboard Pro to one guild and add visible client-side debugging."""
+    """Run Dashboard Pro exclusively against one guild and surface all failures."""
 
+    fixed_select = (
+        '<select id="guild">'
+        '<option value="1162733312226361454">Server 1162733312226361454</option>'
+        '</select>'
+    )
     text = text.replace(
-        "api('/api/discord/guilds')",
-        "api('/api/ops/fixed-guild')",
+        '<select id="guild"><option value="">Server wählen …</option></select>',
+        fixed_select,
         1,
     )
+
+    original_bootstrap = (
+        "async function bootstrap(){const b=await api('/api/bootstrap');csrf=b.csrf;"
+        "const g=await api('/api/discord/guilds');const sel=$('#guild');"
+        "for(const item of g.guilds||[]){const o=document.createElement('option');"
+        "o.value=item.id;o.textContent=item.name;sel.appendChild(o)}"
+        "if((g.guilds||[]).length===1){sel.value=g.guilds[0].id;guildId=sel.value;await onGuild()}"
+        "openTab(location.hash.slice(1)||'overview');setupQuick();setupPreview()}"
+    )
+    fixed_bootstrap = (
+        "async function bootstrap(){const b=await api('/api/bootstrap');csrf=b.csrf;"
+        "const sel=$('#guild');guildId='1162733312226361454';sel.value=guildId;"
+        "openTab(location.hash.slice(1)||'overview');setupQuick();setupPreview();"
+        "onGuild().catch(e=>{if(window.showOpsDebug)showOpsDebug('Guild Bootstrap',e,'Bootstrap');note(e.message,false)})}"
+    )
+    text = text.replace(original_bootstrap, fixed_bootstrap, 1)
+
     text = text.replace(
-        "if((g.guilds||[]).length===1){sel.value=g.guilds[0].id;guildId=sel.value;await onGuild()}openTab",
-        "if((g.guilds||[]).length===1){sel.value='1162733312226361454';guildId=sel.value;sel.disabled=true;await onGuild()}else{throw new Error('Feste Guild 1162733312226361454 wurde nicht geladen.')}openTab",
+        "$('#guild').onchange=async()=>{guildId=$('#guild').value;await onGuild()};",
+        "$('#guild').onchange=async()=>{guildId='1162733312226361454';$('#guild').value=guildId;await onGuild()};",
         1,
     )
     text = text.replace(
         "async function onGuild(){if(!guildId)return;await loadDiscordResources();await loadOverview();if(currentTab!=='overview')lazyLoad(currentTab);startLive()}",
-        "async function onGuild(){guildId='1162733312226361454';const sel=$('#guild');if(sel){sel.value=guildId;sel.disabled=true}startLive();const results=await Promise.allSettled([loadDiscordResources(),loadOverview()]);for(const r of results){if(r.status==='rejected'&&window.showOpsDebug)showOpsDebug('Initialer Guild-Load',r.reason,'Bootstrap')}if(currentTab!=='overview')lazyLoad(currentTab)}",
+        "async function onGuild(){guildId='1162733312226361454';const sel=$('#guild');if(sel)sel.value=guildId;startLive();const jobs=[['Discord Ressourcen',loadDiscordResources()],['Overview',loadOverview()]];const results=await Promise.allSettled(jobs.map(x=>x[1]));results.forEach((r,i)=>{if(r.status==='rejected'&&window.showOpsDebug)showOpsDebug(jobs[i][0],r.reason,'Initial Load')});if(currentTab!=='overview')lazyLoad(currentTab)}",
         1,
     )
-    if "</body>" in text:
-        text = text.replace("</body>", _OPS_DEBUG_INJECT + "</body>", 1)
+    text = text.replace(
+        "function note(text,ok=true){const n=$('#notice');n.textContent=text;n.className='notice '+(ok?'':'bad')+' show';clearTimeout(n._t);n._t=setTimeout(()=>n.classList.remove('show'),4500)}",
+        "function note(text,ok=true){const n=$('#notice');n.textContent=text;n.className='notice '+(ok?'':'bad')+' show';clearTimeout(n._t);n._t=setTimeout(()=>n.classList.remove('show'),4500);if(!ok&&window.showOpsDebug)window.showOpsDebug('Dashboard Meldung',text,'UI')}",
+        1,
+    )
+    text = text.replace(
+        "bootstrap().catch(e=>note(e.message,false));",
+        "bootstrap().catch(e=>{if(window.showOpsDebug)window.showOpsDebug('Bootstrap fehlgeschlagen',e,'Bootstrap');note(e.message,false)});",
+        1,
+    )
+
+    # Install the fetch/error instrumentation before Dashboard Pro's own script
+    # executes, otherwise a bootstrap failure can happen before the popup exists.
+    text = text.replace("<body>", "<body>" + _OPS_DEBUG_INJECT, 1)
     return text
 
 
@@ -272,8 +235,6 @@ if not getattr(_app_legacy, "_workspace_suite_wrapped", False):
 
     @web.middleware
     async def _auth_with_public_status(request: web.Request, handler):
-        # Only this deliberately reduced status surface is public. Every other
-        # Dashboard Pro API still inherits the dashboard session + CSRF policy.
         if request.path in {"/status", "/api/public/status"}:
             return await handler(request)
         return await _original_auth_middleware(request, handler)
@@ -289,7 +250,6 @@ if not getattr(_app_legacy, "_workspace_suite_wrapped", False):
         register_workspace_editor_routes(app)
         register_media_routes(app)
         register_ops_routes(app)
-        app.router.add_get("/api/ops/fixed-guild", _ops_fixed_guild_response)
         return app
 
     _app_legacy.create_app = _create_app_with_workspace
