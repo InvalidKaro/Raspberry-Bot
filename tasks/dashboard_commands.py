@@ -116,10 +116,7 @@ class DashboardCommands(commands.Cog):
                                 value = str(item.get("value", "")).strip()[:1024]
                                 if name and value:
                                     embed.add_field(name=name, value=value, inline=bool(item.get("inline")))
-                        await channel.send(
-                            embed=embed,
-                            allowed_mentions=discord.AllowedMentions.none(),
-                        )
+                        await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
                         result = f"Embed sent to {payload['channel_id']}"
                     elif action == "plugin-toggle":
                         ext = str(payload["extension"])
@@ -142,6 +139,43 @@ class DashboardCommands(commands.Cog):
                         elif not enabled and ext in self.bot.extensions:
                             await self.bot.unload_extension(ext)
                         result = f"{ext} -> {'enabled' if enabled else 'disabled'}"
+                    elif action.startswith("media-"):
+                        voice_cog = self.bot.get_cog("VoiceSuite")
+                        if voice_cog is None:
+                            raise RuntimeError("VoiceSuite is not loaded")
+                        guild_id = int(payload["guild_id"])
+                        if action == "media-radio-play":
+                            result = await voice_cog.dashboard_play_radio(
+                                guild_id,
+                                int(payload["channel_id"]),
+                                str(payload["station"]),
+                                int(payload.get("volume", 65)),
+                            )
+                        elif action == "media-ambient-play":
+                            result = await voice_cog.dashboard_play_ambient(
+                                guild_id,
+                                int(payload["channel_id"]),
+                                str(payload["scene"]),
+                                int(payload.get("volume", 65)),
+                                int(payload.get("minutes", 0)),
+                            )
+                        elif action == "media-ambient-source-play":
+                            result = await voice_cog.dashboard_play_ambient_source(
+                                guild_id,
+                                int(payload["channel_id"]),
+                                str(payload["source"]),
+                                int(payload.get("volume", 65)),
+                                int(payload.get("minutes", 0)),
+                            )
+                        elif action == "media-volume":
+                            volume = voice_cog.set_session_volume(guild_id, int(payload.get("volume", 65)))
+                            result = f"Voice volume -> {volume}%"
+                        elif action == "media-stop":
+                            result = await voice_cog.dashboard_stop(guild_id)
+                        elif action == "media-disconnect":
+                            result = await voice_cog.dashboard_disconnect(guild_id)
+                        else:
+                            raise ValueError("Unsupported media action")
                     else:
                         raise ValueError("Unsupported dashboard bot action")
                     status = "done"
