@@ -47,51 +47,83 @@ _OPS_DEBUG_INJECT = r"""
 </style>
 <div id="ops-debug-stack" aria-live="assertive"></div>
 <script>
-(()=>{
-  const FIXED_GUILD='1162733312226361454';
-  let seq=0;const stack=document.getElementById('ops-debug-stack');
-  function safeText(value){if(value instanceof Error)return `${value.name}: ${value.message}\n${value.stack||''}`;if(typeof value==='string')return value;try{return JSON.stringify(value,null,2)}catch(error){return String(value)}}
-  window.showOpsDebug=(title,details,meta='')=>{if(!stack)return;const box=document.createElement('div');box.className='ops-debug-window';const id=++seq;box.innerHTML=`<div class="ops-debug-head"><strong>Dashboard Pro Error #${id} · ${String(title||'Fehler')}</strong><button type="button" aria-label="Schließen">×</button></div><div class="ops-debug-body"><pre></pre><div class="ops-debug-meta"></div></div>`;box.querySelector('pre').textContent=safeText(details);box.querySelector('.ops-debug-meta').textContent=`Guild ${FIXED_GUILD}${meta?' · '+meta:''} · ${new Date().toLocaleTimeString()}`;box.querySelector('button').onclick=()=>box.remove();stack.prepend(box);while(stack.children.length>5)stack.lastElementChild.remove()};
-  const rawFetch=window.fetch.bind(window);
-  window.fetch=async function(input,init={}){
-    const rawUrl=typeof input==='string'?input:(input&&input.url)||String(input);const method=((init&&init.method)||'GET').toUpperCase();let requestUrl;try{requestUrl=new URL(rawUrl,window.location.href)}catch(error){requestUrl=null}
-    if(requestUrl&&requestUrl.pathname==='/api/discord/guilds'&&method==='GET')return new Response(JSON.stringify({ok:true,guilds:[{id:FIXED_GUILD,name:`Server ${FIXED_GUILD}`,icon:null,owner_id:'',member_count:0,presence_count:0,description:null,features:[]}],fixed_guild:true}),{status:200,headers:{'Content-Type':'application/json'}});
-    let nextInput=input;
-    if(requestUrl){const guildPath=requestUrl.pathname.match(/^\/api\/discord\/guilds\/(\d+)(\/.*)?$/);if(guildPath&&guildPath[1]!==FIXED_GUILD)requestUrl.pathname=`/api/discord/guilds/${FIXED_GUILD}${guildPath[2]||''}`;if(requestUrl.pathname.startsWith('/api/ops/')&&requestUrl.searchParams.has('guild_id'))requestUrl.searchParams.set('guild_id',FIXED_GUILD);if(typeof input==='string')nextInput=requestUrl.pathname+requestUrl.search+requestUrl.hash}
-    const shouldTimeout=requestUrl&&method==='GET'&&(requestUrl.pathname.startsWith('/api/discord/')||requestUrl.pathname.startsWith('/api/ops/'));let timer=null;let controller=null;let nextInit=init;
-    if(shouldTimeout&&!init.signal){controller=new AbortController();nextInit={...init,signal:controller.signal};timer=setTimeout(()=>controller.abort(),10000)}
-    try{const response=await rawFetch(nextInput,nextInit);if(!response.ok){let body='';try{body=await response.clone().text()}catch(error){}window.showOpsDebug(`HTTP ${response.status}`,`${method} ${requestUrl?requestUrl.pathname+requestUrl.search:rawUrl}\n\n${body.slice(0,4000)||response.statusText||'Keine Response-Daten'}`,'HTTP')}return response}catch(error){window.showOpsDebug(error&&error.name==='AbortError'?'Request Timeout':'Fetch fehlgeschlagen',`${method} ${rawUrl}\n\n${safeText(error)}`,error&&error.name==='AbortError'?'Timeout':'Network');throw error}finally{if(timer)clearTimeout(timer)}};
-  window.addEventListener('error',event=>window.showOpsDebug('JavaScript Error',event.error||`${event.message}\n${event.filename||''}:${event.lineno||0}:${event.colno||0}`,'JS'));
-  window.addEventListener('unhandledrejection',event=>window.showOpsDebug('Unhandled Promise',event.reason||'Unbekannter Promise-Fehler','Promise'));
+(function(){
+  var fixedGuild='1162733312226361454';
+  var seq=0;
+  var stack=document.getElementById('ops-debug-stack');
+  function safe(value){
+    if(value&&value.stack)return String(value.name||'Error')+': '+String(value.message||value)+'\n'+String(value.stack);
+    if(typeof value==='string')return value;
+    try{return JSON.stringify(value,null,2)}catch(ignore){return String(value)}
+  }
+  window.showOpsDebug=function(title,details,meta){
+    if(!stack)return;
+    var box=document.createElement('div');
+    box.className='ops-debug-window';
+    seq+=1;
+    box.innerHTML='<div class="ops-debug-head"><strong></strong><button type="button" aria-label="Schließen">×</button></div><div class="ops-debug-body"><pre></pre><div class="ops-debug-meta"></div></div>';
+    box.querySelector('strong').textContent='Dashboard Pro Error #'+seq+' · '+String(title||'Fehler');
+    box.querySelector('pre').textContent=safe(details);
+    box.querySelector('.ops-debug-meta').textContent='Guild '+fixedGuild+(meta?' · '+meta:'')+' · '+new Date().toLocaleTimeString();
+    box.querySelector('button').onclick=function(){box.remove()};
+    stack.insertBefore(box,stack.firstChild);
+    while(stack.children.length>5)stack.removeChild(stack.lastElementChild);
+  };
+  window.addEventListener('error',function(event){
+    var where=(event.filename||'')+':'+(event.lineno||0)+':'+(event.colno||0);
+    window.showOpsDebug('JavaScript Error',(event.error||event.message||'Unbekannter Fehler')+'\n'+where,'JS');
+  });
+  window.addEventListener('unhandledrejection',function(event){window.showOpsDebug('Unhandled Promise',event.reason||'Unbekannter Promise-Fehler','Promise')});
 })();
 </script>
 """
 
 
-_OPS_RESCUE_INJECT = r"""
-<script>
-(()=>{
-  const FIXED_GUILD='1162733312226361454';
-  try{
-    const sel=document.getElementById('guild');
-    if(sel){sel.innerHTML='';const option=document.createElement('option');option.value=FIXED_GUILD;option.textContent=`Server ${FIXED_GUILD}`;sel.appendChild(option);sel.value=FIXED_GUILD}
-    guildId=FIXED_GUILD;
-    const tab=(location.hash.slice(1)||'overview');
-    if(typeof openTab==='function')openTab(tab);
-    if(typeof setupQuick==='function')setupQuick();
-    if(typeof setupPreview==='function')setupPreview();
-    if(typeof loadDiscordResources==='function')loadDiscordResources().catch(error=>window.showOpsDebug&&window.showOpsDebug('Discord Ressourcen',error,'Rescue'));
-    if(typeof startLive==='function')startLive();
-  }catch(error){if(window.showOpsDebug)window.showOpsDebug('Dashboard Rescue',error,'Startup')}
-})();
-</script>
-"""
+async def _ops_fixed_guild(_: web.Request) -> web.Response:
+    """Return exactly one synthetic guild for Dashboard Pro bootstrap.
+
+    No Discord request happens here. Real resource calls only start after the
+    Dashboard shell is visible, using the fixed guild ID.
+    """
+
+    return web.json_response(
+        {
+            "ok": True,
+            "guilds": [
+                {
+                    "id": OPS_GUILD_ID,
+                    "name": f"Server {OPS_GUILD_ID}",
+                    "icon": None,
+                    "owner_id": None,
+                    "member_count": 0,
+                    "presence_count": 0,
+                    "description": None,
+                    "features": [],
+                }
+            ],
+            "fixed_guild": True,
+        }
+    )
 
 
 def _patch_ops_html(text: str) -> str:
-    """Pin Dashboard Pro to one guild and render the shell without waiting for API calls."""
+    """Use one fixed guild without rewriting Dashboard Pro functions."""
+
+    # Only change the guild-list endpoint. This keeps Media/Now Playing on the
+    # normal multi-guild endpoint and avoids the expensive full guild scan here.
+    text = text.replace(
+        "api('/api/discord/guilds')",
+        "api('/api/ops/fixed-guild')",
+        1,
+    )
+
+    # The original bootstrap waited for channels + overview before rendering the
+    # selected tab. Start that load in the background so the UI appears at once.
+    text = text.replace("await onGuild()", "onGuild()", 1)
+
+    # Debug listener is synchronous ES5-style code and therefore cannot create
+    # another Safari async-parser failure itself.
     text = text.replace("<body>", "<body>" + _OPS_DEBUG_INJECT, 1)
-    text = text.replace("</body>", _OPS_RESCUE_INJECT + "</body>", 1)
     return text
 
 
@@ -135,6 +167,7 @@ if not getattr(_app_legacy, "_workspace_suite_wrapped", False):
         register_workspace_editor_routes(app)
         register_media_routes(app)
         register_ops_routes(app)
+        app.router.add_get("/api/ops/fixed-guild", _ops_fixed_guild)
         return app
 
     _app_legacy.create_app = _create_app_with_workspace
