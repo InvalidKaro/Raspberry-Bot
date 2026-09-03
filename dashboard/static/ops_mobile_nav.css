@@ -1,0 +1,26 @@
+/* Dashboard Pro mobile dock v2 */
+@media(max-width:760px){
+  .side{
+    left:10px!important;right:10px!important;bottom:calc(8px + env(safe-area-inset-bottom))!important;
+    width:auto!important;height:62px!important;padding:6px!important;border:1px solid rgba(66,79,96,.72)!important;
+    border-radius:18px!important;background:rgba(10,14,20,.90)!important;
+    box-shadow:0 18px 55px rgba(0,0,0,.48),inset 0 1px rgba(255,255,255,.035)!important;
+    backdrop-filter:blur(20px) saturate(135%)!important;overflow:hidden!important
+  }
+  .nav{height:100%;align-items:center!important;gap:3px!important;scroll-snap-type:x proximity;padding:0 2px!important}
+  .nav button{
+    position:relative;flex:0 0 46px!important;min-width:46px!important;width:46px!important;height:46px!important;min-height:46px!important;
+    padding:0!important;border:0!important;border-radius:14px!important;background:transparent!important;color:#748196!important;
+    font-size:17px!important;scroll-snap-align:center;box-shadow:none!important;transition:background .16s ease,color .16s ease,transform .16s ease!important
+  }
+  .nav button:hover{background:rgba(255,255,255,.035)!important;color:#aab7c8!important}
+  .nav button.active{
+    background:linear-gradient(180deg,rgba(46,157,244,.20),rgba(23,93,149,.12))!important;color:#66baff!important;
+    border:1px solid rgba(55,157,234,.28)!important;box-shadow:0 5px 16px rgba(0,92,160,.18),inset 0 0 0 1px rgba(86,184,255,.04)!important;
+    transform:translateY(-1px)
+  }
+  .nav button.active:after{content:"";position:absolute;left:50%;bottom:3px;transform:translateX(-50%);width:12px;height:2px;border-radius:999px;background:#55b5ff;box-shadow:0 0 7px rgba(85,181,255,.7)}
+  .nav button span{display:none!important}
+  .main{padding-bottom:calc(86px + env(safe-area-inset-bottom))!important}
+  .notice{bottom:calc(84px + env(safe-area-inset-bottom))!important}
+}
