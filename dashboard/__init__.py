@@ -9,7 +9,6 @@ project remains modular.
 from __future__ import annotations
 
 import asyncio
-import os
 import sqlite3
 from pathlib import Path
 
@@ -18,7 +17,6 @@ from aiohttp import web
 from . import app_legacy as _app_legacy
 from .media_routes import register_media_routes
 from .ops_routes import register_ops_routes
-from .services.discord_service import DiscordServiceError
 from .workspace_editor_routes import register_workspace_editor_routes
 from .workspace_plus_routes import register_workspace_plus_routes
 from .workspace_routes import register_workspace_routes
@@ -80,16 +78,11 @@ def _dashboard_db_path(config) -> Path:
 
 
 def _select_ops_guild_id(config) -> int | None:
-    """Pick one Dashboard Pro guild without asking Discord for every guild.
+    """Return the guild in which the bot was active most recently.
 
-    An explicit DASHBOARD_PRO_GUILD_ID wins. Otherwise use the guild with the
-    newest recorded dashboard activity. Runtime telemetry and guild settings are
-    only fallbacks when no activity event has been recorded yet.
+    Command activity and dashboard telemetry are compared by their timestamps.
+    Runtime state and guild settings are only fallbacks for a fresh database.
     """
-
-    explicit = os.getenv("DASHBOARD_PRO_GUILD_ID", "").strip()
-    if explicit.isdigit() and int(explicit) > 0:
-        return int(explicit)
 
     try:
         con = sqlite3.connect(_dashboard_db_path(config), timeout=1.0)
@@ -100,7 +93,28 @@ def _select_ops_guild_id(config) -> int | None:
         queries = [
             """
             SELECT guild_id
+            FROM (
+                SELECT guild_id, created_at AS active_at
+                FROM dashboard_activity
+                WHERE guild_id IS NOT NULL
+                UNION ALL
+                SELECT guild_id, created_at AS active_at
+                FROM command_analytics
+                WHERE guild_id IS NOT NULL
+            )
+            ORDER BY active_at DESC
+            LIMIT 1
+            """,
+            """
+            SELECT guild_id
             FROM dashboard_activity
+            WHERE guild_id IS NOT NULL
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            """
+            SELECT guild_id
+            FROM command_analytics
             WHERE guild_id IS NOT NULL
             ORDER BY id DESC
             LIMIT 1
@@ -134,55 +148,31 @@ def _select_ops_guild_id(config) -> int | None:
     return None
 
 
-async def _ops_single_guild_response(request: web.Request) -> web.Response:
-    """Fast single-guild bootstrap used only by Dashboard Pro."""
+async def _ops_last_guild_response(request: web.Request) -> web.Response:
+    """Return only the locally selected guild ID; never call Discord here."""
 
     guild_id = await asyncio.to_thread(_select_ops_guild_id, request.app["config"])
-    if guild_id is None:
-        return web.json_response(
-            {
-                "ok": True,
-                "guilds": [],
-                "single_guild": True,
-                "message": "No Dashboard Pro guild is available yet.",
-            }
-        )
-
-    # One direct Discord lookup gives the proper name/counts. It is optional:
-    # Dashboard Pro still opens from SQLite immediately if Discord is slow.
-    try:
-        guild = await asyncio.wait_for(request.app["discord"].guild(guild_id), timeout=2.5)
-    except (DiscordServiceError, asyncio.TimeoutError, OSError):
-        guild = {
-            "id": str(guild_id),
-            "name": f"Server {guild_id}",
-            "icon": None,
-            "owner_id": "",
-            "member_count": 0,
-            "presence_count": 0,
-            "description": None,
-            "features": [],
+    return web.json_response(
+        {
+            "ok": True,
+            "guild_id": str(guild_id) if guild_id is not None else None,
         }
-
-    return web.json_response({"ok": True, "guilds": [guild], "single_guild": True})
+    )
 
 
 def _patch_ops_html(text: str) -> str:
-    """Make /ops single-guild and non-blocking without changing other pages."""
+    """Reuse the working guild list from Now Playing and auto-select one guild."""
 
-    text = text.replace(
-        "api('/api/discord/guilds')",
-        "api('/api/discord/guilds?ops_single=1')",
-        1,
-    )
-
-    # Dashboard Pro used to wait for channel/role/overview REST calls before it
-    # even rendered the first tab. Start those in the background instead.
+    # /now-playing already proves that the normal /api/discord/guilds endpoint
+    # works on this installation. Dashboard Pro uses exactly the same endpoint
+    # now; a tiny local endpoint only chooses which returned guild is selected.
     text = text.replace(
         "if((g.guilds||[]).length===1){sel.value=g.guilds[0].id;guildId=sel.value;await onGuild()}openTab",
-        "if((g.guilds||[]).length===1){sel.value=g.guilds[0].id;guildId=sel.value;onGuild().catch(e=>note(e.message,false))}openTab",
+        "if((g.guilds||[]).length){let pick=g.guilds[0];try{const last=await api('/api/ops/last-guild');pick=(g.guilds||[]).find(x=>String(x.id)===String(last.guild_id))||pick}catch{}sel.value=pick.id;guildId=sel.value;onGuild().catch(e=>note(e.message,false))}openTab",
         1,
     )
+
+    # Do not let the first Discord resource/overview requests block the shell.
     text = text.replace(
         "async function onGuild(){if(!guildId)return;await loadDiscordResources();await loadOverview();if(currentTab!=='overview')lazyLoad(currentTab);startLive()}",
         "async function onGuild(){if(!guildId)return;startLive();await Promise.allSettled([loadDiscordResources(),loadOverview()]);if(currentTab!=='overview')lazyLoad(currentTab)}",
@@ -242,13 +232,6 @@ if not getattr(_app_legacy, "_workspace_suite_wrapped", False):
         # Dashboard Pro API still inherits the dashboard session + CSRF policy.
         if request.path in {"/status", "/api/public/status"}:
             return await handler(request)
-
-        if request.path == "/api/discord/guilds" and request.query.get("ops_single") == "1":
-            async def single_guild_handler(inner_request: web.Request):
-                return await _ops_single_guild_response(inner_request)
-
-            return await _original_auth_middleware(request, single_guild_handler)
-
         return await _original_auth_middleware(request, handler)
 
     _app_legacy.security_headers = _security_headers_with_workspace
@@ -262,6 +245,7 @@ if not getattr(_app_legacy, "_workspace_suite_wrapped", False):
         register_workspace_editor_routes(app)
         register_media_routes(app)
         register_ops_routes(app)
+        app.router.add_get("/api/ops/last-guild", _ops_last_guild_response)
         return app
 
     _app_legacy.create_app = _create_app_with_workspace
