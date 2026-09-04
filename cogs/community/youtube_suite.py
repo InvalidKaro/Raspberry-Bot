@@ -49,7 +49,7 @@ def _duration_text(seconds: int | None) -> str:
 
 def _card(title: str, text: str, color: int = 0xFF0000) -> discord.Embed:
     embed = discord.Embed(title=title, description=text, color=color)
-    embed.set_footer(text="Private YouTube Voice · Owner startet · freigegebene Mods dürfen Songs hinzufügen")
+    embed.set_footer(text="Private YouTube Voice · Owner + Queue-Mods können starten und Songs verwalten")
     return embed
 
 
@@ -86,7 +86,15 @@ class YouTubeSuite(
     def _is_owner(self, user_id: int) -> bool:
         return user_id in set(self.bot.settings.owner_ids)
 
-    async def _reply(self, interaction: discord.Interaction, content: str | None = None, *, embed: discord.Embed | None = None, ephemeral: bool = True, allowed_mentions: discord.AllowedMentions | None = None) -> None:
+    async def _reply(
+        self,
+        interaction: discord.Interaction,
+        content: str | None = None,
+        *,
+        embed: discord.Embed | None = None,
+        ephemeral: bool = True,
+        allowed_mentions: discord.AllowedMentions | None = None,
+    ) -> None:
         kwargs: dict[str, Any] = {"ephemeral": ephemeral}
         if embed is not None:
             kwargs["embed"] = embed
@@ -102,14 +110,39 @@ class YouTubeSuite(
             return True
         row = await self.bot.database.fetchone(
             "SELECT 1 FROM youtube_queue_mods WHERE guild_id=? AND user_id=?",
-            (guild_id, user_id),
+            (int(guild_id), int(user_id)),
         )
         return row is not None
+
+    async def _set_queue_mod(self, guild_id: int, user_id: int, added_by: int, enabled: bool) -> bool:
+        guild_id = int(guild_id)
+        user_id = int(user_id)
+        if enabled:
+            await self.bot.database.execute(
+                """
+                INSERT INTO youtube_queue_mods(guild_id,user_id,added_by,created_at)
+                VALUES(?,?,?,CURRENT_TIMESTAMP)
+                ON CONFLICT(guild_id,user_id) DO UPDATE SET
+                    added_by=excluded.added_by,
+                    created_at=CURRENT_TIMESTAMP
+                """,
+                (guild_id, user_id, int(added_by)),
+            )
+        else:
+            await self.bot.database.execute(
+                "DELETE FROM youtube_queue_mods WHERE guild_id=? AND user_id=?",
+                (guild_id, user_id),
+            )
+        row = await self.bot.database.fetchone(
+            "SELECT 1 FROM youtube_queue_mods WHERE guild_id=? AND user_id=?",
+            (guild_id, user_id),
+        )
+        return (row is not None) if enabled else (row is None)
 
     async def _require_owner(self, interaction: discord.Interaction) -> bool:
         if self._is_owner(interaction.user.id):
             return True
-        await self._reply(interaction, "Nur der Bot-Owner darf die YouTube-Wiedergabe steuern.")
+        await self._reply(interaction, "Nur der Bot-Owner darf diese YouTube-Verwaltungsfunktion nutzen.")
         return False
 
     async def _require_queue_access(self, interaction: discord.Interaction) -> bool:
@@ -119,7 +152,18 @@ class YouTubeSuite(
             return True
         await self._reply(
             interaction,
-            "Die private YouTube-Queue ist für dich nicht freigeschaltet. Der Bot-Owner kann dich mit `/media youtube mod` hinzufügen.",
+            "Du bist nicht für die private YouTube-Queue freigeschaltet. Der Bot-Owner kann dich mit `/media youtube mod` hinzufügen.",
+        )
+        return False
+
+    async def _require_play_access(self, interaction: discord.Interaction) -> bool:
+        if interaction.guild_id is None:
+            return False
+        if await self._is_queue_mod(interaction.guild_id, interaction.user.id):
+            return True
+        await self._reply(
+            interaction,
+            "Nur der Bot-Owner oder ein freigeschalteter Queue-Mod darf YouTube direkt starten.",
         )
         return False
 
@@ -256,7 +300,7 @@ class YouTubeSuite(
         finally:
             self.starting.discard(guild_id)
 
-    @app_commands.command(name="play", description="Owner-only: startet einen YouTube-Song im aktuellen Voice-Channel.")
+    @app_commands.command(name="play", description="Owner/Queue-Mod: startet einen YouTube-Song im aktuellen Voice-Channel.")
     @app_commands.describe(suche="YouTube-Link oder Suchbegriff", lautstaerke="10 bis 120 Prozent")
     async def play(
         self,
@@ -264,7 +308,7 @@ class YouTubeSuite(
         suche: str,
         lautstaerke: app_commands.Range[int, 10, 120] = DEFAULT_VOLUME,
     ) -> None:
-        if interaction.guild_id is None or not await self._require_owner(interaction):
+        if interaction.guild_id is None or not await self._require_play_access(interaction):
             return
         if yt_dlp is None:
             await interaction.response.send_message("`yt-dlp` fehlt auf dem Pi.", ephemeral=True)
@@ -284,7 +328,7 @@ class YouTubeSuite(
         await interaction.followup.send(
             embed=_card(
                 "▶️ YouTube",
-                f"**{track.title}**\nDauer: **{_duration_text(track.duration)}** · Lautstärke: **{int(lautstaerke)}%**\n\nFreigegebene Mods können jetzt mit `/media youtube add` Songs anhängen.",
+                f"**{track.title}**\nDauer: **{_duration_text(track.duration)}** · Lautstärke: **{int(lautstaerke)}%**\n\nOwner und Queue-Mods können Songs direkt starten oder mit `/media youtube add` anhängen.",
             ),
             ephemeral=True,
         )
@@ -308,7 +352,7 @@ class YouTubeSuite(
             return
         queue.append(resolved.track)
         active = interaction.guild_id in self.session_active
-        suffix = "" if active else "\n\nDie Queue startet erst, wenn der Bot-Owner `/media youtube play` ausführt."
+        suffix = "" if active else "\n\nOwner oder Queue-Mod können die Session mit `/media youtube play` starten."
         await interaction.followup.send(
             embed=_card(
                 "➕ YouTube Queue",
@@ -374,9 +418,6 @@ class YouTubeSuite(
         if voice is None or not (voice.is_playing() or voice.is_paused()):
             await interaction.response.send_message("Aktuell läuft kein Song.", ephemeral=True)
             return
-        # Remove the current item before stopping so loop mode does not restart
-        # the song the owner explicitly skipped. Loop itself remains enabled and
-        # will apply to the next YouTube track.
         self.current.pop(interaction.guild_id, None)
         voice.stop()
         await interaction.response.send_message("⏭️ Übersprungen. Nächster Queue-Eintrag startet automatisch.", ephemeral=True)
@@ -401,41 +442,72 @@ class YouTubeSuite(
         self.queues[interaction.guild_id].clear()
         await interaction.response.send_message(f"🧹 **{count}** Queue-Einträge entfernt.", ephemeral=True)
 
-    @app_commands.command(name="mod", description="Owner-only: erlaubt oder entzieht einem User das Hinzufügen zur YouTube-Queue.")
-    @app_commands.describe(mitglied="User für die private Queue", erlauben="True = erlauben, False = entziehen")
+    @app_commands.command(name="mod", description="Owner-only: verwaltet freigeschaltete YouTube Queue-Mods.")
+    @app_commands.describe(
+        mitglied="User für YouTube Play + Queue",
+        erlauben="True = Zugriff geben, False = Zugriff entziehen",
+    )
     async def mod(self, interaction: discord.Interaction, mitglied: discord.Member, erlauben: bool = True) -> None:
         if interaction.guild_id is None or not await self._require_owner(interaction):
             return
         if mitglied.bot:
-            await interaction.response.send_message("Bots werden nicht zur YouTube-Queue freigeschaltet.", ephemeral=True)
+            await interaction.response.send_message("Bots werden nicht als Queue-Mod freigeschaltet.", ephemeral=True)
             return
+        if self._is_owner(mitglied.id):
+            await interaction.response.send_message("Der Bot-Owner hat automatisch vollständigen YouTube-Zugriff.", ephemeral=True)
+            return
+
         await interaction.response.defer(ephemeral=True)
+        try:
+            verified = await self._set_queue_mod(
+                interaction.guild_id,
+                mitglied.id,
+                interaction.user.id,
+                bool(erlauben),
+            )
+        except Exception as exc:
+            logger.exception("Could not update YouTube queue mod for guild=%s user=%s", interaction.guild_id, mitglied.id)
+            await interaction.followup.send(
+                f"Queue-Mod konnte nicht gespeichert werden: `{type(exc).__name__}`",
+                ephemeral=True,
+            )
+            return
+
+        if not verified:
+            await interaction.followup.send(
+                "Die Datenbankänderung konnte nicht bestätigt werden. Bitte erneut versuchen.",
+                ephemeral=True,
+            )
+            return
+
         if erlauben:
-            await self.bot.database.execute(
-                "INSERT OR REPLACE INTO youtube_queue_mods(guild_id,user_id,added_by,created_at) VALUES(?,?,?,CURRENT_TIMESTAMP)",
-                (interaction.guild_id, mitglied.id, interaction.user.id),
+            text = (
+                f"✅ {mitglied.mention} ist jetzt **YouTube Queue-Mod**.\n"
+                "Erlaubt: `/media youtube play`, `/media youtube add`, `/media youtube queue` "
+                "und die Play/Queue-Buttons der YouTube-Suche."
             )
-            text = f"✅ {mitglied.mention} darf jetzt `/media youtube add` und `/media youtube queue` nutzen."
         else:
-            await self.bot.database.execute(
-                "DELETE FROM youtube_queue_mods WHERE guild_id=? AND user_id=?",
-                (interaction.guild_id, mitglied.id),
-            )
-            text = f"🔒 YouTube-Queue-Zugriff für {mitglied.mention} entfernt."
+            text = f"🔒 YouTube Queue-Mod-Zugriff für {mitglied.mention} entfernt."
         await interaction.followup.send(text, ephemeral=True)
 
-    @app_commands.command(name="mods", description="Owner-only: zeigt freigeschaltete YouTube-Queue-User.")
+    @app_commands.command(name="mods", description="Owner-only: zeigt freigeschaltete YouTube Queue-Mods.")
     async def mods(self, interaction: discord.Interaction) -> None:
         if interaction.guild_id is None or not await self._require_owner(interaction):
             return
         await interaction.response.defer(ephemeral=True)
         rows = await self.bot.database.fetchall(
-            "SELECT user_id,created_at FROM youtube_queue_mods WHERE guild_id=? ORDER BY created_at",
+            "SELECT user_id,added_by,created_at FROM youtube_queue_mods WHERE guild_id=? ORDER BY created_at",
             (interaction.guild_id,),
         )
-        text = "\n".join(f"• <@{row['user_id']}> · {row['created_at']}" for row in rows) or "Keine zusätzlichen User freigeschaltet."
+        text = (
+            "\n".join(
+                f"• <@{row['user_id']}> · hinzugefügt von <@{row['added_by']}> · {row['created_at']}"
+                for row in rows
+            )
+            or "Keine zusätzlichen Queue-Mods freigeschaltet."
+        )
         await interaction.followup.send(
-            embed=_card("🔐 YouTube Queue Mods", text, 0x5865F2),
+            embed=_card("🔐 YouTube Queue-Mods", text, 0x5865F2),
             ephemeral=True,
             allowed_mentions=discord.AllowedMentions.none(),
         )
