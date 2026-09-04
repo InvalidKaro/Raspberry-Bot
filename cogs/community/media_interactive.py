@@ -283,8 +283,11 @@ class YouTubeResultButton(discord.ui.Button):
 
         guild_id = interaction.guild_id or 0
         if self.action == "play":
-            if not yt._is_owner(interaction.user.id):
-                await interaction.response.send_message("Nur der Bot-Owner darf einen YouTube-Titel direkt starten.", ephemeral=True)
+            if not await yt._is_queue_mod(guild_id, interaction.user.id):
+                await interaction.response.send_message(
+                    "Nur der Bot-Owner oder ein freigeschalteter Queue-Mod darf einen YouTube-Titel direkt starten.",
+                    ephemeral=True,
+                )
                 return
             if not isinstance(interaction.user, discord.Member) or not interaction.user.voice or not interaction.user.voice.channel:
                 await interaction.response.send_message("Du musst zuerst einem Voice-Channel beitreten.", ephemeral=True)
@@ -440,7 +443,7 @@ class MediaInteractive(commands.Cog):
         )
         if results[0].thumbnail:
             embed.set_thumbnail(url=results[0].thumbnail)
-        embed.set_footer(text="▶ Play = Owner-only · ➕ Queue = Owner oder freigeschaltete Mods")
+        embed.set_footer(text="▶ Play / ➕ Queue = Owner oder freigeschaltete Queue-Mods")
         await interaction.followup.send(embed=embed, view=YouTubeSearchView(self.bot, results), ephemeral=True)
 
 
