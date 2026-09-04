@@ -52,7 +52,6 @@ echo "[6/6] Status"
 sudo systemctl --no-pager --full status "$SERVICE_NAME" || true
 
 echo
-echo=""
 echo "Fertig. Ohne OLED ist 'standby' normal."
 echo "Statusdatei: $REPO_ROOT/data/display_status.json"
 echo "Headless-Preview: $REPO_ROOT/data/display_preview.png"
