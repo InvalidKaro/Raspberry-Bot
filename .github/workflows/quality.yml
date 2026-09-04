@@ -18,8 +18,11 @@ jobs:
           cache: pip
       - run: python -m pip install --upgrade pip
       - run: pip install -r requirements.txt
+      - run: pip install -r requirements-display.txt
       - run: python -m compileall -q .
       - run: python scripts/import_smoke.py
       - run: python scripts/command_hub_smoke.py
       - run: python scripts/dashboard_smoke.py
       - run: python scripts/feature_flags_smoke.py
+      - run: python scripts/display_smoke.py
+      - run: bash -n scripts/install_display_service.sh
