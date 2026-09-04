@@ -1,22 +1,27 @@
 [Unit]
 Description=HomePi 0.96 OLED Display
-After=local-fs.target raspberry-bot.service
-Wants=raspberry-bot.service
+After=local-fs.target network-online.target raspberry-bot.service
+Wants=network-online.target raspberry-bot.service
 
 [Service]
 Type=simple
 User=stefano
 Group=stefano
-SupplementaryGroups=i2c
 WorkingDirectory=/home/stefano/services/Raspberry-Bot
 Environment=PYTHONUNBUFFERED=1
 Environment=DISPLAY_GUILD_ID=1162733312226361454
+Environment=DISPLAY_ALLOW_MISSING_HARDWARE=1
+Environment=DISPLAY_HARDWARE_RETRY_SECONDS=20
+Environment=DISPLAY_HEADLESS_PREVIEW=1
 EnvironmentFile=-/home/stefano/services/Raspberry-Bot/.env.display
+ExecStartPre=/home/stefano/services/Raspberry-Bot/.venv/bin/python -m display_service.main --check
 ExecStart=/home/stefano/services/Raspberry-Bot/.venv/bin/python -m display_service.main
-Restart=on-failure
-RestartSec=4
+Restart=always
+RestartSec=5
 TimeoutStopSec=10
+Nice=5
 PrivateTmp=true
+NoNewPrivileges=true
 
 [Install]
 WantedBy=multi-user.target
