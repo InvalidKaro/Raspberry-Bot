@@ -1,6 +1,8 @@
-# HomePi 0.96 OLED Display
+# HomePi 0.96 Blue OLED
 
-Target hardware: 128x64 SSD1306 I2C OLED, blue pixels, Raspberry Pi 3 B+.
+Target hardware: **0.96 inch, 128x64, SSD1306, I2C, blue pixels** on the Raspberry Pi 3 B+.
+
+The display service is intentionally deployable **before the hardware exists**. Without an OLED it runs in `standby`, keeps reading the Dashboard Pro configuration, writes a headless preview PNG, and retries the I2C device automatically.
 
 ## Wiring
 
@@ -11,64 +13,79 @@ Target hardware: 128x64 SSD1306 I2C OLED, blue pixels, Raspberry Pi 3 B+.
 | SCL | Pin 5 / GPIO3 / SCL1 |
 | SDA | Pin 3 / GPIO2 / SDA1 |
 
-Use 3.3V for this setup.
+Use **3.3V** for this setup.
 
-## One-time installation
+## Deploy now, even without the OLED
 
 ```bash
 cd ~/services/Raspberry-Bot
 git pull
-
-sudo raspi-config
+bash scripts/install_display_service.sh
 ```
 
-In `raspi-config`: **Interface Options -> I2C -> Enable**. Reboot if requested.
+The installer:
 
-Then:
+1. installs the I2C/display dependencies,
+2. enables I2C when `raspi-config` is available,
+3. installs `requirements-display.txt` into the existing venv,
+4. runs a deployment check,
+5. installs and enables `raspberry-display.service`.
+
+No connected OLED is required for a successful deployment.
+
+## Expected status before the hardware arrives
 
 ```bash
-sudo apt update
-sudo apt install -y i2c-tools python3-dev libjpeg-dev zlib1g-dev
-sudo usermod -aG i2c stefano
-
-cd ~/services/Raspberry-Bot
-source .venv/bin/activate
-pip install -r requirements-display.txt
-deactivate
-
-sudo cp systemd/raspberry-display.service /etc/systemd/system/raspberry-display.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now raspberry-display
+sudo systemctl status raspberry-display --no-pager
+cat ~/services/Raspberry-Bot/data/display_status.json
 ```
 
-After adding the user to the `i2c` group, log out/in or reboot once before troubleshooting permissions.
+Expected state:
 
-## Check the display
+```json
+{
+  "mode": "standby",
+  "hardware_connected": false,
+  "hardware_optional": true
+}
+```
+
+The service stays healthy. It retries the OLED every 20 seconds instead of crashing or spamming a traceback.
+
+A software preview is continuously written to:
+
+```text
+~/services/Raspberry-Bot/data/display_preview.png
+```
+
+Manual deployment check:
+
+```bash
+cd ~/services/Raspberry-Bot
+.venv/bin/python -m display_service.main --check
+```
+
+Hardware missing is still exit code `0` while `DISPLAY_ALLOW_MISSING_HARDWARE=1`.
+
+## When the OLED is connected later
+
+Check the bus:
 
 ```bash
 i2cdetect -y 1
 ```
 
-Normally the module appears at `3c`. If it appears at `3d`, select `0x3D` in Dashboard Pro -> Pi Display Builder.
+Normally the device appears at `3c`. If it appears at `3d`, select `0x3D` in Dashboard Pro -> Pi Display Builder.
 
-Service status:
-
-```bash
-sudo systemctl status raspberry-display --no-pager
-journalctl -u raspberry-display -n 80 --no-pager
-```
-
-Restart after an update:
+The already-running service automatically retries the device and switches from `standby` to `hardware` when it becomes reachable. A restart is optional:
 
 ```bash
 sudo systemctl restart raspberry-display
 ```
 
-## What the service shows
+## What the physical display shows
 
-The physical display follows the Dashboard Pro configuration stored for guild `1162733312226361454`.
-
-Base rotation always contains all pages:
+The service follows the Dashboard Pro layout for guild `1162733312226361454` and cycles through every core page:
 
 1. Clock
 2. Temperature + RAM
@@ -76,16 +93,39 @@ Base rotation always contains all pages:
 4. Network + Pi-hole
 5. Now Playing
 
-Media and high CPU/temperature can temporarily insert a priority page. They do not remove pages from the normal rotation.
+Every page remains in the normal rotation. Media start or high CPU/temperature may temporarily show the relevant page early, but the base rotation continues afterwards.
 
-The service reloads display configuration automatically, so most Builder changes do not require a service restart.
+The service reloads the saved Dashboard Pro display configuration automatically.
 
-## Optional environment overrides
+## Logs and diagnostics
 
-Create `.env.display` only when needed:
+```bash
+journalctl -u raspberry-display -n 80 --no-pager
+sudo systemctl restart raspberry-display
+.venv/bin/python -m display_service.main --check
+```
+
+The current runtime status is also available in:
+
+```text
+data/display_status.json
+```
+
+## Optional `.env.display`
+
+Copy the example only when overrides are needed:
+
+```bash
+cp .env.display.example .env.display
+```
+
+Default deploy-safe values include:
 
 ```env
 DISPLAY_GUILD_ID=1162733312226361454
-DISPLAY_DATABASE_PATH=/home/stefano/services/Raspberry-Bot/data/bot.sqlite3
-DISPLAY_LOG_LEVEL=INFO
+DISPLAY_ALLOW_MISSING_HARDWARE=1
+DISPLAY_HARDWARE_RETRY_SECONDS=20
+DISPLAY_HEADLESS_PREVIEW=1
 ```
+
+Set `DISPLAY_ALLOW_MISSING_HARDWARE=0` only if you later want systemd startup to fail when the OLED cannot be reached.
