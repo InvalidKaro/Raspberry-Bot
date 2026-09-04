@@ -1,6 +1,6 @@
 from __future__ import annotations
 from io import BytesIO
-from datetime import date
+from datetime import date, timedelta
 import csv
 import discord
 from discord import app_commands
@@ -68,6 +68,23 @@ class Personnel(commands.GroupCog, group_name="perso", group_description="MD Per
             if not row:missing.append(name);continue
             await self.service.record(interaction.guild_id,int(row["id"]),interaction.user.id,inductions=einweisungen,bwg=bwg,period_key=zeitraum);ok.append(row["display_name"])
         await interaction.response.send_message(embed=EmbedFactory.success(title="Bulk-Eintrag",description=f"Gespeichert: **{len(ok)}**\nNicht gefunden: {', '.join(missing) if missing else '—'}"),ephemeral=True)
+
+    @app_commands.command(name="clear",description="Setzt alle Perso-Aktivitätswerte einer Woche zurück, Namen bleiben erhalten.")
+    @app_commands.describe(bestaetigen="Muss True sein, damit wirklich gelöscht wird",datum="Ein Datum aus der Woche im Format YYYY-MM-DD; leer = aktuelle Woche")
+    @app_commands.default_permissions(manage_messages=True)
+    async def clear(self,interaction:discord.Interaction,bestaetigen:bool,datum:str|None=None):
+        try:
+            target=date.fromisoformat(datum) if datum else date.today()
+        except ValueError:
+            await interaction.response.send_message(embed=EmbedFactory.error(title="Datum ungültig",description="Bitte `YYYY-MM-DD` verwenden."),ephemeral=True);return
+        start=target-timedelta(days=target.weekday());end=start+timedelta(days=6)
+        if not bestaetigen:
+            await interaction.response.send_message(embed=EmbedFactory.info(title="Perso-Wochenreset nicht ausgeführt",description=f"Woche **{start.strftime('%d.%m.%Y')} – {end.strftime('%d.%m.%Y')}** würde zurückgesetzt.\n\nFühre den Command mit `bestaetigen: True` aus. Namen, Personalakten, Notizen, Qualifikationen und Ränge bleiben erhalten."),ephemeral=True);return
+        summary=await self.bot.database.fetchone("SELECT COUNT(*) AS records,COALESCE(SUM(inductions),0) AS inductions,COALESCE(SUM(bwg),0) AS bwg FROM personnel_records WHERE record_date>=? AND record_date<=?",(start.isoformat(),end.isoformat()))
+        records=int(summary["records"] or 0) if summary else 0;inductions=int(summary["inductions"] or 0) if summary else 0;bwg=int(summary["bwg"] or 0) if summary else 0
+        await self.bot.database.execute("DELETE FROM personnel_records WHERE record_date>=? AND record_date<=?",(start.isoformat(),end.isoformat()))
+        if hasattr(self.bot,"audit"):await self.bot.audit.record("perso.week.clear",guild_id=interaction.guild_id,actor_id=interaction.user.id,target_type="personnel_week",target_id=f"{start.isoformat()}_{end.isoformat()}",before={"records":records,"einweisungen":inductions,"bwg":bwg,"start":start.isoformat(),"end":end.isoformat()},after={"records":0,"einweisungen":0,"bwg":0})
+        await interaction.response.send_message(embed=EmbedFactory.success(title="Perso-Woche zurückgesetzt",description=f"**{start.strftime('%d.%m.%Y')} – {end.strftime('%d.%m.%Y')}**\n\nGelöscht: **{records}** Aktivitätseinträge\nEinweisungen: **{inductions} → 0**\nBWG: **{bwg} → 0**\n\n✅ Namen und Personalakten wurden **nicht** gelöscht."),ephemeral=True)
 
     @app_commands.command(name="note",description="Interne Notiz zur Personalakte hinzufügen.")
     @app_commands.autocomplete(person=_name_auto)
@@ -177,6 +194,6 @@ class Personnel(commands.GroupCog, group_name="perso", group_description="MD Per
 
     @app_commands.command(name="stats",description="Übersicht der Perso-Funktionen.")
     async def stats(self,interaction:discord.Interaction):
-        await interaction.response.send_message(embed=EmbedFactory.info(title="Perso 2.1",description="Profile, Einträge, Bulk-Import, Notizen, Qualifikationen, Ziele, Ranghistorie, Leaderboard, Trends, Reports, PNG/CSV und Archivierung sind aktiv."),ephemeral=True)
+        await interaction.response.send_message(embed=EmbedFactory.info(title="Perso 2.2",description="Profile, Einträge, Wochenreset, Bulk-Import, Notizen, Qualifikationen, Ziele, Ranghistorie, Leaderboard, Trends, Reports, PNG/CSV und Archivierung sind aktiv."),ephemeral=True)
 
 async def setup(bot): await bot.add_cog(Personnel(bot))
