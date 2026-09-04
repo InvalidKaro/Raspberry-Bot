@@ -64,6 +64,7 @@ class YouTubeSuite(
         self.current: dict[int, YouTubeTrack] = {}
         self.session_active: set[int] = set()
         self.starting: set[int] = set()
+        self.loop_enabled: set[int] = set()
         self.queue_guard.start()
 
     async def cog_load(self) -> None:
@@ -331,6 +332,7 @@ class YouTubeSuite(
             lines.append(f"**Jetzt:** {current.title} · {_duration_text(current.duration)}")
         else:
             lines.append("**Jetzt:** —")
+        lines.append(f"**Loop:** {'🔁 An' if interaction.guild_id in self.loop_enabled else 'Aus'}")
         if queued:
             lines.append("")
             for index, track in enumerate(queued[:15], start=1):
@@ -343,6 +345,27 @@ class YouTubeSuite(
             allowed_mentions=discord.AllowedMentions.none(),
         )
 
+    @app_commands.command(name="loop", description="Owner-only: wiederholt den jeweils aktuellen YouTube-Song.")
+    @app_commands.describe(aktiv="True = Song wiederholen, False = Loop ausschalten")
+    async def loop(self, interaction: discord.Interaction, aktiv: bool = True) -> None:
+        if interaction.guild_id is None or not await self._require_owner(interaction):
+            return
+        guild_id = interaction.guild_id
+        if aktiv:
+            current = self.current.get(guild_id)
+            voice = interaction.guild.voice_client if interaction.guild else None
+            if current is None or voice is None or not (voice.is_playing() or voice.is_paused()):
+                await interaction.response.send_message("Aktuell läuft kein YouTube-Song, den ich loopen kann.", ephemeral=True)
+                return
+            self.loop_enabled.add(guild_id)
+            await interaction.response.send_message(
+                f"🔁 **Song-Loop an:** **{current.title}** wird nach dem Ende erneut gestartet.",
+                ephemeral=True,
+            )
+            return
+        self.loop_enabled.discard(guild_id)
+        await interaction.response.send_message("➡️ **Song-Loop aus.** Danach läuft die Queue normal weiter.", ephemeral=True)
+
     @app_commands.command(name="skip", description="Owner-only: überspringt den aktuellen YouTube-Song.")
     async def skip(self, interaction: discord.Interaction) -> None:
         if interaction.guild_id is None or not await self._require_owner(interaction):
@@ -351,8 +374,11 @@ class YouTubeSuite(
         if voice is None or not (voice.is_playing() or voice.is_paused()):
             await interaction.response.send_message("Aktuell läuft kein Song.", ephemeral=True)
             return
-        voice.stop()
+        # Remove the current item before stopping so loop mode does not restart
+        # the song the owner explicitly skipped. Loop itself remains enabled and
+        # will apply to the next YouTube track.
         self.current.pop(interaction.guild_id, None)
+        voice.stop()
         await interaction.response.send_message("⏭️ Übersprungen. Nächster Queue-Eintrag startet automatisch.", ephemeral=True)
 
     @app_commands.command(name="stop", description="Owner-only: stoppt die private YouTube-Session.")
@@ -360,11 +386,12 @@ class YouTubeSuite(
         if interaction.guild_id is None or not await self._require_owner(interaction):
             return
         self.session_active.discard(interaction.guild_id)
+        self.loop_enabled.discard(interaction.guild_id)
         self.current.pop(interaction.guild_id, None)
         voice = interaction.guild.voice_client if interaction.guild else None
         if voice and (voice.is_playing() or voice.is_paused()):
             voice.stop()
-        await interaction.response.send_message("⏹️ YouTube-Session gestoppt. Die Queue bleibt gespeichert.", ephemeral=True)
+        await interaction.response.send_message("⏹️ YouTube-Session gestoppt. Die Queue bleibt gespeichert; Loop ist aus.", ephemeral=True)
 
     @app_commands.command(name="clear", description="Owner-only: leert die YouTube-Queue.")
     async def clear(self, interaction: discord.Interaction) -> None:
@@ -422,11 +449,15 @@ class YouTubeSuite(
             voice = guild.voice_client if guild else None
             if voice is None or not voice.is_connected():
                 self.session_active.discard(guild_id)
+                self.loop_enabled.discard(guild_id)
                 self.current.pop(guild_id, None)
                 continue
             if voice.is_playing() or voice.is_paused():
                 continue
-            self.current.pop(guild_id, None)
+            finished = self.current.pop(guild_id, None)
+            if finished is not None and guild_id in self.loop_enabled:
+                await self._start_queued(guild_id, finished)
+                continue
             queue = self.queues.get(guild_id)
             if queue:
                 track = queue.popleft()
