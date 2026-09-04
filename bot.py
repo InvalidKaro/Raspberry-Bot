@@ -56,6 +56,7 @@ EXTENSIONS: tuple[str, ...] = (
     "cogs.community.voice_suite",
     "cogs.community.voice_playlist_support",
     "cogs.community.youtube_suite",
+    "cogs.community.nowplaying_plus",
     "cogs.community.visual_suite",
     "cogs.community.astro_weather_suite",
     "cogs.management.workspace_suite",
@@ -315,8 +316,6 @@ async def handle_tree_error(
                 ),
             )
         except Exception:
-            # Dashboard telemetry is optional and must never interfere with the
-            # bot's normal command error handling.
             pass
 
     if isinstance(error, app_commands.CommandOnCooldown):
