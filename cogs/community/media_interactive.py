@@ -9,6 +9,7 @@ from typing import Any
 
 import aiohttp
 import discord
+from discord import app_commands
 from discord.ext import commands, tasks
 
 from cogs.community import media_interactive_base as _base
@@ -34,6 +35,12 @@ CREATE TABLE IF NOT EXISTS radio_runtime_metadata(
     content_type TEXT,
     metadata_supported INTEGER NOT NULL DEFAULT 0,
     last_error TEXT,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS radio_panel_config(
+    guild_id INTEGER PRIMARY KEY,
+    channel_id INTEGER NOT NULL,
+    message_id INTEGER,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 """
@@ -90,13 +97,16 @@ def _inactive_payload(guild_id: int) -> dict[str, Any]:
 
 
 class RadioMetadataRuntime(commands.Cog):
-    """Pi-friendly ICY metadata polling shared by OLED, Dashboard and radio panel."""
+    """Pi-friendly radio metadata and automatic persistent panel runtime."""
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self.session: aiohttp.ClientSession | None = None
         self.next_probe_at: dict[int, float] = {}
         self.persisted_state: dict[int, str] = {}
+        self.panel_render_state: dict[int, str] = {}
+        self.panel_messages: dict[int, discord.Message] = {}
+        self.panel_locks: dict[int, asyncio.Lock] = {}
 
     async def cog_load(self) -> None:
         await self.bot.database.connection.executescript(RADIO_METADATA_SCHEMA)
@@ -105,12 +115,37 @@ class RadioMetadataRuntime(commands.Cog):
             self.bot.radio_metadata_cache = {}
         self.session = aiohttp.ClientSession()
         self.radio_metadata_loop.start()
+        self.radio_panel_loop.start()
 
     async def cog_unload(self) -> None:
         self.radio_metadata_loop.cancel()
+        self.radio_panel_loop.cancel()
         if self.session is not None and not self.session.closed:
             await self.session.close()
         self.session = None
+        self.panel_messages.clear()
+        self.panel_render_state.clear()
+        self.panel_locks.clear()
+
+    def _panel_lock(self, guild_id: int) -> asyncio.Lock:
+        lock = self.panel_locks.get(guild_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self.panel_locks[guild_id] = lock
+        return lock
+
+    def _radio_state(self, guild: discord.Guild) -> tuple[Any | None, discord.VoiceClient | None, bool]:
+        voice_cog = self.bot.get_cog("VoiceSuite")
+        state = getattr(voice_cog, "states", {}).get(guild.id) if voice_cog else None
+        voice = guild.voice_client
+        active = bool(
+            state
+            and str(getattr(state, "kind", "") or "").lower() == "radio"
+            and voice
+            and voice.is_connected()
+            and (voice.is_playing() or voice.is_paused())
+        )
+        return state, voice, active
 
     async def _persist(self, guild_id: int, payload: dict[str, Any]) -> None:
         stable = {key: payload.get(key) for key in _PERSIST_KEYS}
@@ -172,15 +207,7 @@ class RadioMetadataRuntime(commands.Cog):
 
     async def _update_guild(self, guild: discord.Guild) -> None:
         guild_id = guild.id
-        voice_cog = self.bot.get_cog("VoiceSuite")
-        state = getattr(voice_cog, "states", {}).get(guild_id) if voice_cog else None
-        voice = guild.voice_client
-        active = bool(
-            state
-            and str(getattr(state, "kind", "") or "").lower() == "radio"
-            and voice
-            and (voice.is_playing() or voice.is_paused())
-        )
+        state, _, active = self._radio_state(guild)
         if not active:
             self.next_probe_at.pop(guild_id, None)
             await self._publish(guild_id, _inactive_payload(guild_id))
@@ -258,6 +285,255 @@ class RadioMetadataRuntime(commands.Cog):
         else:
             self.next_probe_at[guild_id] = now + 10
 
+    async def _panel_config(self, guild_id: int):
+        return await self.bot.database.fetchone(
+            "SELECT channel_id,message_id FROM radio_panel_config WHERE guild_id=?",
+            (guild_id,),
+        )
+
+    async def _set_panel_message_id(self, guild_id: int, message_id: int | None) -> None:
+        await self.bot.database.execute(
+            "UPDATE radio_panel_config SET message_id=?,updated_at=CURRENT_TIMESTAMP WHERE guild_id=?",
+            (message_id, guild_id),
+        )
+
+    async def _load_stations(self, guild_id: int) -> list[dict[str, Any]]:
+        rows = await self.bot.database.fetchall(
+            "SELECT name,stream_url,COALESCE(genre,'') genre,COALESCE(homepage,'') homepage "
+            "FROM voice_radio_stations WHERE guild_id=? AND enabled=1 ORDER BY name COLLATE NOCASE LIMIT 25",
+            (guild_id,),
+        )
+        return [dict(row) for row in rows]
+
+    async def _delete_panel_message(
+        self,
+        guild: discord.Guild,
+        channel_id: int,
+        message_id: int | None,
+    ) -> None:
+        cached = self.panel_messages.pop(guild.id, None)
+        self.panel_render_state.pop(guild.id, None)
+        if message_id is None and cached is None:
+            return
+
+        message = cached if cached is not None and (message_id is None or cached.id == message_id) else None
+        channel = guild.get_channel(channel_id)
+        if message is None and message_id is not None and isinstance(channel, discord.TextChannel):
+            try:
+                message = await channel.fetch_message(message_id)
+            except discord.NotFound:
+                message = None
+            except discord.Forbidden:
+                logger.warning("No permission to fetch radio panel message %s in guild %s", message_id, guild.id)
+                message = None
+            except discord.HTTPException as exc:
+                logger.warning("Failed to fetch radio panel message %s: %s", message_id, exc)
+                message = None
+
+        if message is not None:
+            try:
+                await message.delete()
+            except discord.NotFound:
+                pass
+            except discord.Forbidden:
+                logger.warning("No permission to delete radio panel message %s in guild %s", message.id, guild.id)
+            except discord.HTTPException as exc:
+                logger.warning("Failed to delete radio panel message %s: %s", message.id, exc)
+
+    def _panel_signature(
+        self,
+        guild: discord.Guild,
+        state: Any,
+        voice: discord.VoiceClient,
+        station_name: str,
+        index: int,
+    ) -> str:
+        metadata = dict(getattr(self.bot, "radio_metadata_cache", {}).get(guild.id) or {})
+        elapsed = max(0, int(time.monotonic() - float(getattr(state, "started_at", time.monotonic()))))
+        payload = {
+            "station": station_name,
+            "index": index,
+            "paused": bool(voice.is_paused()),
+            "volume": int(getattr(state, "volume", 65) or 65),
+            "voice_channel": getattr(getattr(voice, "channel", None), "id", None),
+            "artist": str(metadata.get("artist") or ""),
+            "track": str(metadata.get("track") or ""),
+            "stream_title": str(metadata.get("stream_title") or ""),
+            "bitrate_kbps": metadata.get("bitrate_kbps"),
+            "codec": str(metadata.get("codec") or ""),
+            "metadata_supported": bool(metadata.get("metadata_supported")),
+            "elapsed_bucket": elapsed // 30,
+        }
+        return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+    async def _reconcile_panel(self, guild: discord.Guild) -> None:
+        async with self._panel_lock(guild.id):
+            config = await self._panel_config(guild.id)
+            if config is None:
+                return
+
+            channel_id = int(config["channel_id"])
+            message_id = int(config["message_id"]) if config["message_id"] is not None else None
+            channel = guild.get_channel(channel_id)
+            if not isinstance(channel, discord.TextChannel):
+                logger.warning("Configured radio panel channel %s is unavailable in guild %s", channel_id, guild.id)
+                return
+
+            state, voice, active = self._radio_state(guild)
+            if not active or state is None or voice is None:
+                if message_id is not None or guild.id in self.panel_messages:
+                    await self._delete_panel_message(guild, channel_id, message_id)
+                    await self._set_panel_message_id(guild.id, None)
+                return
+
+            stations = await self._load_stations(guild.id)
+            if not stations:
+                logger.warning("Radio is active but no enabled stations exist in guild %s", guild.id)
+                return
+
+            current_name = str(getattr(state, "title", "") or getattr(state, "source_name", "") or "").strip()
+            index = next(
+                (
+                    i
+                    for i, station in enumerate(stations)
+                    if str(station.get("name") or "").casefold() == current_name.casefold()
+                ),
+                0,
+            )
+            station_name = str(stations[index].get("name") or current_name)
+            signature = self._panel_signature(guild, state, voice, station_name, index)
+            view = _base.RadioPanelView(self.bot, guild.id, stations, index)
+            embed = view.embed(guild)
+
+            message = self.panel_messages.get(guild.id)
+            if message is not None and (message.id != message_id or message.channel.id != channel_id):
+                self.panel_messages.pop(guild.id, None)
+                message = None
+
+            if message is None and message_id is not None:
+                try:
+                    message = await channel.fetch_message(message_id)
+                except discord.NotFound:
+                    message = None
+                    await self._set_panel_message_id(guild.id, None)
+                    message_id = None
+                except discord.Forbidden:
+                    logger.warning("No permission to fetch radio panel in %s", channel.mention)
+                    return
+                except discord.HTTPException as exc:
+                    logger.warning("Failed to fetch radio panel in guild %s: %s", guild.id, exc)
+                    return
+
+            if message is None:
+                try:
+                    message = await channel.send(
+                        embed=embed,
+                        view=view,
+                        file=_base._radio_cover(),
+                        allowed_mentions=discord.AllowedMentions.none(),
+                    )
+                except discord.Forbidden:
+                    logger.warning("No permission to create radio panel in %s", channel.mention)
+                    return
+                except discord.HTTPException as exc:
+                    logger.warning("Failed to create radio panel in guild %s: %s", guild.id, exc)
+                    return
+                self.panel_messages[guild.id] = message
+                self.panel_render_state[guild.id] = signature
+                await self._set_panel_message_id(guild.id, message.id)
+                return
+
+            self.panel_messages[guild.id] = message
+            if self.panel_render_state.get(guild.id) == signature:
+                return
+
+            try:
+                await message.edit(
+                    embed=embed,
+                    view=view,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            except discord.NotFound:
+                self.panel_messages.pop(guild.id, None)
+                self.panel_render_state.pop(guild.id, None)
+                await self._set_panel_message_id(guild.id, None)
+                return
+            except discord.Forbidden:
+                logger.warning("No permission to update radio panel %s in guild %s", message.id, guild.id)
+                return
+            except discord.HTTPException as exc:
+                logger.warning("Failed to update radio panel %s: %s", message.id, exc)
+                return
+
+            self.panel_render_state[guild.id] = signature
+
+    @app_commands.command(
+        name="radiopanelchannel",
+        description="Legt den dedizierten Kanal für das automatische Live-Radio-Panel fest.",
+    )
+    @app_commands.describe(kanal="Textkanal, in dem das Radio-Panel während eines Streams erscheinen soll")
+    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.guild_only()
+    async def radiopanelchannel(self, interaction: discord.Interaction, kanal: discord.TextChannel) -> None:
+        if interaction.guild is None or interaction.guild_id is None:
+            return
+
+        member = interaction.guild.me
+        if member is None and self.bot.user is not None:
+            member = interaction.guild.get_member(self.bot.user.id)
+        if member is None:
+            await interaction.response.send_message("Bot-Mitglied konnte nicht aufgelöst werden.", ephemeral=True)
+            return
+
+        permissions = kanal.permissions_for(member)
+        missing: list[str] = []
+        if not permissions.view_channel:
+            missing.append("Kanal ansehen")
+        if not permissions.send_messages:
+            missing.append("Nachrichten senden")
+        if not permissions.embed_links:
+            missing.append("Links einbetten")
+        if not permissions.attach_files:
+            missing.append("Dateien anhängen")
+        if not permissions.read_message_history:
+            missing.append("Nachrichtenverlauf lesen")
+        if missing:
+            await interaction.response.send_message(
+                f"Mir fehlen in {kanal.mention}: **{', '.join(missing)}**.",
+                ephemeral=True,
+            )
+            return
+
+        old = await self._panel_config(interaction.guild_id)
+        old_channel_id = int(old["channel_id"]) if old is not None else None
+        old_message_id = int(old["message_id"]) if old is not None and old["message_id"] is not None else None
+        keep_message_id = old_message_id if old_channel_id == kanal.id else None
+
+        if old_channel_id is not None and old_channel_id != kanal.id:
+            await self._delete_panel_message(interaction.guild, old_channel_id, old_message_id)
+
+        await self.bot.database.execute(
+            """
+            INSERT INTO radio_panel_config(guild_id,channel_id,message_id,updated_at)
+            VALUES(?,?,?,CURRENT_TIMESTAMP)
+            ON CONFLICT(guild_id) DO UPDATE SET
+                channel_id=excluded.channel_id,
+                message_id=excluded.message_id,
+                updated_at=CURRENT_TIMESTAMP
+            """,
+            (interaction.guild_id, kanal.id, keep_message_id),
+        )
+        self.panel_render_state.pop(interaction.guild_id, None)
+        if keep_message_id is None:
+            self.panel_messages.pop(interaction.guild_id, None)
+
+        await interaction.response.send_message(
+            f"📻 Automatisches Radio-Panel ist jetzt fest auf {kanal.mention} gesetzt. "
+            "Es erscheint beim Start eines Radiosenders und wird nach dem Stop/Disconnect wieder gelöscht.",
+            ephemeral=True,
+        )
+        asyncio.create_task(self._reconcile_panel(interaction.guild))
+
     @tasks.loop(seconds=10)
     async def radio_metadata_loop(self) -> None:
         results = await asyncio.gather(
@@ -272,11 +548,31 @@ class RadioMetadataRuntime(commands.Cog):
     async def before_radio_metadata_loop(self) -> None:
         await self.bot.wait_until_ready()
 
+    @tasks.loop(seconds=3)
+    async def radio_panel_loop(self) -> None:
+        results = await asyncio.gather(
+            *(self._reconcile_panel(guild) for guild in self.bot.guilds),
+            return_exceptions=True,
+        )
+        for result in results:
+            if isinstance(result, Exception):
+                logger.warning("Radio panel reconciliation failed: %s", result)
+
+    @radio_panel_loop.before_loop
+    async def before_radio_panel_loop(self) -> None:
+        await self.bot.wait_until_ready()
+
 
 class _RadioMetadataRefreshButton(discord.ui.Button):
     def __init__(self, panel) -> None:
         self.panel = panel
-        super().__init__(label="Refresh", emoji="🔄", style=discord.ButtonStyle.secondary, row=1)
+        super().__init__(
+            label="Refresh",
+            emoji="🔄",
+            style=discord.ButtonStyle.secondary,
+            custom_id="homepi:radio:metadata-refresh",
+            row=1,
+        )
 
     async def callback(self, interaction: discord.Interaction) -> None:
         await interaction.response.edit_message(embed=self.panel.embed(interaction.guild), view=self.panel)
@@ -291,6 +587,7 @@ _ORIGINAL_RADIO_INIT = getattr(
 
 def _enhanced_radio_init(self, bot: commands.Bot, guild_id: int, stations: list[dict], index: int = 0) -> None:
     _ORIGINAL_RADIO_INIT(self, bot, guild_id, stations, index)
+    self.timeout = None
     if not any(isinstance(child, _RadioMetadataRefreshButton) for child in self.children):
         self.add_item(_RadioMetadataRefreshButton(self))
 
