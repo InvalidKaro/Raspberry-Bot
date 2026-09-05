@@ -86,6 +86,8 @@ HUB_SPECS: tuple[HubSpec, ...] = (
             "radio",
             "youtube",
             "radiopanel",
+            "radiopanelchannel",
+            "radiopanelcreate",
             "youtubesearch",
             "ambientsource",
             "ambient",
