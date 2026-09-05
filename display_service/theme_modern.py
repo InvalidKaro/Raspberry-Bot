@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-import time
+import os
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from PIL import Image, ImageDraw
 
@@ -16,6 +18,15 @@ _PAGE_LABELS = {
     "media": "MEDIA",
 }
 _WEEKDAYS = ("MO", "DI", "MI", "DO", "FR", "SA", "SO")
+_TIMEZONE_NAME = os.getenv("DISPLAY_TIMEZONE", "Europe/Berlin").strip() or "Europe/Berlin"
+try:
+    _DISPLAY_TIMEZONE = ZoneInfo(_TIMEZONE_NAME)
+except ZoneInfoNotFoundError:
+    _DISPLAY_TIMEZONE = ZoneInfo("UTC")
+
+
+def _now() -> datetime:
+    return datetime.now(_DISPLAY_TIMEZONE)
 
 
 def _text_width(draw: ImageDraw.ImageDraw, value: str, font) -> int:
@@ -25,15 +36,6 @@ def _text_width(draw: ImageDraw.ImageDraw, value: str, font) -> int:
 
 def _right_text(draw: ImageDraw.ImageDraw, y: int, value: str, font, *, right: int = 126) -> None:
     draw.text((right - _text_width(draw, value, font), y), value, font=font, fill=255)
-
-
-def _pill(draw: ImageDraw.ImageDraw, x: int, y: int, text: str, *, active: bool) -> int:
-    label = str(text).upper()
-    width = _text_width(draw, label, _base.FONT_TINY) + 8
-    x2 = min(127, x + width)
-    draw.rounded_rectangle((x, y, x2, y + 10), radius=3, outline=255, fill=255 if active else 0)
-    draw.text((x + 4, y + 1), label, font=_base.FONT_TINY, fill=0 if active else 255)
-    return x2
 
 
 def _header(draw: ImageDraw.ImageDraw, title: str, status: str = "") -> None:
@@ -52,6 +54,18 @@ def _bar(draw: ImageDraw.ImageDraw, x: int, y: int, width: int, value: float, *,
     fill_width = round(inner * value / 100.0)
     if fill_width > 0:
         draw.rectangle((x + 2, y + 2, x + 1 + fill_width, y2 - 2 if height >= 6 else y2 - 1), fill=255)
+
+
+def _status_box(draw: ImageDraw.ImageDraw, x: int, y: int, width: int, enabled: bool) -> None:
+    """High-contrast status box that stays readable on small blue SSD1306 panels."""
+    height = 19
+    draw.rounded_rectangle((x, y, x + width - 1, y + height - 1), radius=3, outline=255)
+    label = "ON" if enabled else "OFF"
+    font = _base.FONT_MEDIUM
+    text_width = _text_width(draw, label, font)
+    draw.text((x + max(2, (width - text_width) // 2), y + 2), label, font=font, fill=255)
+    if enabled:
+        draw.rectangle((x + 3, y + height - 4, x + width - 4, y + height - 3), fill=255)
 
 
 def _footer(draw: ImageDraw.ImageDraw, page: str, layout: dict[str, Any]) -> None:
@@ -87,18 +101,17 @@ def _finish(image: Image.Image, page: str, layout: dict[str, Any]) -> Image.Imag
 def _render_clock(snap: _base.Snapshot, layout: dict[str, Any]) -> Image.Image:
     image = Image.new("1", (128, 64), 0)
     draw = ImageDraw.Draw(image)
+    now = _now()
 
     draw.text((2, 1), "HOMEPI", font=_base.FONT_TINY, fill=255)
-    right = "NET" if snap.network else "OFF"
-    _right_text(draw, 1, right, _base.FONT_TINY)
+    _right_text(draw, 1, "NET ON" if snap.network else "NET OFF", _base.FONT_TINY)
 
-    value = time.strftime("%H:%M")
+    value = now.strftime("%H:%M")
     width = _text_width(draw, value, _base.FONT_LARGE)
     draw.text(((128 - width) // 2, 10), value, font=_base.FONT_LARGE, fill=255)
 
-    weekday = _WEEKDAYS[time.localtime().tm_wday]
-    date = time.strftime("%d.%m.%Y")
-    subtitle = f"{weekday}  {date}"
+    weekday = _WEEKDAYS[now.weekday()]
+    subtitle = f"{weekday}  {now.strftime('%d.%m.%Y')}"
     sw = _text_width(draw, subtitle, _base.FONT_SMALL)
     draw.text(((128 - sw) // 2, 38), subtitle, font=_base.FONT_SMALL, fill=255)
 
@@ -115,17 +128,15 @@ def _render_system(snap: _base.Snapshot, layout: dict[str, Any]) -> Image.Image:
 
     draw.text((3, 15), "TEMP", font=_base.FONT_TINY, fill=255)
     temp = "--" if snap.temp is None else f"{snap.temp:.0f}C"
-    draw.text((3, 23), temp, font=_base.FONT_MEDIUM, fill=255)
+    temp_width = _text_width(draw, temp, _base.FONT_MEDIUM)
+    draw.text((3 + max(0, (55 - temp_width) // 2), 26), temp, font=_base.FONT_MEDIUM, fill=255)
+    draw.text((3, 43), "CPU TEMP", font=_base.FONT_TINY, fill=255)
 
     draw.line((62, 15, 62, 49), fill=255)
 
     draw.text((68, 15), "RAM", font=_base.FONT_TINY, fill=255)
     _right_text(draw, 23, f"{snap.ram:.0f}%", _base.FONT_MEDIUM, right=124)
     _bar(draw, 68, 41, 56, snap.ram, height=6)
-
-    if snap.temp is not None:
-        temp_pct = max(0.0, min(100.0, (float(snap.temp) - 25.0) / 55.0 * 100.0))
-        _bar(draw, 3, 41, 53, temp_pct, height=6)
 
     return _finish(image, "system", layout)
 
@@ -153,14 +164,15 @@ def _render_network(snap: _base.Snapshot, layout: dict[str, Any]) -> Image.Image
     draw = ImageDraw.Draw(image)
     _header(draw, "NETWORK", "HOMEPI")
 
-    draw.text((3, 16), "LINK", font=_base.FONT_TINY, fill=255)
-    _pill(draw, 3, 26, "ONLINE" if snap.network else "OFFLINE", active=snap.network)
+    draw.text((3, 14), "NETWORK", font=_base.FONT_TINY, fill=255)
+    _status_box(draw, 3, 23, 54, snap.network)
 
-    draw.text((70, 16), "PI-HOLE", font=_base.FONT_TINY, fill=255)
-    _pill(draw, 70, 26, "ACTIVE" if snap.pihole else "OFF", active=snap.pihole)
+    draw.text((70, 14), "PI-HOLE", font=_base.FONT_TINY, fill=255)
+    _status_box(draw, 70, 23, 54, snap.pihole)
 
-    status = "DNS + FILTER READY" if snap.network and snap.pihole else "CHECK SERVICES"
-    draw.text((3, 43), _base._truncate(draw, status, _base.FONT_TINY, 122), font=_base.FONT_TINY, fill=255)
+    status = "ALL SERVICES OK" if snap.network and snap.pihole else "CHECK SERVICES"
+    status_width = _text_width(draw, status, _base.FONT_TINY)
+    draw.text((max(2, (128 - status_width) // 2), 45), status, font=_base.FONT_TINY, fill=255)
     return _finish(image, "network", layout)
 
 
