@@ -14,6 +14,7 @@ from cogs.community.voice_suite import VoiceControls
 
 KIND_COLORS = {
     "youtube": 0xFF2449,
+    "spotify": 0x1DB954,
     "radio": 0x2AA7FF,
     "ambient": 0x8B5CF6,
     "real ambient": 0x8B5CF6,
@@ -101,6 +102,7 @@ def _draw_generic_cover(kind: str) -> discord.File:
     image = Image.new("RGB", (size, size), (8, 11, 17))
     draw = ImageDraw.Draw(image)
     color = {
+        "spotify": (29, 185, 84),
         "ambient": (139, 92, 246),
         "real ambient": (139, 92, 246),
         "tts": (49, 196, 141),
@@ -159,9 +161,18 @@ class NowPlayingPlus(commands.Cog):
 
         yt_cog = self.bot.get_cog("YouTubeSuite")
         yt_track = getattr(yt_cog, "current", {}).get(interaction.guild_id) if yt_cog else None
-        duration = int(getattr(yt_track, "duration", 0) or 0) or None
-        queue_len = len(getattr(yt_cog, "queues", {}).get(interaction.guild_id, ())) if yt_cog else 0
+        yt_queue_len = len(getattr(yt_cog, "queues", {}).get(interaction.guild_id, ())) if yt_cog else 0
         loop_enabled = interaction.guild_id in getattr(yt_cog, "loop_enabled", set()) if yt_cog else False
+
+        spotify_cog = self.bot.get_cog("SpotifySuite")
+        spotify_track = getattr(spotify_cog, "current", {}).get(interaction.guild_id) if spotify_cog else None
+        spotify_queue_len = len(getattr(spotify_cog, "queues", {}).get(interaction.guild_id, ())) if spotify_cog else 0
+
+        duration: int | None = None
+        if kind_lower == "youtube":
+            duration = int(getattr(yt_track, "duration", 0) or 0) or None
+        elif kind_lower == "spotify":
+            duration = int(getattr(spotify_track, "duration_seconds", 0) or 0) or None
 
         source_url = str(getattr(state, "source_name", "") or "").strip()
         video_id = _youtube_video_id(source_url) if kind_lower == "youtube" else None
@@ -169,12 +180,14 @@ class NowPlayingPlus(commands.Cog):
 
         embed = discord.Embed(title=title, color=color)
         embed.set_author(name="HomePi Media · Now Playing")
-        if kind_lower == "youtube" and source_url.startswith(("https://", "http://")):
+        if kind_lower in {"youtube", "spotify"} and source_url.startswith(("https://", "http://")):
             embed.url = source_url
 
         status_line = f"{status_icon} **{status_text}**"
         if kind_lower == "radio":
             status_line += " · `LIVE`"
+        elif kind_lower == "spotify":
+            status_line += " · `SPOTIFY`"
         embed.description = status_line
 
         embed.add_field(name="Quelle", value=f"`{kind}`", inline=True)
@@ -192,7 +205,17 @@ class NowPlayingPlus(commands.Cog):
 
         if kind_lower == "youtube":
             embed.add_field(name="Loop", value="🔁 **An**" if loop_enabled else "➡️ Aus", inline=True)
-            embed.add_field(name="Queue", value=f"**{queue_len}** Titel", inline=True)
+            embed.add_field(name="Queue", value=f"**{yt_queue_len}** Titel", inline=True)
+        elif kind_lower == "spotify":
+            artist = str(getattr(spotify_track, "artist", "") or "").strip()
+            album = str(getattr(spotify_track, "album", "") or "").strip()
+            if artist:
+                embed.add_field(name="Artist", value=artist[:180], inline=True)
+            if album:
+                embed.add_field(name="Album", value=album[:180], inline=True)
+            embed.add_field(name="Spotify Queue", value=f"**{spotify_queue_len}** Titel", inline=True)
+            if source_url.startswith("https://open.spotify.com/"):
+                embed.add_field(name="Spotify", value=f"[Track öffnen]({source_url})", inline=True)
         elif kind_lower == "radio":
             row = await self.bot.database.fetchone(
                 "SELECT COALESCE(genre,'') genre,COALESCE(homepage,'') homepage "
@@ -215,6 +238,8 @@ class NowPlayingPlus(commands.Cog):
         file: discord.File | None = None
         if video_id:
             embed.set_thumbnail(url=f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg")
+        elif kind_lower == "spotify" and spotify_track and str(getattr(spotify_track, "thumbnail", "")).startswith("https://"):
+            embed.set_thumbnail(url=str(spotify_track.thumbnail))
         elif kind_lower == "radio":
             file = _draw_radio_cover()
             embed.set_thumbnail(url="attachment://radio-cover.png")
