@@ -24,8 +24,6 @@ ANIMATION_DURATION_SECONDS = max(5.0, min(15.0, float(os.getenv("DISPLAY_ANIMATI
 ANIMATION_FPS = max(5.0, min(20.0, float(os.getenv("DISPLAY_ANIMATION_FPS", "10") or 10)))
 ANIMATION_STYLE = (os.getenv("DISPLAY_ANIMATION_STYLE", "mix").strip().lower() or "mix")
 
-_ORIGINAL_RUN = _core.DisplayService.run
-
 
 def _text_width(draw: ImageDraw.ImageDraw, value: str, font) -> int:
     box = draw.textbbox((0, 0), str(value), font=font)
@@ -52,7 +50,7 @@ def _spectrum_frame(elapsed: float, layout: dict[str, Any]) -> Image.Image:
     draw.text((126 - _text_width(draw, right, _core.FONT_TINY), 1), right, font=_core.FONT_TINY, fill=255)
     draw.line((0, 10, 127, 10), fill=255)
 
-    bar_count = 16
+    bar_count = 15
     bar_width = 5
     gap = 3
     x0 = 4
@@ -280,8 +278,8 @@ def _run_with_retro_animation(self: _core.DisplayService) -> None:
                 and now - last_animation_at >= ANIMATION_INTERVAL_SECONDS
                 and (self.hardware.connected or _core.WRITE_HEADLESS_PREVIEW)
             ):
-                animation_sequence += 1
                 _play_animation(self, animation_sequence)
+                animation_sequence += 1
                 last_animation_at = time.monotonic()
                 # The animation owns the screen for its full duration. Afterwards the
                 # normal carousel restarts cleanly on HOME instead of instantly skipping.
