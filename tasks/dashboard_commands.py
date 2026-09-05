@@ -265,6 +265,25 @@ class DashboardCommands(commands.Cog):
                                 int(payload.get("volume", 65)),
                                 int(payload.get("minutes", 0)),
                             )
+                        elif action == "media-spotify-play":
+                            spotify = self.bot.get_cog("SpotifySuite")
+                            if spotify is None:
+                                raise RuntimeError("SpotifySuite is not loaded")
+                            result = await spotify.dashboard_play(
+                                guild_id,
+                                int(payload["channel_id"]),
+                                str(payload["source"]),
+                                int(payload.get("volume", 65)),
+                            )
+                        elif action == "media-spotify-add":
+                            spotify = self.bot.get_cog("SpotifySuite")
+                            if spotify is None:
+                                raise RuntimeError("SpotifySuite is not loaded")
+                            result = await spotify.dashboard_add(
+                                guild_id,
+                                str(payload["source"]),
+                                int(payload.get("requested_by", 0) or 0),
+                            )
                         elif action == "media-volume":
                             volume = voice_cog.set_session_volume(guild_id, int(payload.get("volume", 65)))
                             result = f"Voice volume -> {volume}%"
