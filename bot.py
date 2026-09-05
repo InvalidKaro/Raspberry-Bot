@@ -57,6 +57,7 @@ EXTENSIONS: tuple[str, ...] = (
     "cogs.community.voice_playlist_support",
     "cogs.community.youtube_suite",
     "cogs.community.spotify_suite",
+    "cogs.community.spotify_playlist_plus",
     "cogs.community.nowplaying_plus",
     "cogs.community.media_interactive",
     "cogs.community.radio_panel_setup",
