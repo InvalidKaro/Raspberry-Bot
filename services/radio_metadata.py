@@ -9,13 +9,23 @@ from urllib.parse import urljoin, urlparse
 
 import aiohttp
 
-USER_AGENT = "Raspberry-Bot-RadioMetadata/1.0"
-MAX_REDIRECTS = 4
+USER_AGENT = "Raspberry-Bot-RadioMetadata/1.1"
+MAX_HOPS = 6
 MAX_META_INTERVAL = 512 * 1024
+MAX_PLAYLIST_BYTES = 64 * 1024
 REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=8, connect=3, sock_connect=3, sock_read=5)
 
 _STREAM_TITLE_RE = re.compile(r"StreamTitle=(?P<q>['\"])(?P<value>.*?)(?P=q);", re.IGNORECASE | re.DOTALL)
 _STREAM_URL_RE = re.compile(r"StreamUrl=(?P<q>['\"])(?P<value>.*?)(?P=q);", re.IGNORECASE | re.DOTALL)
+
+_PLAYLIST_CONTENT_TYPES = {
+    "audio/x-mpegurl",
+    "application/x-mpegurl",
+    "application/vnd.apple.mpegurl",
+    "audio/mpegurl",
+    "audio/scpls",
+}
+_PLAYLIST_SUFFIXES = (".m3u", ".m3u8", ".pls")
 
 
 @dataclass(slots=True)
@@ -146,6 +156,46 @@ def _parse_int(value: object) -> int | None:
     return number if number > 0 else None
 
 
+def _looks_like_playlist(url: str, content_type: str) -> bool:
+    path = urlparse(url).path.lower()
+    mime = content_type.split(";", 1)[0].strip().lower()
+    return path.endswith(_PLAYLIST_SUFFIXES) or mime in _PLAYLIST_CONTENT_TYPES
+
+
+def _playlist_stream_url(payload: bytes, base_url: str) -> str:
+    if len(payload) > MAX_PLAYLIST_BYTES:
+        raise RuntimeError("Radio playlist is too large")
+
+    text = payload.decode("utf-8-sig", errors="replace")
+    candidates: list[str] = []
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+
+        if "=" in line and line.lower().startswith("file"):
+            _, value = line.split("=", 1)
+            line = value.strip()
+
+        candidate = urljoin(base_url, line)
+        parsed = urlparse(candidate)
+        if parsed.scheme.lower() in {"http", "https"} and parsed.hostname:
+            candidates.append(candidate)
+
+    if not candidates:
+        raise RuntimeError("Radio playlist contained no stream URL")
+
+    https_candidate = next(
+        (candidate for candidate in candidates if urlparse(candidate).scheme.lower() == "https"),
+        None,
+    )
+    if https_candidate:
+        return https_candidate
+
+    raise RuntimeError("Radio playlist contained no public HTTPS stream URL")
+
+
 async def fetch_radio_metadata(
     session: aiohttp.ClientSession,
     stream_url: str,
@@ -163,9 +213,14 @@ async def fetch_radio_metadata(
         "Accept": "*/*",
         "Connection": "close",
     }
+    seen_urls: set[str] = set()
 
     try:
-        for redirect_index in range(MAX_REDIRECTS + 1):
+        for hop_index in range(MAX_HOPS + 1):
+            if current_url in seen_urls:
+                raise RuntimeError("Radio stream redirect/playlist loop")
+            seen_urls.add(current_url)
+
             await _assert_public_https(current_url)
             async with session.get(
                 current_url,
@@ -178,7 +233,7 @@ async def fetch_radio_metadata(
                     location = response.headers.get("Location", "").strip()
                     if not location:
                         raise RuntimeError(f"Radio stream redirect {response.status} has no Location header")
-                    if redirect_index >= MAX_REDIRECTS:
+                    if hop_index >= MAX_HOPS:
                         raise RuntimeError("Radio stream redirected too many times")
                     current_url = urljoin(str(response.url), location)
                     continue
@@ -186,11 +241,21 @@ async def fetch_radio_metadata(
                 if response.status < 200 or response.status >= 300:
                     raise RuntimeError(f"Radio metadata HTTP {response.status}")
 
-                result.stream_url = str(response.url)
+                response_url = str(response.url)
+                content_type = _clean_header(response.headers.get("Content-Type"), 80)
+
+                if _looks_like_playlist(response_url, content_type):
+                    if hop_index >= MAX_HOPS:
+                        raise RuntimeError("Radio playlist resolution exceeded hop limit")
+                    payload = await response.content.read(MAX_PLAYLIST_BYTES + 1)
+                    current_url = _playlist_stream_url(payload, response_url)
+                    continue
+
+                result.stream_url = response_url
                 result.stream_name = _clean_header(response.headers.get("icy-name"), 160)
                 result.stream_genre = _clean_header(response.headers.get("icy-genre"), 120)
                 result.bitrate_kbps = _parse_int(response.headers.get("icy-br"))
-                result.content_type = _clean_header(response.headers.get("Content-Type"), 80)
+                result.content_type = content_type
                 result.codec = _codec_from_content_type(result.content_type)
 
                 metaint = _parse_int(response.headers.get("icy-metaint"))
@@ -232,7 +297,7 @@ async def fetch_radio_metadata(
                         result.stream_url = metadata_url
                 return result
 
-        raise RuntimeError("Radio stream redirect loop")
+        raise RuntimeError("Radio stream redirect/playlist loop")
     except (aiohttp.ClientError, asyncio.TimeoutError, OSError, RuntimeError, ValueError) as exc:
         result.error = f"{type(exc).__name__}: {exc}"[:500]
         return result
