@@ -1,255 +1,196 @@
 from __future__ import annotations
 
 import asyncio
-import ipaddress
 import json
 import sqlite3
-from pathlib import Path
-from urllib.parse import urlparse
+from typing import Any
 
 from aiohttp import web
 
-TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
+from dashboard import media_routes_base as _base
 
-AMBIENT_CATALOG = [
-    {"key": "rain", "label": "Regen am Fenster", "icon": "🌧️", "description": "Mehrschichtiger Regen, Tropfen und tiefer Raum-Rumble."},
-    {"key": "storm", "label": "Gewitter", "icon": "⛈️", "description": "Dichter Regen, Donnerteppich und langsame Druckwellen."},
-    {"key": "fireplace", "label": "Kamin", "icon": "🔥", "description": "Glut, Knistern und wechselnde Crackle-Layer."},
-    {"key": "forest", "label": "Wald", "icon": "🌲", "description": "Blätterwind mit Vogel- und Insekten-Tönen."},
-    {"key": "cafe", "label": "Café", "icon": "☕", "description": "Gedämpfter Raum, Murmelteppich und Geschirr-Höhen."},
-    {"key": "ocean", "label": "Ozean", "icon": "🌊", "description": "Langsame Brandung mit Luft- und Gischt-Layer."},
-    {"key": "train", "label": "Nachtzug", "icon": "🚆", "description": "Schienen-Rhythmus, Motor-Rumble und Fahrtgeräusch."},
-    {"key": "night", "label": "Sommernacht", "icon": "🌙", "description": "Nachtwind mit Grillen-/Insekten-Tönen."},
-    {"key": "spaceship", "label": "Raumschiff", "icon": "🛰️", "description": "Maschinen-Drones, Lüftung und Elektronik-Hum."},
-    {"key": "fan", "label": "Ventilator", "icon": "🌀", "description": "Luftstrom mit Motor-Grundton und leichtem Puls."},
-    {"key": "city", "label": "Stadt bei Nacht", "icon": "🌆", "description": "Verkehr, diffuse Straße und entfernte Motoren."},
-]
+AMBIENT_CATALOG = _base.AMBIENT_CATALOG
+TEMPLATE_DIR = _base.TEMPLATE_DIR
+
+RADIO_METADATA_SCHEMA = """
+CREATE TABLE IF NOT EXISTS radio_runtime_metadata(
+    guild_id INTEGER PRIMARY KEY,
+    active INTEGER NOT NULL DEFAULT 0,
+    station_name TEXT,
+    stream_title TEXT,
+    artist TEXT,
+    track TEXT,
+    genre TEXT,
+    homepage TEXT,
+    stream_name TEXT,
+    stream_genre TEXT,
+    bitrate_kbps INTEGER,
+    codec TEXT,
+    content_type TEXT,
+    metadata_supported INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+_RADIO_CSS = r"""
+<style>
+.radio-live-card{border-color:#203d52;background:linear-gradient(145deg,rgba(11,25,37,.98),rgba(17,21,28,.96))}
+.radio-live-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.radio-live-badge{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:999px;background:#15202b;border:1px solid #294255;color:#9eabb9;font-size:10px;font-weight:800;letter-spacing:.08em}
+.radio-live-badge.on{background:#3b1017;border-color:#7d2634;color:#ffb7c0}.radio-live-badge.on::before{content:'';width:7px;height:7px;border-radius:50%;background:#ff4057;box-shadow:0 0 10px #ff4057}
+.radio-live-station{font-size:18px;font-weight:850;letter-spacing:-.02em;margin-bottom:10px}.radio-live-artist{color:#91d5ff;font-weight:800;font-size:13px}.radio-live-track{font-size:16px;font-weight:800;margin-top:2px;overflow-wrap:anywhere}
+.radio-live-meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}.radio-live-chip{padding:5px 8px;border-radius:999px;background:#0b1118;border:1px solid #243240;color:#b7c4d1;font-size:11px}.radio-live-muted{color:var(--muted);font-size:12px}.radio-live-error{margin-top:9px;color:#d89ca3;font-size:10px}
+</style>
+"""
+
+_RADIO_SCRIPT = r"""
+<script>
+(()=>{
+  const aside=document.querySelector('aside');
+  if(!aside||document.querySelector('#radioLiveCard'))return;
+  const card=document.createElement('section');
+  card.className='card radio-live-card';card.id='radioLiveCard';
+  card.innerHTML='<div class="head"><div class="radio-live-head"><h2>📻 Radio Live</h2></div><span id="radioLiveBadge" class="radio-live-badge">OFFLINE</span></div><div class="body"><div id="radioLiveBody" class="radio-live-muted">Kein Live-Radio aktiv.</div></div>';
+  aside.prepend(card);
+
+  const h=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const duration=s=>{s=Math.max(0,Number(s)||0);const hr=Math.floor(s/3600),min=Math.floor((s%3600)/60),sec=Math.floor(s%60);return hr?`${hr}:${String(min).padStart(2,'0')}:${String(sec).padStart(2,'0')}`:`${min}:${String(sec).padStart(2,'0')}`};
+  function renderRadioLive(radio){
+    const badge=document.querySelector('#radioLiveBadge'),body=document.querySelector('#radioLiveBody');
+    if(!badge||!body)return;
+    if(!radio||!radio.active){badge.className='radio-live-badge';badge.textContent='OFFLINE';body.className='radio-live-muted';body.innerHTML='Kein Live-Radio aktiv.';return;}
+    badge.className='radio-live-badge on';badge.textContent=radio.paused?'PAUSE':'LIVE';body.className='';
+    const station=h(radio.station_name||radio.stream_name||'Radio');
+    const artist=h(radio.artist||'');const track=h(radio.track||'');const raw=h(radio.stream_title||'');
+    let now='';
+    if(artist&&track)now=`<div class="radio-live-artist">${artist}</div><div class="radio-live-track">${track}</div>`;
+    else if(raw)now=`<div class="radio-live-track">${raw}</div>`;
+    else now='<div class="radio-live-muted">Der Stream liefert aktuell keine Song-Metadaten.</div>';
+    const chips=[];
+    if(radio.genre)chips.push(h(radio.genre));
+    if(radio.volume!=null)chips.push(`🔊 ${h(radio.volume)}%`);
+    if(radio.elapsed_seconds!=null)chips.push(`⏱ ${duration(radio.elapsed_seconds)}`);
+    if(radio.channel_name)chips.push(`Voice · ${h(radio.channel_name)}`);
+    const stream=[radio.bitrate_kbps?`${h(radio.bitrate_kbps)} kbps`:'',radio.codec?h(radio.codec):''].filter(Boolean).join(' · ');if(stream)chips.push(stream);
+    body.innerHTML=`<div class="radio-live-station">${station}</div>${now}<div class="radio-live-meta">${chips.map(x=>`<span class="radio-live-chip">${x}</span>`).join('')}</div>${radio.last_error&&!radio.stream_title?`<div class="radio-live-error">Metadaten vorübergehend nicht verfügbar.</div>`:''}`;
+  }
+  async function refreshRadioLive(){
+    const sel=document.querySelector('#guild');const gid=sel?.value||'';
+    if(!gid){renderRadioLive(null);return;}
+    try{const response=await fetch('/api/media/state?guild_id='+encodeURIComponent(gid),{cache:'no-store'});const data=await response.json();if(response.ok&&data.ok!==false)renderRadioLive(data.radio||null)}catch(_e){}
+  }
+  document.querySelector('#guild')?.addEventListener('change',()=>setTimeout(refreshRadioLive,150));
+  document.querySelector('#refresh')?.addEventListener('click',()=>setTimeout(refreshRadioLive,250));
+  setInterval(refreshRadioLive,10000);setTimeout(refreshRadioLive,500);
+})();
+</script>
+"""
 
 
-def _db_path(config) -> Path:
-    configured = Path(config.database_path)
-    if configured.is_absolute():
-        return configured
-    return Path(config.repo_path) / configured
+def _inject_radio_live_ui(html: str) -> str:
+    if "id=\"radioLiveCard\"" in html:
+        return html
+    if "</head>" in html:
+        html = html.replace("</head>", _RADIO_CSS + "\n</head>", 1)
+    if "</body>" in html:
+        html = html.replace("</body>", _RADIO_SCRIPT + "\n</body>", 1)
+    return html
 
 
-def _connect(config) -> sqlite3.Connection:
-    con = sqlite3.connect(_db_path(config))
-    con.row_factory = sqlite3.Row
-    con.execute("PRAGMA busy_timeout=5000")
-    _ensure_schema(con)
-    return con
-
-
-def _ensure_schema(con: sqlite3.Connection) -> None:
-    con.execute("""CREATE TABLE IF NOT EXISTS voice_radio_stations (guild_id INTEGER NOT NULL,name TEXT NOT NULL,stream_url TEXT NOT NULL,genre TEXT,homepage TEXT,created_by INTEGER NOT NULL,enabled INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(guild_id,name))""")
-    con.execute("""CREATE TABLE IF NOT EXISTS voice_ambient_sources (guild_id INTEGER NOT NULL,name TEXT NOT NULL,audio_url TEXT NOT NULL,category TEXT,created_by INTEGER NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(guild_id,name))""")
-    con.execute("""CREATE TABLE IF NOT EXISTS voice_playback_history (id INTEGER PRIMARY KEY AUTOINCREMENT,guild_id INTEGER NOT NULL,kind TEXT NOT NULL,title TEXT NOT NULL,source_name TEXT,started_by INTEGER NOT NULL,started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
-    con.commit()
-
-
-def _guild_id(value: object) -> int:
-    raw = str(value or "").strip()
-    if not raw.isdigit():
-        raise ValueError("Guild-ID fehlt oder ist ungültig.")
-    return int(raw)
-
-
-def _channel_id(value: object) -> int:
-    raw = str(value or "").strip()
-    if not raw.isdigit():
-        raise ValueError("Voice-Channel-ID fehlt oder ist ungültig.")
-    return int(raw)
-
-
-def _clean_name(value: object) -> str:
-    raw = " ".join(str(value or "").strip().split())[:48]
-    if not raw or not all(ch.isalnum() or ch in " -_().&+" for ch in raw):
-        raise ValueError("Ungültiger Name. Erlaubt: Buchstaben, Zahlen, Leerzeichen und - _ ( ) . & +")
-    return raw
-
-
-def _safe_https(value: object, *, optional: bool = False) -> str:
-    raw = str(value or "").strip()
-    if optional and not raw:
-        return ""
-    parsed = urlparse(raw)
-    if parsed.scheme != "https" or not parsed.hostname:
-        raise ValueError("Es sind nur öffentliche HTTPS-URLs erlaubt.")
-    host = parsed.hostname.lower()
-    if host in {"localhost", "localhost.localdomain"} or host.endswith(".local"):
-        raise ValueError("Lokale Ziele sind nicht erlaubt.")
+def _read_radio_state(config: Any, guild_id: int) -> dict[str, Any]:
+    con = _base._connect(config)
     try:
-        address = ipaddress.ip_address(host)
-    except ValueError:
-        return raw
-    if address.is_private or address.is_loopback or address.is_link_local or address.is_reserved or address.is_multicast:
-        raise ValueError("Private/lokale IP-Adressen sind nicht erlaubt.")
-    return raw
-
-
-def _clamp(value: object, low: int, high: int, default: int) -> int:
-    try:
-        number = int(value)
-    except (TypeError, ValueError):
-        return default
-    return max(low, min(high, number))
-
-
-def _enqueue(config, action: str, payload: dict) -> int:
-    con = _connect(config)
-    try:
-        cur = con.execute(
-            "INSERT INTO dashboard_commands(action,payload_json) VALUES(?,?)",
-            (action, json.dumps(payload, ensure_ascii=False)),
-        )
+        con.execute(RADIO_METADATA_SCHEMA)
         con.commit()
-        return int(cur.lastrowid)
+        row = con.execute(
+            """
+            SELECT active,station_name,stream_title,artist,track,genre,homepage,
+                   stream_name,stream_genre,bitrate_kbps,codec,content_type,
+                   metadata_supported,last_error,updated_at
+            FROM radio_runtime_metadata WHERE guild_id=?
+            """,
+            (guild_id,),
+        ).fetchone()
+        radio = dict(row) if row else {
+            "active": 0,
+            "station_name": "",
+            "stream_title": "",
+            "artist": "",
+            "track": "",
+            "genre": "",
+            "homepage": "",
+            "stream_name": "",
+            "stream_genre": "",
+            "bitrate_kbps": None,
+            "codec": "",
+            "content_type": "",
+            "metadata_supported": 0,
+            "last_error": "",
+            "updated_at": None,
+        }
+
+        runtime: dict[str, Any] = {}
+        try:
+            runtime_row = con.execute(
+                "SELECT state_json FROM dashboard_runtime_state WHERE guild_id=?",
+                (guild_id,),
+            ).fetchone()
+            if runtime_row:
+                parsed = json.loads(runtime_row["state_json"] or "{}")
+                if isinstance(parsed, dict):
+                    runtime = parsed
+        except (sqlite3.Error, ValueError, TypeError, json.JSONDecodeError):
+            runtime = {}
+
+        voice = runtime.get("voice") if isinstance(runtime.get("voice"), dict) else {}
+        is_radio = str(voice.get("kind") or "").lower() == "radio"
+        voice_active = bool(is_radio and (voice.get("playing") or voice.get("paused")))
+        radio["active"] = bool(voice_active)
+        if voice_active:
+            radio["station_name"] = str(voice.get("title") or radio.get("station_name") or "")
+        radio["paused"] = bool(voice.get("paused"))
+        radio["playing"] = bool(voice.get("playing"))
+        radio["volume"] = voice.get("volume")
+        radio["elapsed_seconds"] = voice.get("elapsed_seconds")
+        radio["channel_name"] = voice.get("channel_name")
+        radio["metadata_supported"] = bool(radio.get("metadata_supported"))
+        return radio
     finally:
         con.close()
 
 
-async def media_page(_: web.Request) -> web.Response:
+async def media_page(request: web.Request) -> web.Response:
+    response = await _base.media_page(request)
     return web.Response(
-        text=(TEMPLATE_DIR / "media.html").read_text(encoding="utf-8"),
+        text=_inject_radio_live_ui(response.text),
         content_type="text/html",
         headers={"Cache-Control": "no-store"},
     )
 
 
 async def api_media_state(request: web.Request) -> web.Response:
-    config = request.app["config"]
+    base_response = await _base.api_media_state(request)
+    if base_response.status >= 400:
+        return base_response
+
     try:
-        guild_id = _guild_id(request.query.get("guild_id"))
-    except ValueError as exc:
-        return web.json_response({"ok": False, "message": str(exc)}, status=400)
+        payload = json.loads(base_response.text)
+        guild_id = int(payload.get("guild_id") or 0)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return base_response
 
-    def read() -> dict:
-        con = _connect(config)
-        try:
-            stations = [dict(row) for row in con.execute(
-                "SELECT name,stream_url,COALESCE(genre,'') genre,COALESCE(homepage,'') homepage,enabled,updated_at FROM voice_radio_stations WHERE guild_id=? ORDER BY name COLLATE NOCASE",
-                (guild_id,),
-            ).fetchall()]
-            ambient_sources = [dict(row) for row in con.execute(
-                "SELECT name,audio_url,COALESCE(category,'Custom') category,updated_at FROM voice_ambient_sources WHERE guild_id=? ORDER BY category,name COLLATE NOCASE",
-                (guild_id,),
-            ).fetchall()]
-            history = [dict(row) for row in con.execute(
-                "SELECT kind,title,source_name,started_by,started_at FROM voice_playback_history WHERE guild_id=? ORDER BY id DESC LIMIT 30",
-                (guild_id,),
-            ).fetchall()]
-            queue = [dict(row) for row in con.execute(
-                "SELECT id,action,status,result,created_at,processed_at FROM dashboard_commands WHERE action LIKE 'media-%' ORDER BY id DESC LIMIT 20"
-            ).fetchall()]
-            return {"stations": stations, "ambient_sources": ambient_sources, "history": history, "queue": queue}
-        finally:
-            con.close()
+    if guild_id <= 0:
+        return base_response
 
-    data = await asyncio.to_thread(read)
-    return web.json_response({"ok": True, "guild_id": str(guild_id), "ambient_catalog": AMBIENT_CATALOG, **data})
+    radio = await asyncio.to_thread(_read_radio_state, request.app["config"], guild_id)
+    payload["radio"] = radio
+    return web.json_response(payload)
 
 
-async def api_media_station(request: web.Request) -> web.Response:
-    config = request.app["config"]
-    data = await request.json()
-    try:
-        guild_id = _guild_id(data.get("guild_id"))
-        name = _clean_name(data.get("name"))
-        action = str(data.get("action", "save")).strip().lower()
-        if action not in {"save", "delete"}:
-            raise ValueError("Unbekannte Sender-Aktion.")
-        if action == "save":
-            stream_url = _safe_https(data.get("stream_url"))
-            homepage = _safe_https(data.get("homepage"), optional=True)
-            genre = str(data.get("genre", "")).strip()[:60]
-    except ValueError as exc:
-        return web.json_response({"ok": False, "message": str(exc)}, status=400)
-
-    def write() -> None:
-        con = _connect(config)
-        try:
-            if action == "delete":
-                con.execute("DELETE FROM voice_radio_favorites WHERE guild_id=? AND lower(station_name)=lower(?)", (guild_id, name))
-                con.execute("DELETE FROM voice_radio_stations WHERE guild_id=? AND lower(name)=lower(?)", (guild_id, name))
-            else:
-                con.execute(
-                    """INSERT INTO voice_radio_stations(guild_id,name,stream_url,genre,homepage,created_by) VALUES(?,?,?,?,?,0)
-                    ON CONFLICT(guild_id,name) DO UPDATE SET stream_url=excluded.stream_url,genre=excluded.genre,homepage=excluded.homepage,enabled=1,updated_at=CURRENT_TIMESTAMP""",
-                    (guild_id, name, stream_url, genre, homepage),
-                )
-            con.commit()
-        finally:
-            con.close()
-
-    await asyncio.to_thread(write)
-    return web.json_response({"ok": True, "message": "Sender gespeichert." if action == "save" else "Sender gelöscht."})
-
-
-async def api_media_ambient_source(request: web.Request) -> web.Response:
-    config = request.app["config"]
-    data = await request.json()
-    try:
-        guild_id = _guild_id(data.get("guild_id"))
-        name = _clean_name(data.get("name"))
-        action = str(data.get("action", "save")).strip().lower()
-        if action not in {"save", "delete"}:
-            raise ValueError("Unbekannte Ambient-Aktion.")
-        if action == "save":
-            audio_url = _safe_https(data.get("audio_url"))
-            category = str(data.get("category", "Custom")).strip()[:40] or "Custom"
-    except ValueError as exc:
-        return web.json_response({"ok": False, "message": str(exc)}, status=400)
-
-    def write() -> None:
-        con = _connect(config)
-        try:
-            if action == "delete":
-                con.execute("DELETE FROM voice_ambient_sources WHERE guild_id=? AND lower(name)=lower(?)", (guild_id, name))
-            else:
-                con.execute(
-                    """INSERT INTO voice_ambient_sources(guild_id,name,audio_url,category,created_by) VALUES(?,?,?,?,0)
-                    ON CONFLICT(guild_id,name) DO UPDATE SET audio_url=excluded.audio_url,category=excluded.category,updated_at=CURRENT_TIMESTAMP""",
-                    (guild_id, name, audio_url, category),
-                )
-            con.commit()
-        finally:
-            con.close()
-
-    await asyncio.to_thread(write)
-    return web.json_response({"ok": True, "message": "Ambient-Quelle gespeichert." if action == "save" else "Ambient-Quelle gelöscht."})
-
-
-async def api_media_action(request: web.Request) -> web.Response:
-    config = request.app["config"]
-    data = await request.json()
-    try:
-        guild_id = _guild_id(data.get("guild_id"))
-        action = str(data.get("action", "")).strip().lower()
-        payload: dict = {"guild_id": str(guild_id)}
-        if action in {"radio-play", "ambient-play", "ambient-source-play"}:
-            payload["channel_id"] = str(_channel_id(data.get("channel_id")))
-            payload["volume"] = _clamp(data.get("volume"), 10, 120, 65)
-        if action == "radio-play":
-            payload["station"] = _clean_name(data.get("station"))
-        elif action == "ambient-play":
-            scene = str(data.get("scene", "")).strip().lower()
-            if scene not in {item["key"] for item in AMBIENT_CATALOG}:
-                raise ValueError("Ambient-Szene ist ungültig.")
-            payload["scene"] = scene
-            payload["minutes"] = _clamp(data.get("minutes"), 0, 480, 0)
-        elif action == "ambient-source-play":
-            payload["source"] = _clean_name(data.get("source"))
-            payload["minutes"] = _clamp(data.get("minutes"), 0, 480, 0)
-        elif action == "volume":
-            payload["volume"] = _clamp(data.get("volume"), 10, 120, 65)
-        elif action not in {"stop", "disconnect"}:
-            raise ValueError("Unbekannte Media-Aktion.")
-    except ValueError as exc:
-        return web.json_response({"ok": False, "message": str(exc)}, status=400)
-
-    command_id = await asyncio.to_thread(_enqueue, config, f"media-{action}", payload)
-    return web.json_response({"ok": True, "command_id": command_id, "message": "Aktion an den Bot übergeben."})
+api_media_station = _base.api_media_station
+api_media_ambient_source = _base.api_media_ambient_source
+api_media_action = _base.api_media_action
 
 
 def register_media_routes(app: web.Application) -> None:
