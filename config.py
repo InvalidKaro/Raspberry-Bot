@@ -26,6 +26,17 @@ class Settings(BaseSettings):
     transcript_max_messages: int = Field(default=3000, alias="TRANSCRIPT_MAX_MESSAGES")
     image_render_concurrency: int = Field(default=1, alias="IMAGE_RENDER_CONCURRENCY")
 
+    # Spotify server-side metadata/API integration. The secret and refresh token
+    # live only in the local .env file; they are never persisted to SQLite.
+    spotify_client_id: str = Field(default="", alias="SPOTIFY_CLIENT_ID")
+    spotify_client_secret: str = Field(default="", alias="SPOTIFY_CLIENT_SECRET")
+    spotify_refresh_token: str = Field(default="", alias="SPOTIFY_REFRESH_TOKEN")
+    spotify_redirect_uri: str = Field(
+        default="http://127.0.0.1:8765/callback",
+        alias="SPOTIFY_REDIRECT_URI",
+    )
+    spotify_market: str = Field(default="DE", alias="SPOTIFY_MARKET")
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -39,6 +50,14 @@ class Settings(BaseSettings):
         if value in ("", None):
             return None
         return value
+
+    @field_validator("spotify_market", mode="before")
+    @classmethod
+    def normalize_spotify_market(cls, value: object) -> str:
+        market = str(value or "DE").strip().upper()
+        if len(market) != 2 or not market.isalpha():
+            return "DE"
+        return market
 
     @property
     def owner_ids(self) -> set[int]:
