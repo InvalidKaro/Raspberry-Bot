@@ -48,6 +48,7 @@ async def main() -> None:
         payload = await response.json()
         assert payload.get("ok") is True, payload
         assert "CPU" in payload.get("speech", ""), payload
+        assert "Systemcheck abgeschlossen" in payload.get("speech", ""), payload
 
         response = await client.post("/api/voice-command", headers=headers, json={"text": "Befehle"})
         assert response.status == 200, await response.text()
@@ -55,24 +56,29 @@ async def main() -> None:
         assert payload.get("command") == "help", payload
         assert "commands" in payload, payload
 
-        # Critical reboot creates a pending confirmation that can be confirmed
-        # with a second shortcut invocation saying only "Bestätigen".
+        # Critical commands deliberately return HTTP 200 with a JSON prompt so
+        # iOS Shortcuts can read and speak `speech` instead of treating the
+        # confirmation as a transport error.
         response = await client.post("/api/voice-command", headers=headers, json={"text": "HomePi neu starten"})
-        assert response.status == 409, await response.text()
+        assert response.status == 200, await response.text()
         payload = await response.json()
         assert payload.get("confirmation_required") is True, payload
         assert payload.get("action") == "reboot", payload
+        assert "Bestätigung" in payload.get("speech", ""), payload
 
         response = await client.post("/api/voice-command", headers=headers, json={"text": "Bestätigen"})
         assert response.status == 200, await response.text()
         payload = await response.json()
         assert payload.get("ok") is True, payload
         assert payload.get("action") == "reboot", payload
+        assert "Bestätigt" in payload.get("speech", ""), payload
         await asyncio.sleep(0)
         assert ("reboot", None) in executed, executed
 
         response = await client.post("/api/voice-command", headers=headers, json={"text": "Pi herunterfahren"})
-        assert response.status == 409, await response.text()
+        assert response.status == 200, await response.text()
+        payload = await response.json()
+        assert payload.get("confirmation_required") is True, payload
         response = await client.post("/api/voice-command", headers=headers, json={"text": "Abbrechen"})
         assert response.status == 200, await response.text()
         payload = await response.json()
@@ -83,7 +89,7 @@ async def main() -> None:
             headers=headers,
             json={"text": "Dienst nginx neu starten"},
         )
-        assert response.status == 409, await response.text()
+        assert response.status == 200, await response.text()
         payload = await response.json()
         assert payload.get("confirmation_required") is True, payload
         assert payload.get("unit") == "nginx", payload
@@ -104,6 +110,8 @@ async def main() -> None:
         payload = await response.json()
         assert payload.get("unit") == "raspberry-meshtastic", payload
         assert payload.get("action") == "restart", payload
+        assert "Erledigt" in payload.get("speech", ""), payload
+        assert "Meshtastic" in payload.get("speech", ""), payload
         assert ("restart", "raspberry-meshtastic") in executed, executed
 
         print("Voice control smoke test passed")
