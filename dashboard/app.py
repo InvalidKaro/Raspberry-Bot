@@ -10,6 +10,7 @@ from aiohttp import web
 
 from . import app_legacy
 from .config import DashboardConfig
+from .meshtastic_routes import register_meshtastic_routes
 from .services.database_admin_service import DatabaseAdminService
 from .services.system_service import bot_action
 
@@ -383,6 +384,7 @@ async def api_database_admin_delete(request: web.Request) -> web.Response:
 
 def create_app(config: DashboardConfig | None = None) -> web.Application:
     app = app_legacy.create_app(config)
+    register_meshtastic_routes(app)
     app["database_admin"] = DatabaseAdminService(app["config"].database_path)
     app.router.add_get("/control", control_page)
     app.router.add_get("/database-admin", database_admin_page)

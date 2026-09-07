@@ -34,6 +34,12 @@ bash scripts/install_display2_service.sh
 sudo reboot
 ```
 
+If Meshtastic should be installed first without Display 2, use:
+
+```bash
+bash scripts/install_meshtastic_service.sh
+```
+
 After reboot:
 
 ```bash
@@ -73,6 +79,15 @@ A newly received Meshtastic text message temporarily overrides the normal rotati
 
 The collector auto-detects one connected Meshtastic serial device by default.
 
+The current CP2102-based LoRa V3 board normally appears as `/dev/ttyUSB0` on Raspberry Pi OS. Some boards may appear as `/dev/ttyACM0`.
+
+Check with:
+
+```bash
+ls -l /dev/ttyUSB* /dev/ttyACM* 2>/dev/null
+ls -l /dev/serial/by-id/ 2>/dev/null
+```
+
 If multiple serial devices are connected, set the device explicitly:
 
 ```bash
@@ -82,14 +97,28 @@ nano ~/services/Raspberry-Bot/.env.meshtastic
 Example:
 
 ```env
-MESHTASTIC_DEVICE=/dev/ttyACM0
+MESHTASTIC_DEVICE=/dev/ttyUSB0
 ```
+
+A `/dev/serial/by-id/...` path is preferable when available because it remains stable if Linux changes the `ttyUSB` number.
 
 Then:
 
 ```bash
 sudo systemctl restart raspberry-meshtastic
 ```
+
+The dedicated setup guide is `MESHTASTIC_SETUP.md`.
+
+## Dashboard
+
+The Meshtastic live page is available at:
+
+```text
+http://homepi.local:8080/meshtastic
+```
+
+It shows connection state, radio configuration, known nodes, RSSI/SNR, recent messages and Display 2 state.
 
 ## Diagnostics
 

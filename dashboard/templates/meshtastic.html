@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>HomePi · Meshtastic</title>
+  <link rel="stylesheet" href="/static/meshtastic.css">
+</head>
+<body>
+<main class="wrap">
+  <header class="top">
+    <div>
+      <h1>Meshtastic</h1>
+      <div class="sub">HomePi USB-LoRa · Live-Status, Nodes, RF und Nachrichten</div>
+    </div>
+    <div class="top-actions">
+      <a class="button" href="/">Dashboard</a>
+      <a class="button" href="/control">Control Center</a>
+      <button class="button" id="refresh" type="button">Aktualisieren</button>
+    </div>
+  </header>
+
+  <section class="grid">
+    <article class="card"><div class="label">Verbindung</div><div class="value small status"><span id="dot" class="dot"></span><span id="connection">Warte…</span></div><div id="device" class="meta">–</div></article>
+    <article class="card"><div class="label">Nodes</div><div id="nodes" class="value">0</div><div id="active" class="meta">0 aktiv · 10 min</div></article>
+    <article class="card"><div class="label">RX Pakete</div><div id="rx" class="value">0</div><div id="last-packet" class="meta">Letztes Paket: –</div></article>
+    <article class="card"><div class="label">Radio</div><div id="region" class="value small">–</div><div id="radio" class="meta">–</div></article>
+
+    <article class="card wide">
+      <div class="section-title"><h2>Lokaler Node</h2><span id="firmware" class="pill">Firmware –</span></div>
+      <div id="local-name" class="value small">–</div>
+      <div id="local-meta" class="meta">–</div>
+    </article>
+
+    <article class="card wide">
+      <div class="section-title"><h2>Letztes RF-Paket</h2><span id="rf-age" class="pill">–</span></div>
+      <div id="rf" class="value small">RSSI – · SNR –</div>
+      <div id="rf-from" class="meta">Von –</div>
+    </article>
+
+    <article class="card full">
+      <div class="section-title"><h2>Bekannte Nodes</h2><span id="node-count-pill" class="pill">0 Peers</span></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Name</th><th>ID</th><th>Zuletzt</th><th>SNR</th><th>Hops</th><th>Akku</th><th>Hardware</th></tr></thead>
+          <tbody id="node-rows"><tr><td colspan="7" class="empty">Noch keine Nodes empfangen.</td></tr></tbody>
+        </table>
+      </div>
+    </article>
+
+    <article class="card wide">
+      <div class="section-title"><h2>Letzte Nachricht</h2><span id="message-age" class="pill">–</span></div>
+      <div id="message-from" class="meta">Von –</div>
+      <div id="message-text" class="value small">Noch keine Nachricht</div>
+    </article>
+
+    <article class="card wide">
+      <div class="section-title"><h2>Display 2</h2><span id="display-mode" class="pill">–</span></div>
+      <div id="display-page" class="value small">–</div>
+      <div id="display-meta" class="meta">–</div>
+    </article>
+
+    <article class="card full">
+      <div class="section-title"><h2>Nachrichtenverlauf</h2><span id="message-count" class="pill">0</span></div>
+      <div id="messages"><div class="empty">Noch keine Meshtastic-Nachrichten gespeichert.</div></div>
+    </article>
+
+    <article class="card full"><div class="label">Collector</div><div id="collector-meta" class="meta">Lade…</div><div id="collector-error" class="meta error"></div></article>
+  </section>
+</main>
+<script src="/static/meshtastic.js"></script>
+</body>
+</html>

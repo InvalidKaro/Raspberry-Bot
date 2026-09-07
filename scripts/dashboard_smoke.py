@@ -14,6 +14,7 @@ from aiohttp.test_utils import TestClient, TestServer
 
 from database.manager import Database
 from dashboard import app_legacy
+from dashboard.app import create_app
 from dashboard.config import DashboardConfig
 
 
@@ -53,9 +54,9 @@ async def main() -> None:
             sample_interval_seconds=30,
         )
 
-        # Creating the full wrapped app catches duplicate routes, missing imports,
-        # schema bootstrap failures and extension-registration mistakes.
-        app = app_legacy.create_app(config)
+        # Creating the production dashboard app catches duplicate routes, missing
+        # imports, schema bootstrap failures and extension-registration mistakes.
+        app = create_app(config)
         server = TestServer(app)
         client = TestClient(server)
         await client.start_server()
@@ -81,6 +82,10 @@ async def main() -> None:
             await _expect_status(response, 302, "unauthenticated Dashboard Pro")
             assert response.headers.get("Location") == "/login", response.headers
 
+            response = await client.get("/meshtastic", allow_redirects=False)
+            await _expect_status(response, 302, "unauthenticated Meshtastic dashboard")
+            assert response.headers.get("Location") == "/login", response.headers
+
             session_cookie = app_legacy._session_value(config)
             auth_headers = {"Cookie": f"dashboard_session={session_cookie}"}
 
@@ -90,6 +95,16 @@ async def main() -> None:
 
             response = await client.get("/now-playing", headers=auth_headers)
             await _expect_status(response, 200, "Now Playing page")
+
+            response = await client.get("/meshtastic", headers=auth_headers)
+            await _expect_status(response, 200, "Meshtastic dashboard")
+            assert "meshtastic" in (await response.text()).lower()
+
+            response = await client.get("/api/meshtastic", headers=auth_headers)
+            await _expect_status(response, 200, "Meshtastic dashboard API")
+            payload = await response.json()
+            assert payload.get("ok") is True, payload
+            assert isinstance(payload.get("state"), dict), payload
 
             # Exercise real API handlers against a freshly initialized SQLite DB.
             response = await client.get("/api/ops/summary", headers=auth_headers)
