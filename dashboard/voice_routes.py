@@ -31,6 +31,25 @@ _SERVICE_ALIASES: list[tuple[tuple[str, ...], str]] = [
     (("tailscale", "tailscaled"), "tailscaled"),
 ]
 
+_UNIT_NAMES = {
+    "raspberry-bot": "Discord-Bot",
+    "raspberry-bot.service": "Discord-Bot",
+    "raspberry-dashboard": "Dashboard",
+    "raspberry-dashboard.service": "Dashboard",
+    "raspberry-display": "Display eins",
+    "raspberry-display.service": "Display eins",
+    "raspberry-display2": "Display zwei",
+    "raspberry-display2.service": "Display zwei",
+    "raspberry-meshtastic": "Meshtastic",
+    "raspberry-meshtastic.service": "Meshtastic",
+    "pihole-FTL": "Pi-hole",
+    "pihole-FTL.service": "Pi-hole",
+    "tailscaled": "Tailscale",
+    "tailscaled.service": "Tailscale",
+    "ssh": "SSH",
+    "ssh.service": "SSH",
+}
+
 _UNIT_RE = re.compile(r"^[A-Za-z0-9_.@:-]{1,128}$")
 _DIRECT_SYSTEMCTL_RE = re.compile(
     r"\bsystemctl\s+(start|stop|restart|reload|try-restart|status|enable|disable|mask|unmask|is-active|is-enabled)\s+([A-Za-z0-9_.@:-]+)\b",
@@ -74,10 +93,6 @@ def _normalise(text: str) -> str:
     value = value.replace("ä", "ae").replace("ö", "oe").replace("ü", "ue").replace("ß", "ss")
     value = re.sub(r"[!?;,.:]+", " ", value)
     value = re.sub(r"\s+", " ", value).strip()
-
-    # Common German Siri transcriptions for "HomePi". The command parser does
-    # not require the wake name, but accepting these makes dictated commands
-    # much less brittle.
     value = re.sub(
         r"\b(?:home\s*(?:pi|pie|pai|pei|p)|homepi|homepie|homepai|homepei|hompi)\b",
         "homepi",
@@ -180,8 +195,6 @@ def _unit_action(text: str, normalised: str) -> str | None:
     if direct:
         return direct.group(1).lower()
 
-    # Natural German Siri phrasing often puts "neu" after the service name,
-    # e.g. "Starte Meshtastic neu" rather than "Meshtastic neu starten".
     if re.search(r"\b(?:starte|start|starten)\b.*\bneu\b", normalised):
         return "restart"
     if re.search(r"\bneu\b.*\b(?:starte|start|starten)\b", normalised):
@@ -234,6 +247,55 @@ def _needs_confirmation(action: str, unit: str | None, known_alias: bool) -> boo
     return False
 
 
+def _friendly_unit(unit: str | None) -> str:
+    if not unit:
+        return "System"
+    if unit in _UNIT_NAMES:
+        return _UNIT_NAMES[unit]
+    clean = unit[:-8] if unit.endswith(".service") else unit
+    return clean.replace("_", " ")
+
+
+def _action_label(action: str) -> str:
+    return {
+        "start": "starten",
+        "stop": "stoppen",
+        "restart": "neu starten",
+        "try-restart": "bei Bedarf neu starten",
+        "reload": "neu laden",
+        "enable": "für den Autostart aktivieren",
+        "disable": "aus dem Autostart entfernen",
+        "mask": "maskieren",
+        "unmask": "entmaskieren",
+        "status": "prüfen",
+        "is-active": "auf Aktivität prüfen",
+        "is-enabled": "auf Autostart prüfen",
+        "reboot": "das System neu starten",
+        "poweroff": "das System herunterfahren",
+    }.get(action, action)
+
+
+def _success_action_speech(action: str, unit: str) -> str:
+    name = _friendly_unit(unit)
+    phrases = {
+        "start": f"Erledigt. {name} ist gestartet.",
+        "stop": f"Erledigt. {name} wurde gestoppt.",
+        "restart": f"Erledigt. {name} wurde sauber neu gestartet.",
+        "try-restart": f"Erledigt. {name} wurde geprüft und bei Bedarf neu gestartet.",
+        "reload": f"Erledigt. {name} hat seine Konfiguration neu eingelesen.",
+        "enable": f"Erledigt. {name} startet künftig automatisch mit dem System.",
+        "disable": f"Erledigt. Der Autostart für {name} ist deaktiviert.",
+        "mask": f"Erledigt. {name} ist jetzt maskiert und kann nicht versehentlich gestartet werden.",
+        "unmask": f"Erledigt. {name} ist wieder freigegeben.",
+    }
+    return phrases.get(action, f"Erledigt. Die Aktion für {name} wurde ausgeführt.")
+
+
+def _failure_action_speech(action: str, unit: str) -> str:
+    name = _friendly_unit(unit)
+    return f"Das hat nicht geklappt. Ich konnte {name} nicht {_action_label(action)}. Die technische Meldung bleibt in der Antwort erhalten."
+
+
 async def _helper(action: str, unit: str | None = None, *, timeout: float = 30.0) -> dict[str, Any]:
     command = ["sudo", "-n", HELPER, action]
     if unit:
@@ -246,6 +308,15 @@ async def _helper(action: str, unit: str | None = None, *, timeout: float = 30.0
 async def _delayed_helper(action: str, unit: str | None = None) -> None:
     await asyncio.sleep(1.0)
     await _helper(action, unit, timeout=20.0)
+
+
+def _duration_speech(hours: int, minutes: int) -> str:
+    parts: list[str] = []
+    if hours:
+        parts.append(f"{hours} {'Stunde' if hours == 1 else 'Stunden'}")
+    if minutes or not parts:
+        parts.append(f"{minutes} {'Minute' if minutes == 1 else 'Minuten'}")
+    return " und ".join(parts)
 
 
 def _system_summary() -> str:
@@ -265,11 +336,28 @@ def _system_summary() -> str:
             break
         except (OSError, ValueError):
             continue
-    temp_text = f", Temperatur {temp:.1f} Grad" if temp is not None else ""
-    return (
-        f"CPU {cpu:.0f} Prozent, RAM {vm.percent:.0f} Prozent, "
-        f"Speicher {disk.percent:.0f} Prozent{temp_text}, Uptime {hours} Stunden {minutes} Minuten."
+
+    warnings: list[str] = []
+    if cpu >= 85:
+        warnings.append("die CPU ist deutlich ausgelastet")
+    if vm.percent >= 85:
+        warnings.append("der Arbeitsspeicher wird knapp")
+    if disk.percent >= 90:
+        warnings.append("der Speicherplatz wird knapp")
+    if temp is not None and temp >= 70:
+        warnings.append("die Temperatur ist erhöht")
+
+    intro = "Systemcheck abgeschlossen."
+    temp_text = ""
+    if temp is not None:
+        temp_text = f" und die Kerntemperatur bei {temp:.1f} Grad".replace(".", ",")
+    metrics = (
+        f"CPU bei {cpu:.0f} Prozent, Arbeitsspeicher bei {vm.percent:.0f} Prozent, "
+        f"Speicher bei {disk.percent:.0f} Prozent{temp_text}."
     )
+    runtime = f"Laufzeit: {_duration_speech(hours, minutes)}."
+    health = " Alles im grünen Bereich." if not warnings else " Auffällig ist: " + "; ".join(warnings) + "."
+    return f"{intro} {metrics} {runtime}{health}"
 
 
 def _command_catalog() -> dict[str, list[str]]:
@@ -317,11 +405,18 @@ def _command_catalog() -> dict[str, list[str]]:
 
 def _confirmation_response(request: web.Request, action: str, unit: str | None = None) -> web.Response:
     _store_pending(request, action, unit)
-    target = f" für {unit}" if unit else ""
+    if action == "reboot":
+        target = "den kompletten HomePi neu starten"
+    elif action == "poweroff":
+        target = "den kompletten HomePi herunterfahren"
+    else:
+        target = f"{_friendly_unit(unit)} {_action_label(action)}"
     speech = (
-        f"Kritischer Befehl: {action}{target}. "
-        "Ich merke ihn mir 60 Sekunden. Starte HomePi noch einmal und sage nur Bestätigen oder Abbrechen."
+        f"Verstanden. Das würde {target}. Aus Sicherheitsgründen brauche ich dafür deine Bestätigung. "
+        f"Ich halte den Befehl {int(CONFIRM_TTL)} Sekunden bereit. Sage einfach: Bestätigen. Oder: Abbrechen."
     )
+    # Deliberately HTTP 200: iOS Shortcuts can always decode and speak the JSON
+    # response instead of treating the confirmation prompt as a transport error.
     return web.json_response(
         {
             "ok": False,
@@ -331,39 +426,62 @@ def _confirmation_response(request: web.Request, action: str, unit: str | None =
             "confirmation_ttl_seconds": int(CONFIRM_TTL),
             "speech": speech,
         },
-        status=409,
+        status=200,
     )
 
 
 async def _execute_action(action: str, unit: str | None = None) -> web.Response:
     if action in {"reboot", "poweroff"}:
         asyncio.create_task(_delayed_helper(action), name=f"voice-{action}")
-        speech = "HomePi wird neu gestartet." if action == "reboot" else "HomePi wird heruntergefahren."
+        speech = (
+            "Bestätigt. Ich starte HomePi jetzt neu. Die Verbindung wird für einen Moment unterbrochen."
+            if action == "reboot"
+            else "Bestätigt. Ich fahre HomePi jetzt kontrolliert herunter."
+        )
         return web.json_response({"ok": True, "speech": speech, "action": action, "scheduled": True})
 
     if not unit:
-        return web.json_response({"ok": False, "speech": "Für diesen Befehl fehlt der Dienstname."}, status=400)
+        return web.json_response(
+            {"ok": False, "speech": "Mir fehlt noch der Name des Dienstes. Nenne zum Beispiel: Dienst SSH neu starten."},
+            status=400,
+        )
 
-    # Restarting/stopping the dashboard itself would kill the HTTP response.
     if unit in {"raspberry-dashboard", "raspberry-dashboard.service"} and action in {"restart", "stop"}:
         asyncio.create_task(_delayed_helper(action, unit), name=f"voice-{action}-dashboard")
+        speech = (
+            "Erledigt. Ich starte das Dashboard jetzt neu. Die Verbindung kann kurz unterbrochen sein."
+            if action == "restart"
+            else "Erledigt. Das Dashboard wird jetzt gestoppt."
+        )
         return web.json_response(
-            {
-                "ok": True,
-                "speech": f"Dashboard {action} ist eingeplant.",
-                "action": action,
-                "unit": unit,
-                "scheduled": True,
-            }
+            {"ok": True, "speech": speech, "action": action, "unit": unit, "scheduled": True}
         )
 
     result = await _helper(action, unit)
+    name = _friendly_unit(unit)
+    output_normalised = str(result["output"] or "").strip().lower()
+
     if action == "status":
-        speech = f"Status für {unit} wurde gelesen."
-    elif action in {"is-active", "is-enabled"}:
-        speech = result["output"] or f"Status für {unit} ist unbekannt."
+        speech = (
+            f"{name} ist aktiv und läuft ordnungsgemäß."
+            if result["ok"]
+            else f"{name} ist derzeit nicht aktiv. Ich habe die technische Statusmeldung mitgeschickt."
+        )
+    elif action == "is-active":
+        if output_normalised == "active" or result["ok"]:
+            speech = f"{name} ist aktiv."
+        elif output_normalised == "failed":
+            speech = f"{name} befindet sich im Fehlerzustand."
+        else:
+            speech = f"{name} ist aktuell nicht aktiv."
+    elif action == "is-enabled":
+        if output_normalised == "enabled" or result["ok"]:
+            speech = f"{name} ist für den automatischen Start eingerichtet."
+        else:
+            speech = f"{name} ist nicht für den automatischen Start eingerichtet."
     else:
-        speech = f"{unit}: {action} erfolgreich." if result["ok"] else f"{unit}: {action} ist fehlgeschlagen."
+        speech = _success_action_speech(action, unit) if result["ok"] else _failure_action_speech(action, unit)
+
     return web.json_response(
         {"ok": result["ok"], "speech": speech, "action": action, "unit": unit, "detail": result["output"]},
         status=200 if result["ok"] else 500,
@@ -372,38 +490,50 @@ async def _execute_action(action: str, unit: str | None = None) -> web.Response:
 
 async def api_voice_command(request: web.Request) -> web.Response:
     if not _token():
-        return web.json_response({"ok": False, "speech": "Voice API ist noch nicht eingerichtet."}, status=503)
+        return web.json_response(
+            {"ok": False, "speech": "Die Sprachsteuerung ist noch nicht vollständig eingerichtet. Mir fehlt der API-Token."},
+            status=503,
+        )
     if not _authorised(request):
-        return web.json_response({"ok": False, "speech": "Voice API Token ist ungültig."}, status=401)
+        return web.json_response(
+            {"ok": False, "speech": "Die Authentifizierung ist fehlgeschlagen. Bitte prüfe den Voice-API-Token."},
+            status=401,
+        )
     if not _rate_allowed(request):
-        return web.json_response({"ok": False, "speech": "Zu viele Befehle. Kurz warten."}, status=429)
+        return web.json_response(
+            {"ok": False, "speech": "Einen Moment bitte. Es kamen zu viele Befehle in kurzer Zeit."},
+            status=429,
+        )
 
     try:
         data = await request.json()
     except Exception:
-        return web.json_response({"ok": False, "speech": "Ich konnte den Sprachbefehl nicht lesen."}, status=400)
+        return web.json_response(
+            {"ok": False, "speech": "Die Anfrage kam unvollständig an. Versuch es bitte noch einmal."},
+            status=400,
+        )
     if not isinstance(data, dict):
-        return web.json_response({"ok": False, "speech": "Ungültiger Request."}, status=400)
+        return web.json_response({"ok": False, "speech": "Mit dieser Anfrage kann ich nichts anfangen."}, status=400)
 
     text = str(data.get("text") or "").strip()
     if not text or len(text) > MAX_TEXT:
-        return web.json_response({"ok": False, "speech": "Der Sprachbefehl ist leer oder zu lang."}, status=400)
+        return web.json_response(
+            {"ok": False, "speech": "Ich habe keinen eindeutigen Sprachbefehl erhalten. Versuch es bitte noch einmal."},
+            status=400,
+        )
 
     normalised = _normalise(text)
     pending = _pending_for(request)
 
-    # Two-turn confirmation: after a critical command the next invocation may
-    # simply say "Bestätigen" or "Abbrechen". This avoids having to repeat the
-    # full destructive command in Siri/Shortcuts.
     if pending and normalised in _CONFIRM_ONLY:
         _clear_pending(request)
         return await _execute_action(str(pending["action"]), pending.get("unit"))
     if pending and normalised in _CANCEL_ONLY:
         _clear_pending(request)
-        return web.json_response({"ok": True, "cancelled": True, "speech": "Befehl abgebrochen."})
+        return web.json_response(
+            {"ok": True, "cancelled": True, "speech": "Verstanden. Der kritische Befehl wurde verworfen."}
+        )
     if pending:
-        # Any unrelated command cancels the previous pending action. This avoids
-        # a later accidental "Bestätigen" executing an old command.
         _clear_pending(request)
 
     confirmed = _explicit_confirmation(data, normalised)
@@ -416,16 +546,14 @@ async def api_voice_command(request: web.Request) -> web.Response:
             {
                 "ok": True,
                 "speech": (
-                    "Ich kann Systemstatus lesen, HomePi Dienste und beliebige systemd Units steuern, "
-                    "Dienste auflisten, systemd neu laden sowie den Pi neu starten oder herunterfahren."
+                    "Natürlich. Ich kann den Systemzustand prüfen, deine HomePi-Dienste steuern, beliebige systemd-Units verwalten, "
+                    "Dienste auflisten und HomePi kontrolliert neu starten oder herunterfahren. Kritische Aktionen bestätigst du in einem zweiten Schritt."
                 ),
                 "command": "help",
                 "commands": _command_catalog(),
             }
         )
 
-    # Fast read-only commands first. "HomePi" is optional after the shortcut
-    # has already been invoked.
     if normalised in {"status", "homepi status", "server status", "system status", "pi status"} or any(
         word in normalised for word in ("temperatur", "wie warm", "cpu", "ram auslastung", "speicher auslastung", "uptime")
     ):
@@ -435,17 +563,31 @@ async def api_voice_command(request: web.Request) -> web.Response:
     if any(phrase in normalised for phrase in ("liste dienste", "dienste auflisten", "services auflisten", "service liste")):
         result = await _helper("list", timeout=20.0)
         if not result["ok"]:
-            return web.json_response({"ok": False, "speech": "Ich konnte die Dienste nicht auflisten.", "detail": result["output"]}, status=500)
+            return web.json_response(
+                {"ok": False, "speech": "Ich konnte die Diensteliste gerade nicht zuverlässig abrufen.", "detail": result["output"]},
+                status=500,
+            )
         lines = [line for line in result["output"].splitlines() if line.strip()]
         active = sum(" active " in f" {line} " for line in lines)
         return web.json_response(
-            {"ok": True, "speech": f"Ich sehe {len(lines)} Services, davon ungefähr {active} aktiv.", "services": lines[:250]}
+            {
+                "ok": True,
+                "speech": f"Bestandsaufnahme abgeschlossen. Ich sehe {len(lines)} Dienste, davon ungefähr {active} aktiv.",
+                "services": lines[:250],
+            }
         )
 
     if any(phrase in normalised for phrase in ("systemd neu laden", "daemon reload", "daemon-reload")):
         result = await _helper("daemon-reload")
-        speech = "Systemd wurde neu geladen." if result["ok"] else "Systemd konnte nicht neu geladen werden."
-        return web.json_response({"ok": result["ok"], "speech": speech, "detail": result["output"]}, status=200 if result["ok"] else 500)
+        speech = (
+            "Erledigt. Systemd hat seine Konfiguration neu eingelesen."
+            if result["ok"]
+            else "Die Systemd-Konfiguration konnte nicht neu eingelesen werden."
+        )
+        return web.json_response(
+            {"ok": result["ok"], "speech": speech, "detail": result["output"]},
+            status=200 if result["ok"] else 500,
+        )
 
     power_action = _system_power_action(normalised)
     if power_action:
@@ -465,7 +607,7 @@ async def api_voice_command(request: web.Request) -> web.Response:
     return web.json_response(
         {
             "ok": False,
-            "speech": "Diesen Befehl kenne ich noch nicht. Sage Befehle für Hilfe oder zum Beispiel Dienst nginx neu starten.",
+            "speech": "Das konnte ich nicht eindeutig zuordnen. Sag Befehle für eine Übersicht. Zum Beispiel: Meshtastic neu starten.",
             "text": text,
         },
         status=400,
