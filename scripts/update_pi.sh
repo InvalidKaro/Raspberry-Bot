@@ -28,6 +28,33 @@ SERVICES=(
   raspberry-display2.service
 )
 
+# Keep already-installed systemd units in sync with the repository. A unit that
+# has never been installed is intentionally left alone.
+unit_changed=0
+for service in "${SERVICES[@]}"; do
+  if systemctl list-unit-files "$service" --no-legend 2>/dev/null | grep -q "^${service}"; then
+    if [[ -f "systemd/$service" ]]; then
+      sudo install -m 0644 "systemd/$service" "/etc/systemd/system/$service"
+      unit_changed=1
+    fi
+  fi
+done
+
+# Voice Control uses a root-owned validated helper. Refresh it automatically if
+# Voice Control was installed before, so new safe actions/Display-2 events do
+# not require rerunning the installer after every git pull.
+if [[ -x /usr/local/sbin/homepi-systemctl && -f scripts/homepi_systemctl.py ]]; then
+  sudo install -o root -g root -m 0755 scripts/homepi_systemctl.py /usr/local/sbin/homepi-systemctl
+  if [[ -f sudoers/raspberry-dashboard ]]; then
+    sudo install -o root -g root -m 0440 sudoers/raspberry-dashboard /etc/sudoers.d/raspberry-dashboard
+    sudo visudo -cf /etc/sudoers.d/raspberry-dashboard
+  fi
+fi
+
+if [[ "$unit_changed" -eq 1 ]]; then
+  sudo systemctl daemon-reload
+fi
+
 for service in "${SERVICES[@]}"; do
   if systemctl list-unit-files "$service" --no-legend 2>/dev/null | grep -q "^${service}"; then
     echo "Restarting $service"
