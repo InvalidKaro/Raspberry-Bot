@@ -127,6 +127,14 @@ def _unit_action(text: str, normalised: str) -> str | None:
     direct = _DIRECT_SYSTEMCTL_RE.search(text)
     if direct:
         return direct.group(1).lower()
+
+    # Natural German Siri phrasing often puts "neu" after the service name,
+    # e.g. "Starte Meshtastic neu" rather than "Meshtastic neu starten".
+    if re.search(r"\b(?:starte|start|starten)\b.*\bneu\b", normalised):
+        return "restart"
+    if re.search(r"\bneu\b.*\b(?:starte|start|starten)\b", normalised):
+        return "restart"
+
     for action, phrases in _UNIT_ACTION_WORDS:
         if any(phrase in normalised for phrase in phrases):
             return action
