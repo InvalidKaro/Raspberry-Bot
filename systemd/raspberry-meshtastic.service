@@ -1,0 +1,23 @@
+[Unit]
+Description=HomePi Meshtastic USB collector
+After=local-fs.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=stefano
+Group=stefano
+WorkingDirectory=/home/stefano/services/Raspberry-Bot
+Environment=PYTHONUNBUFFERED=1
+Environment=MESHTASTIC_RETRY_SECONDS=15
+EnvironmentFile=-/home/stefano/services/Raspberry-Bot/.env.meshtastic
+ExecStart=/home/stefano/services/Raspberry-Bot/.venv/bin/python -m meshtastic_service.collector
+Restart=always
+RestartSec=5
+TimeoutStopSec=10
+Nice=5
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
