@@ -20,6 +20,13 @@ fi
 # make the HomePi update fail.
 python -m compileall -q -x '(^|/)(\.venv|\.git)(/|$)' .
 
+# Migrate the old Display-2 default page duration. Preserve deliberate custom
+# values: only the previous shipped default of 5 seconds is changed to 8.
+if [[ -f .env.display2 ]] && grep -qx 'DISPLAY2_PAGE_SECONDS=5' .env.display2; then
+  sed -i 's/^DISPLAY2_PAGE_SECONDS=5$/DISPLAY2_PAGE_SECONDS=8/' .env.display2
+  echo "Display 2 page duration migrated: 5s -> 8s"
+fi
+
 SERVICES=(
   raspberry-bot.service
   raspberry-dashboard.service
