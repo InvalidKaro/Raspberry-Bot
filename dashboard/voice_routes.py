@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import hmac
 import os
 import re
@@ -18,6 +19,7 @@ HELPER = "/usr/local/sbin/homepi-systemctl"
 MAX_TEXT = 500
 RATE_LIMIT = 30
 RATE_WINDOW = 60.0
+CONFIRM_TTL = 60.0
 
 _SERVICE_ALIASES: list[tuple[tuple[str, ...], str]] = [
     (("display 2", "display zwei", "zweites display", "oled 2", "oled zwei"), "raspberry-display2"),
@@ -52,14 +54,35 @@ _UNIT_ACTION_WORDS: list[tuple[str, tuple[str, ...]]] = [
 ]
 
 _DANGEROUS_UNIT_ACTIONS = {"stop", "disable", "mask"}
+_CONFIRM_ONLY = {
+    "bestaetigen",
+    "bestaetige",
+    "ja bestaetigen",
+    "ja bitte bestaetigen",
+    "befehl bestaetigen",
+    "ausfuehren",
+    "jetzt ausfuehren",
+    "ja wirklich",
+}
+_CANCEL_ONLY = {"abbrechen", "abbruch", "nicht ausfuehren", "nein abbrechen", "stornieren"}
 _rate_buckets: dict[str, deque[float]] = defaultdict(deque)
+_pending_confirmations: dict[str, dict[str, Any]] = {}
 
 
 def _normalise(text: str) -> str:
     value = text.lower().strip()
     value = value.replace("ä", "ae").replace("ö", "oe").replace("ü", "ue").replace("ß", "ss")
-    value = re.sub(r"[!?;,]+", " ", value)
-    value = re.sub(r"\s+", " ", value)
+    value = re.sub(r"[!?;,.:]+", " ", value)
+    value = re.sub(r"\s+", " ", value).strip()
+
+    # Common German Siri transcriptions for "HomePi". The command parser does
+    # not require the wake name, but accepting these makes dictated commands
+    # much less brittle.
+    value = re.sub(
+        r"\b(?:home\s*(?:pi|pie|pai|pei|p)|homepi|homepie|homepai|homepei|hompi)\b",
+        "homepi",
+        value,
+    )
     return value
 
 
@@ -67,16 +90,22 @@ def _token() -> str:
     return os.getenv("VOICE_API_TOKEN", "").strip()
 
 
-def _authorised(request: web.Request) -> bool:
-    expected = _token()
-    if len(expected) < 24:
-        return False
+def _supplied_token(request: web.Request) -> str:
     supplied = request.headers.get("Authorization", "").strip()
     if supplied.lower().startswith("bearer "):
-        supplied = supplied[7:].strip()
-    else:
-        supplied = request.headers.get("X-HomePi-Token", "").strip()
-    return bool(supplied) and hmac.compare_digest(supplied, expected)
+        return supplied[7:].strip()
+    return request.headers.get("X-HomePi-Token", "").strip()
+
+
+def _authorised(request: web.Request) -> bool:
+    expected = _token()
+    supplied = _supplied_token(request)
+    return len(expected) >= 24 and bool(supplied) and hmac.compare_digest(supplied, expected)
+
+
+def _client_key(request: web.Request) -> str:
+    token_digest = hashlib.sha256(_supplied_token(request).encode("utf-8")).hexdigest()
+    return f"{request.remote or 'unknown'}:{token_digest}"
 
 
 def _rate_allowed(request: web.Request) -> bool:
@@ -104,6 +133,29 @@ def _explicit_confirmation(data: dict[str, Any], normalised: str) -> bool:
             "ja wirklich",
         )
     )
+
+
+def _pending_for(request: web.Request) -> dict[str, Any] | None:
+    key = _client_key(request)
+    pending = _pending_confirmations.get(key)
+    if not pending:
+        return None
+    if time.monotonic() - float(pending.get("created_at", 0.0)) > CONFIRM_TTL:
+        _pending_confirmations.pop(key, None)
+        return None
+    return pending
+
+
+def _store_pending(request: web.Request, action: str, unit: str | None) -> None:
+    _pending_confirmations[_client_key(request)] = {
+        "action": action,
+        "unit": unit,
+        "created_at": time.monotonic(),
+    }
+
+
+def _clear_pending(request: web.Request) -> None:
+    _pending_confirmations.pop(_client_key(request), None)
 
 
 def _service_from_text(text: str, normalised: str) -> tuple[str | None, bool]:
@@ -144,27 +196,30 @@ def _unit_action(text: str, normalised: str) -> str | None:
 def _system_power_action(normalised: str) -> str | None:
     poweroff_phrases = (
         "homepi herunterfahren",
-        "home pi herunterfahren",
         "pi herunterfahren",
+        "server herunterfahren",
         "system herunterfahren",
+        "raspberry herunterfahren",
         "shutdown",
         "poweroff",
         "ausschalten",
     )
     reboot_phrases = (
         "homepi neu starten",
-        "home pi neu starten",
         "pi neu starten",
+        "server neu starten",
         "system neu starten",
         "raspberry pi neu starten",
+        "raspberry neu starten",
         "reboot homepi",
         "reboot system",
+        "reboot server",
     )
     if any(value in normalised for value in poweroff_phrases):
         return "poweroff"
     if any(value in normalised for value in reboot_phrases):
         return "reboot"
-    if normalised in {"reboot", "neustart", "neu starten"}:
+    if normalised in {"reboot", "neustart", "neu starten", "starte neu"}:
         return "reboot"
     return None
 
@@ -217,18 +272,101 @@ def _system_summary() -> str:
     )
 
 
-def _confirmation_response(action: str, unit: str | None = None) -> web.Response:
+def _command_catalog() -> dict[str, list[str]]:
+    return {
+        "status": [
+            "Status",
+            "Wie warm ist der Pi?",
+            "CPU Auslastung",
+            "RAM Auslastung",
+            "Speicher Auslastung",
+            "Uptime",
+        ],
+        "homepi_services": [
+            "Starte den Bot neu",
+            "Starte das Dashboard neu",
+            "Starte Display eins neu",
+            "Starte Display zwei neu",
+            "Starte Meshtastic neu",
+            "Starte Pi-hole neu",
+            "Starte Tailscale neu",
+        ],
+        "systemd": [
+            "Liste Dienste",
+            "Systemd neu laden",
+            "Status Dienst ssh",
+            "Dienst nginx starten",
+            "Dienst nginx neu starten",
+            "Dienst nginx stoppen",
+            "Dienst nginx aktivieren",
+            "Dienst nginx deaktivieren",
+            "Dienst nginx maskieren",
+            "Dienst nginx entmaskieren",
+            "systemctl restart cron",
+        ],
+        "power": [
+            "Pi neu starten",
+            "Pi herunterfahren",
+        ],
+        "confirmation": [
+            "Bestätigen",
+            "Abbrechen",
+        ],
+    }
+
+
+def _confirmation_response(request: web.Request, action: str, unit: str | None = None) -> web.Response:
+    _store_pending(request, action, unit)
     target = f" für {unit}" if unit else ""
-    speech = f"Das ist ein kritischer Befehl: {action}{target}. Sage den Befehl erneut mit dem Wort bestätigen."
+    speech = (
+        f"Kritischer Befehl: {action}{target}. "
+        "Ich merke ihn mir 60 Sekunden. Starte HomePi noch einmal und sage nur Bestätigen oder Abbrechen."
+    )
     return web.json_response(
         {
             "ok": False,
             "confirmation_required": True,
             "action": action,
             "unit": unit,
+            "confirmation_ttl_seconds": int(CONFIRM_TTL),
             "speech": speech,
         },
         status=409,
+    )
+
+
+async def _execute_action(action: str, unit: str | None = None) -> web.Response:
+    if action in {"reboot", "poweroff"}:
+        asyncio.create_task(_delayed_helper(action), name=f"voice-{action}")
+        speech = "HomePi wird neu gestartet." if action == "reboot" else "HomePi wird heruntergefahren."
+        return web.json_response({"ok": True, "speech": speech, "action": action, "scheduled": True})
+
+    if not unit:
+        return web.json_response({"ok": False, "speech": "Für diesen Befehl fehlt der Dienstname."}, status=400)
+
+    # Restarting/stopping the dashboard itself would kill the HTTP response.
+    if unit in {"raspberry-dashboard", "raspberry-dashboard.service"} and action in {"restart", "stop"}:
+        asyncio.create_task(_delayed_helper(action, unit), name=f"voice-{action}-dashboard")
+        return web.json_response(
+            {
+                "ok": True,
+                "speech": f"Dashboard {action} ist eingeplant.",
+                "action": action,
+                "unit": unit,
+                "scheduled": True,
+            }
+        )
+
+    result = await _helper(action, unit)
+    if action == "status":
+        speech = f"Status für {unit} wurde gelesen."
+    elif action in {"is-active", "is-enabled"}:
+        speech = result["output"] or f"Status für {unit} ist unbekannt."
+    else:
+        speech = f"{unit}: {action} erfolgreich." if result["ok"] else f"{unit}: {action} ist fehlgeschlagen."
+    return web.json_response(
+        {"ok": result["ok"], "speech": speech, "action": action, "unit": unit, "detail": result["output"]},
+        status=200 if result["ok"] else 500,
     )
 
 
@@ -252,16 +390,49 @@ async def api_voice_command(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "speech": "Der Sprachbefehl ist leer oder zu lang."}, status=400)
 
     normalised = _normalise(text)
+    pending = _pending_for(request)
+
+    # Two-turn confirmation: after a critical command the next invocation may
+    # simply say "Bestätigen" or "Abbrechen". This avoids having to repeat the
+    # full destructive command in Siri/Shortcuts.
+    if pending and normalised in _CONFIRM_ONLY:
+        _clear_pending(request)
+        return await _execute_action(str(pending["action"]), pending.get("unit"))
+    if pending and normalised in _CANCEL_ONLY:
+        _clear_pending(request)
+        return web.json_response({"ok": True, "cancelled": True, "speech": "Befehl abgebrochen."})
+    if pending:
+        # Any unrelated command cancels the previous pending action. This avoids
+        # a later accidental "Bestätigen" executing an old command.
+        _clear_pending(request)
+
     confirmed = _explicit_confirmation(data, normalised)
 
-    # Fast read-only commands first.
-    if normalised in {"status", "homepi status", "home pi status", "system status"} or any(
+    if any(
+        phrase in normalised
+        for phrase in ("hilfe", "befehle", "commands", "was kannst du", "welche befehle", "befehlsliste")
+    ):
+        return web.json_response(
+            {
+                "ok": True,
+                "speech": (
+                    "Ich kann Systemstatus lesen, HomePi Dienste und beliebige systemd Units steuern, "
+                    "Dienste auflisten, systemd neu laden sowie den Pi neu starten oder herunterfahren."
+                ),
+                "command": "help",
+                "commands": _command_catalog(),
+            }
+        )
+
+    # Fast read-only commands first. "HomePi" is optional after the shortcut
+    # has already been invoked.
+    if normalised in {"status", "homepi status", "server status", "system status", "pi status"} or any(
         word in normalised for word in ("temperatur", "wie warm", "cpu", "ram auslastung", "speicher auslastung", "uptime")
     ):
         speech = _system_summary()
         return web.json_response({"ok": True, "speech": speech, "command": "system-summary"})
 
-    if any(phrase in normalised for phrase in ("liste dienste", "dienste auflisten", "services auflisten")):
+    if any(phrase in normalised for phrase in ("liste dienste", "dienste auflisten", "services auflisten", "service liste")):
         result = await _helper("list", timeout=20.0)
         if not result["ok"]:
             return web.json_response({"ok": False, "speech": "Ich konnte die Dienste nicht auflisten.", "detail": result["output"]}, status=500)
@@ -279,46 +450,22 @@ async def api_voice_command(request: web.Request) -> web.Response:
     power_action = _system_power_action(normalised)
     if power_action:
         if not confirmed:
-            return _confirmation_response(power_action)
-        asyncio.create_task(_delayed_helper(power_action), name=f"voice-{power_action}")
-        speech = "HomePi wird neu gestartet." if power_action == "reboot" else "HomePi wird heruntergefahren."
-        return web.json_response({"ok": True, "speech": speech, "action": power_action, "scheduled": True})
+            return _confirmation_response(request, power_action)
+        _clear_pending(request)
+        return await _execute_action(power_action)
 
     unit, known_alias = _service_from_text(text, normalised)
     action = _unit_action(text, normalised)
     if unit and action:
         if _needs_confirmation(action, unit, known_alias) and not confirmed:
-            return _confirmation_response(action, unit)
-
-        # Restarting/stopping the dashboard itself would kill the HTTP response.
-        if unit in {"raspberry-dashboard", "raspberry-dashboard.service"} and action in {"restart", "stop"}:
-            asyncio.create_task(_delayed_helper(action, unit), name=f"voice-{action}-dashboard")
-            return web.json_response(
-                {
-                    "ok": True,
-                    "speech": f"Dashboard {action} ist eingeplant.",
-                    "action": action,
-                    "unit": unit,
-                    "scheduled": True,
-                }
-            )
-
-        result = await _helper(action, unit)
-        if action == "status":
-            speech = f"Status für {unit} wurde gelesen."
-        elif action in {"is-active", "is-enabled"}:
-            speech = result["output"] or f"Status für {unit} ist unbekannt."
-        else:
-            speech = f"{unit}: {action} erfolgreich." if result["ok"] else f"{unit}: {action} ist fehlgeschlagen."
-        return web.json_response(
-            {"ok": result["ok"], "speech": speech, "action": action, "unit": unit, "detail": result["output"]},
-            status=200 if result["ok"] else 500,
-        )
+            return _confirmation_response(request, action, unit)
+        _clear_pending(request)
+        return await _execute_action(action, unit)
 
     return web.json_response(
         {
             "ok": False,
-            "speech": "Diesen Befehl kenne ich noch nicht. Für beliebige Dienste sage zum Beispiel: Dienst nginx neu starten.",
+            "speech": "Diesen Befehl kenne ich noch nicht. Sage Befehle für Hilfe oder zum Beispiel Dienst nginx neu starten.",
             "text": text,
         },
         status=400,
