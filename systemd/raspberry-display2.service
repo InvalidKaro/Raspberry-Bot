@@ -1,5 +1,5 @@
 [Unit]
-Description=HomePi second 0.96 OLED (Meshtastic)
+Description=HomePi second 0.96 OLED (Meshtastic + adaptive fallback)
 After=local-fs.target network-online.target raspberry-meshtastic.service
 Wants=network-online.target raspberry-meshtastic.service
 
