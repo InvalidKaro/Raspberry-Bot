@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import sys
 import tempfile
 import time
@@ -10,12 +11,32 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+DB_PATH = Path(tempfile.gettempdir()) / "homepi-display2-smoke.sqlite3"
+try:
+    DB_PATH.unlink()
+except FileNotFoundError:
+    pass
+
+with sqlite3.connect(DB_PATH) as con:
+    con.execute(
+        """CREATE TABLE dashboard_error_events(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )"""
+    )
+    con.execute("INSERT INTO dashboard_error_events DEFAULT VALUES")
+    con.execute("INSERT INTO dashboard_error_events(created_at) VALUES(datetime('now','-2 days'))")
+
 os.environ.setdefault("DISPLAY2_ALLOW_MISSING_HARDWARE", "1")
 os.environ.setdefault("DISPLAY2_HEADLESS_PREVIEW", "0")
 os.environ.setdefault("DISPLAY2_PUBLIC_IP", "0")
+os.environ.setdefault("DISPLAY2_PAGE_SECONDS", "8")
 os.environ.setdefault("BOT_REPO_PATH", tempfile.gettempdir())
-os.environ.setdefault("DISPLAY2_DATABASE_PATH", str(Path(tempfile.gettempdir()) / "homepi-display2-smoke-missing.sqlite3"))
+os.environ["DISPLAY2_DATABASE_PATH"] = str(DB_PATH)
 
+# Import the production runtime wrapper first: it applies the corrected Discord
+# error metric and Display-2 runtime defaults to the core renderer/service.
+from display_service import secondary_runtime  # noqa: F401
 from display_service.secondary import (
     HOME_PAGES,
     MESH_PAGES,
@@ -30,6 +51,7 @@ from display_service.secondary import (
     render_message,
     render_voice,
 )
+from display_service import secondary as secondary_core
 
 
 def _assert_image(label: str, image) -> None:
@@ -39,6 +61,10 @@ def _assert_image(label: str, image) -> None:
 
 
 def main() -> None:
+    assert secondary_core.PAGE_SECONDS == 8
+    discord = secondary_core._read_discord_stats()
+    assert discord["errors_24h"] == 1, discord
+
     now = time.time()
     mesh = MeshSnapshot(
         connected=True,
