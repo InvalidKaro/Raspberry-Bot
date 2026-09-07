@@ -15,7 +15,10 @@ if [[ -f requirements-meshtastic.txt ]]; then
   python -m pip install -r requirements-meshtastic.txt
 fi
 
-python -m compileall -q .
+# Compile only project code. The venv contains third-party packages with legacy
+# contrib modules that are intentionally not Python 3 compatible and must not
+# make the HomePi update fail.
+python -m compileall -q -x '(^|/)(\.venv|\.git)(/|$)' .
 
 SERVICES=(
   raspberry-bot.service
