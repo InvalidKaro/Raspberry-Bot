@@ -12,13 +12,29 @@ if str(REPO_ROOT) not in sys.path:
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from dashboard.voice_routes import register_voice_routes
+import dashboard.voice_routes as voice_routes
 
 
 async def main() -> None:
     os.environ["VOICE_API_TOKEN"] = "voice-smoke-token-abcdefghijklmnopqrstuvwxyz"
+    voice_routes._pending_confirmations.clear()
+
+    executed: list[tuple[str, str | None]] = []
+
+    async def fake_helper(action: str, unit: str | None = None, *, timeout: float = 30.0) -> dict:
+        executed.append((action, unit))
+        if action == "list":
+            return {"ok": True, "output": "demo.service loaded active running Demo"}
+        return {"ok": True, "output": "active" if action in {"status", "is-active", "is-enabled"} else "ok"}
+
+    async def fake_delayed_helper(action: str, unit: str | None = None) -> None:
+        executed.append((action, unit))
+
+    voice_routes._helper = fake_helper
+    voice_routes._delayed_helper = fake_delayed_helper
+
     app = web.Application()
-    register_voice_routes(app)
+    voice_routes.register_voice_routes(app)
     client = TestClient(TestServer(app))
     await client.start_server()
     try:
@@ -26,17 +42,41 @@ async def main() -> None:
         assert response.status == 401, await response.text()
 
         headers = {"Authorization": "Bearer voice-smoke-token-abcdefghijklmnopqrstuvwxyz"}
-        response = await client.post("/api/voice-command", headers=headers, json={"text": "HomePi Status"})
+
+        response = await client.post("/api/voice-command", headers=headers, json={"text": "Home Pie Status"})
         assert response.status == 200, await response.text()
         payload = await response.json()
         assert payload.get("ok") is True, payload
         assert "CPU" in payload.get("speech", ""), payload
 
+        response = await client.post("/api/voice-command", headers=headers, json={"text": "Befehle"})
+        assert response.status == 200, await response.text()
+        payload = await response.json()
+        assert payload.get("command") == "help", payload
+        assert "commands" in payload, payload
+
+        # Critical reboot creates a pending confirmation that can be confirmed
+        # with a second shortcut invocation saying only "Bestätigen".
         response = await client.post("/api/voice-command", headers=headers, json={"text": "HomePi neu starten"})
         assert response.status == 409, await response.text()
         payload = await response.json()
         assert payload.get("confirmation_required") is True, payload
         assert payload.get("action") == "reboot", payload
+
+        response = await client.post("/api/voice-command", headers=headers, json={"text": "Bestätigen"})
+        assert response.status == 200, await response.text()
+        payload = await response.json()
+        assert payload.get("ok") is True, payload
+        assert payload.get("action") == "reboot", payload
+        await asyncio.sleep(0)
+        assert ("reboot", None) in executed, executed
+
+        response = await client.post("/api/voice-command", headers=headers, json={"text": "Pi herunterfahren"})
+        assert response.status == 409, await response.text()
+        response = await client.post("/api/voice-command", headers=headers, json={"text": "Abbrechen"})
+        assert response.status == 200, await response.text()
+        payload = await response.json()
+        assert payload.get("cancelled") is True, payload
 
         response = await client.post(
             "/api/voice-command",
@@ -48,18 +88,23 @@ async def main() -> None:
         assert payload.get("confirmation_required") is True, payload
         assert payload.get("unit") == "nginx", payload
 
+        response = await client.post("/api/voice-command", headers=headers, json={"text": "Befehl bestätigen"})
+        assert response.status == 200, await response.text()
+        payload = await response.json()
+        assert payload.get("unit") == "nginx", payload
+        assert payload.get("action") == "restart", payload
+        assert ("restart", "nginx") in executed, executed
+
         response = await client.post(
             "/api/voice-command",
             headers=headers,
             json={"text": "Starte Meshtastic neu"},
         )
-        # The known HomePi alias skips extra confirmation; on CI the privileged
-        # helper is intentionally absent, so execution must fail safely rather
-        # than ever falling back to a shell.
-        assert response.status == 500, await response.text()
+        assert response.status == 200, await response.text()
         payload = await response.json()
         assert payload.get("unit") == "raspberry-meshtastic", payload
         assert payload.get("action") == "restart", payload
+        assert ("restart", "raspberry-meshtastic") in executed, executed
 
         print("Voice control smoke test passed")
     finally:
