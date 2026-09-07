@@ -27,6 +27,9 @@ jobs:
       - run: python scripts/feature_flags_smoke.py
       - run: python scripts/display_smoke.py
       - run: python scripts/meshtastic_smoke.py
+      - run: python scripts/voice_control_smoke.py
+      - run: python scripts/homepi_systemctl.py status definitely-not-a-real-service || true
       - run: bash -n scripts/install_display_service.sh
       - run: bash -n scripts/install_display2_service.sh
       - run: bash -n scripts/install_meshtastic_service.sh
+      - run: bash -n scripts/install_voice_control.sh
