@@ -37,6 +37,7 @@ PY
     python3 - "$DASH_ENV" "$TOKEN" <<'PY'
 from pathlib import Path
 import sys
+
 path = Path(sys.argv[1])
 token = sys.argv[2]
 lines = path.read_text(encoding="utf-8").splitlines()
@@ -68,14 +69,18 @@ echo "[5/5] Dashboard neu starten"
 sudo systemctl restart raspberry-dashboard
 
 TOKEN_VALUE="$(grep '^VOICE_API_TOKEN=' "$DASH_ENV" | tail -n1 | cut -d= -f2-)"
-echo
-echo "Voice Control ist installiert."
-echo "Endpoint: http://homepi.local:8080/api/voice-command"
-echo "Token für den iPhone-Kurzbefehl:"
-echo "$TOKEN_VALUE"
-echo
-echo "Test vom Pi:"
-echo "curl -sS -X POST http://127.0.0.1:8080/api/voice-command \\\"
-echo "  -H 'Authorization: Bearer $TOKEN_VALUE' \\\"
-echo "  -H 'Content-Type: application/json' \\\"
-echo "  -d '{\"text\":\"HomePi Status\"}'"
+
+cat <<EOF
+
+Voice Control ist installiert.
+Endpoint: http://homepi.local:8080/api/voice-command
+Token für den iPhone-Kurzbefehl:
+$TOKEN_VALUE
+
+Test vom Pi:
+TOKEN='$TOKEN_VALUE'
+curl -sS -X POST http://127.0.0.1:8080/api/voice-command \\
+  -H "Authorization: Bearer \$TOKEN" \\
+  -H 'Content-Type: application/json' \\
+  -d '{"text":"HomePi Status"}'
+EOF
