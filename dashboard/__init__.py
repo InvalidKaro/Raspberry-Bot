@@ -14,6 +14,7 @@ from . import app_legacy as _app_legacy
 from .media_routes import register_media_routes
 from .message_studio_routes import register_message_studio_routes
 from .ops_routes import register_ops_routes
+from .voice_routes import register_voice_routes
 from .workspace_editor_routes import register_workspace_editor_routes
 from .workspace_plus_routes import register_workspace_plus_routes
 from .workspace_routes import register_workspace_routes
@@ -208,7 +209,7 @@ if not getattr(_app_legacy, "_workspace_suite_wrapped", False):
 
     @web.middleware
     async def _auth_with_public_status(request: web.Request, handler):
-        if request.path in {"/status", "/api/public/status"}:
+        if request.path in {"/status", "/api/public/status", "/api/voice-command"}:
             return await handler(request)
         return await _original_auth_middleware(request, handler)
 
@@ -224,6 +225,7 @@ if not getattr(_app_legacy, "_workspace_suite_wrapped", False):
         register_media_routes(app)
         register_ops_routes(app)
         register_message_studio_routes(app)
+        register_voice_routes(app)
         app.router.add_get("/api/ops/fixed-guild", _ops_fixed_guild)
         return app
 

@@ -1,3 +1,7 @@
 # HomePi Dashboard — intentionally limited system privileges.
 # Verify systemctl path with: command -v systemctl
 stefano ALL=(root) NOPASSWD: /usr/bin/systemctl start raspberry-bot, /usr/bin/systemctl stop raspberry-bot, /usr/bin/systemctl restart raspberry-bot, /usr/bin/systemctl restart raspberry-dashboard, /usr/bin/systemctl reboot, /usr/bin/systemctl poweroff
+
+# Voice control never receives raw shell access. It may only call this root-owned
+# validator/helper, which limits systemctl actions and validates unit names.
+stefano ALL=(root) NOPASSWD: /usr/local/sbin/homepi-systemctl *
