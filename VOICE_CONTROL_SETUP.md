@@ -13,7 +13,7 @@ iPhone / Siri / Kurzbefehle
         v
 POST /api/voice-command
         |
-        | Bearer Token
+        | Voice API Token
         v
 HomePi command parser
         |
@@ -53,9 +53,9 @@ Den Token nicht öffentlich teilen.
 ```bash
 TOKEN="$(grep '^VOICE_API_TOKEN=' ~/services/Raspberry-Bot/.env.dashboard | cut -d= -f2-)"
 curl -sS -X POST http://127.0.0.1:8080/api/voice-command \
-  -H "Authorization: Bearer $TOKEN" \
+  -H "X-HomePi-Token: $TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"text":"HomePi Status"}'
+  -d '{"text":"Status"}'
 ```
 
 Beispielantwort:
@@ -70,7 +70,9 @@ Beispielantwort:
 
 ## iPhone-Kurzbefehl
 
-In **Kurzbefehle** einen neuen Kurzbefehl namens `HomePi` anlegen.
+In **Kurzbefehle** einen neuen Kurzbefehl anlegen. `HomePi` funktioniert, Siri versteht als Auslöser aber oft **`Serversteuerung`** oder **`Raspberry Steuerung`** zuverlässiger.
+
+Nach dem Start des Kurzbefehls muss das Wort `HomePi` im eigentlichen Diktat **nicht noch einmal gesagt werden**. Einfach `Status`, `Bot neu starten`, `Pi neu starten` usw. sprechen.
 
 ### Aktionen
 
@@ -79,12 +81,11 @@ In **Kurzbefehle** einen neuen Kurzbefehl namens `HomePi` anlegen.
    - Stoppen: nach Pause
 
 2. **Inhalte von URL abrufen**
-   - URL: `http://homepi.local:8080/api/voice-command`
+   - URL: `http://PI-IP:8080/api/voice-command`
    - Methode: `POST`
    - Request Body: JSON
    - Feld `text`: Ergebnis von **Text diktieren**
-   - Header `Authorization`: `Bearer DEIN_TOKEN`
-   - Header `Content-Type`: `application/json`
+   - Header `X-HomePi-Token`: `DEIN_TOKEN`
 
 3. **Wert aus Wörterbuch abrufen**
    - Schlüssel: `speech`
@@ -92,66 +93,91 @@ In **Kurzbefehle** einen neuen Kurzbefehl namens `HomePi` anlegen.
 4. **Text sprechen**
    - den Wert `speech`
 
-Danach kann der Kurzbefehl auch über Siri gestartet werden, z. B.:
+## Siri-Erkennung
+
+Der Parser akzeptiert mehrere typische Diktatvarianten von HomePi, unter anderem:
 
 ```text
-Hey Siri, HomePi
+HomePi
+Home Pi
+Home Pie
+Home Pai
+Home Pei
+HomPi
 ```
 
-Das iPhone fragt nach dem Diktat bzw. nimmt den folgenden Befehl entgegen.
-
-## Beispiele
+Noch zuverlässiger ist es, nach dem Start des Kurzbefehls einfach **ohne Wake-Name** zu diktieren:
 
 ```text
-HomePi Status
-Wie warm ist HomePi?
-Wie ist die RAM Auslastung?
+Status
+Bot neu starten
+Meshtastic neu starten
+Pi neu starten
+```
 
-Starte Meshtastic neu
+## Befehlsübersicht
+
+Der Sprachbefehl `Befehle`, `Hilfe`, `Was kannst du?` oder `Befehlsliste` liefert eine kurze Funktionsübersicht.
+
+### Systemstatus
+
+```text
+Status
+Pi Status
+Server Status
+Wie warm ist der Pi?
+Temperatur
+CPU Auslastung
+RAM Auslastung
+Speicher Auslastung
+Uptime
+```
+
+### Bekannte HomePi-Dienste
+
+```text
 Starte den Bot neu
+Starte das Dashboard neu
+Starte Display eins neu
 Starte Display zwei neu
-Stoppe den Bot
-Status Dienst ssh
-Dienst nginx neu starten
-systemctl restart cron
+Starte Meshtastic neu
+Starte Pi-hole neu
+Starte Tailscale neu
+```
+
+Bekannte natürliche Namen:
+
+| Gesprochen | Unit |
+|---|---|
+| Bot / Discord Bot | `raspberry-bot.service` |
+| Dashboard | `raspberry-dashboard.service` |
+| Display / Display 1 | `raspberry-display.service` |
+| Display 2 | `raspberry-display2.service` |
+| Meshtastic | `raspberry-meshtastic.service` |
+| Pi-hole | `pihole-FTL.service` |
+| Tailscale | `tailscaled.service` |
+
+### Beliebige systemd-Units
+
+```text
 Liste Dienste
 Systemd neu laden
+Status Dienst ssh
+Dienst nginx starten
+Dienst nginx neu starten
+Dienst nginx neu laden
+Dienst nginx stoppen
+Dienst nginx aktivieren
+Dienst nginx deaktivieren
+Dienst nginx maskieren
+Dienst nginx entmaskieren
+systemctl restart cron
+systemctl status ssh
+systemctl is-active tailscaled
+systemctl is-enabled ssh
 ```
 
-### Kritische Befehle
-
-Reboot, Herunterfahren sowie riskantere systemd-Aktionen verlangen eine explizite Bestätigung.
-
-Erster Versuch:
-
-```text
-HomePi neu starten
-```
-
-Antwort:
-
-```text
-Das ist ein kritischer Befehl. Sage den Befehl erneut mit dem Wort bestätigen.
-```
-
-Dann:
-
-```text
-HomePi neu starten bestätigen
-```
-
-Dasselbe gilt unter anderem für:
-
-```text
-HomePi herunterfahren bestätigen
-Dienst ssh stoppen bestätigen
-Dienst nginx deaktivieren bestätigen
-Dienst bluetooth maskieren bestätigen
-```
-
-Bei bekannten HomePi-Diensten sind normale `restart`-Befehle ohne zweite Bestätigung möglich. Bei beliebigen fremden systemd-Units verlangt `restart` zusätzlich `bestätigen`.
-
-## Unterstützte systemd-Aktionen
+Unterstützte Aktionen:
 
 ```text
 start
@@ -167,23 +193,69 @@ unmask
 is-active
 is-enabled
 daemon-reload
-reboot
-poweroff
 ```
 
-Bekannte natürliche Namen:
+### Stromversorgung
 
-| Gesprochen | Unit |
-|---|---|
-| Bot / Discord Bot | `raspberry-bot.service` |
-| Dashboard | `raspberry-dashboard.service` |
-| Display / Display 1 | `raspberry-display.service` |
-| Display 2 | `raspberry-display2.service` |
-| Meshtastic | `raspberry-meshtastic.service` |
-| Pi-hole | `pihole-FTL.service` |
-| Tailscale | `tailscaled.service` |
+```text
+Pi neu starten
+Server neu starten
+HomePi neu starten
+Pi herunterfahren
+Server herunterfahren
+HomePi herunterfahren
+```
 
-Für jede andere systemd-Unit die Form `Dienst <unit> ...` verwenden, z. B. `Dienst ssh neu starten bestätigen`.
+## Kritische Befehle und Bestätigung
+
+Reboot, Herunterfahren, `stop`, `disable`, `mask` sowie riskantere Aktionen auf unbekannten systemd-Units verlangen eine explizite Bestätigung.
+
+Beispiel:
+
+```text
+Pi neu starten
+```
+
+HomePi antwortet:
+
+```text
+Kritischer Befehl. Ich merke ihn mir 60 Sekunden. Starte HomePi noch einmal und sage nur Bestätigen oder Abbrechen.
+```
+
+Danach den Kurzbefehl erneut starten und nur sagen:
+
+```text
+Bestätigen
+```
+
+oder:
+
+```text
+Abbrechen
+```
+
+Die folgenden Bestätigungsformulierungen werden akzeptiert:
+
+```text
+Bestätigen
+Befehl bestätigen
+Ja bestätigen
+Ausführen
+Jetzt ausführen
+Ja wirklich
+```
+
+Wenn innerhalb von 60 Sekunden ein anderer Befehl kommt, wird die vorgemerkte kritische Aktion verworfen. Dadurch kann ein späteres versehentliches `Bestätigen` keinen alten Befehl ausführen.
+
+Alternativ funktioniert weiterhin die Ein-Satz-Form:
+
+```text
+Pi neu starten bestätigen
+Dienst nginx neu starten bestätigen
+Dienst ssh stoppen bestätigen
+```
+
+Bei bekannten HomePi-Diensten sind normale `restart`-Befehle ohne zweite Bestätigung möglich. `stop`, `disable` und `mask` bleiben auch dort bestätigungspflichtig.
 
 ## Sicherheit
 
@@ -193,6 +265,6 @@ Für jede andere systemd-Unit die Form `Dienst <unit> ...` verwenden, z. B. `Die
 - Diktat wird maximal 500 Zeichen lang akzeptiert.
 - Es gibt keinen `shell=True`- oder freien Bash-Endpunkt.
 - Der privilegierte Helper wird bei Installation root-owned kopiert; Änderungen im Git-Checkout ändern daher nicht automatisch den root-Helper.
-- Reboot, Poweroff, Stop/Disable/Mask und fremde Service-Restarts erfordern eine Bestätigung.
+- Kritische Aktionen werden nur 60 Sekunden vorgemerkt und können mit `Abbrechen` verworfen werden.
 
 Für Nutzung außerhalb des Heim-WLANs sollte der Endpoint nur über Tailscale/VPN erreichbar gemacht werden, nicht per Router-Portfreigabe ins öffentliche Internet.
