@@ -1,0 +1,23 @@
+[Unit]
+Description=HomePi Blackbox, Server Score and Warnzentrale
+After=local-fs.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=stefano
+Group=stefano
+WorkingDirectory=/home/stefano/services/Raspberry-Bot
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/home/stefano/services/Raspberry-Bot/.env.homepi
+ExecStartPre=/home/stefano/services/Raspberry-Bot/.venv/bin/python -m homepi_intelligence --check
+ExecStart=/home/stefano/services/Raspberry-Bot/.venv/bin/python -m homepi_intelligence --daemon
+Restart=always
+RestartSec=5
+TimeoutStopSec=10
+Nice=8
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
