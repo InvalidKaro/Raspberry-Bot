@@ -111,7 +111,7 @@ def _kind_line(kind: str, day_index: int) -> tuple[str, bool]:
     if "reha" in low or "psychiatr" in low:
         return "🤸‍♂️ Reha-Schulung / 🧠 Psychiatrie", False
     if low in {"rp", "staatsfraktionen", "rp mit staatsfraktionen"} or "staatsfraktion" in low:
-        emoji = "<:1State:1448298845208580138>" if day_index == 3 else "<:OS_RP:1448296240058990672>"
+        emoji = "<:1State:1448298845208580138>" if day_index == 2 else "<:OS_RP:1448296240058990672>"
         return f"{emoji} RP mit Staatsfraktionen", False
     if "wochenbesprech" in low or "besprechung" in low:
         return f"📡 {clean}", False
@@ -340,7 +340,7 @@ class PlannerBuilderView(discord.ui.View):
             "Art: `RTW-Schulung`, `Theorieunterricht`, `Medizinische Grundlagen`, `Notaufnahme – Innere Medizin`, `Reha-Schulung`, `Wochenbesprechung`\n"
             "Lehrer: `Melvin Crawley | 👩🏼‍🏫 Nancy Crawley`\n"
             "Thema: `Patientenübergabe an die Notaufnahme & kleines Funktraining`\n\n"
-            "Donnerstag und Samstag wird bei einem neuen Entwurf standardmäßig RP mit Staatsfraktionen angelegt.",
+            "Mittwoch und Samstag wird bei einem neuen Entwurf standardmäßig RP mit Staatsfraktionen angelegt.",
             ephemeral=True,
         )
 
@@ -460,7 +460,7 @@ class MDBellWeeklyPlanner(
 
         if standard_rp:
             await self.bot.database.execute(
-                "INSERT INTO md_weekly_entries(draft_id,day_index,start_sort,time_text,kind,teachers,topic) VALUES(?,3,'22:30','ab 22:30','RP mit Staatsfraktionen','','')",
+                "INSERT INTO md_weekly_entries(draft_id,day_index,start_sort,time_text,kind,teachers,topic) VALUES(?,2,'22:30','ab 22:30','RP mit Staatsfraktionen','','')",
                 (draft_id,),
             )
             await self.bot.database.execute(
