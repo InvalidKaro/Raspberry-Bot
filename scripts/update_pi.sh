@@ -33,6 +33,7 @@ SERVICES=(
   raspberry-display.service
   raspberry-meshtastic.service
   raspberry-display2.service
+  raspberry-intelligence.service
 )
 
 # Keep already-installed systemd units in sync with the repository. A unit that
