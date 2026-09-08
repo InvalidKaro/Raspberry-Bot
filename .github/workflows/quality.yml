@@ -24,6 +24,7 @@ jobs:
       - run: python scripts/import_smoke.py
       - run: python scripts/command_hub_smoke.py
       - run: python scripts/dashboard_smoke.py
+      - run: python scripts/mdplan_smoke.py
       - run: python scripts/feature_flags_smoke.py
       - run: python scripts/display_smoke.py
       - run: python scripts/display2_smoke.py
