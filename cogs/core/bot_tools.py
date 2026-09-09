@@ -8,6 +8,7 @@ from discord.ext import commands
 
 from helpers.embeds import EmbedFactory
 from helpers.formatting import human_duration
+from views.control_center import ControlCenterView, control_center_embed, run_quick_check
 
 
 def _all_app_commands(bot: commands.Bot) -> list[app_commands.Command | app_commands.Group]:
@@ -22,6 +23,29 @@ def _all_app_commands(bot: commands.Bot) -> list[app_commands.Command | app_comm
 class BotTools(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
+
+    @app_commands.command(name="controlcenter", description="Open the interactive Raspberry-Bot and HomePi command palette.")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_guild=True)
+    async def controlcenter(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_message(
+            embed=control_center_embed(),
+            view=ControlCenterView(self.bot, interaction.user.id),
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="quickcheck", description="Run an interactive HomePi health check with live progress.")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_guild=True)
+    async def quickcheck(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_message(
+            embed=EmbedFactory.system(
+                title="Schnellcheck wird vorbereitet",
+                description="Die Systemprüfungen werden gestartet…",
+            ),
+            ephemeral=True,
+        )
+        await run_quick_check(interaction, self.bot, interaction.user.id)
 
     @app_commands.command(name="botinfo", description="Show detailed information about Raspberry-Bot.")
     async def botinfo(self, interaction: discord.Interaction) -> None:
