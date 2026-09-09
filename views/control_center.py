@@ -160,19 +160,19 @@ class ActionSuggestionsView(discord.ui.View):
         await interaction.response.send_message("Dieses Control-Center gehört zu einer anderen Session.", ephemeral=True)
         return False
 
-    @discord.ui.button(label="Schnellcheck", emoji="🩺", style=discord.ButtonStyle.success, row=0)
+    @discord.ui.button(label="Schnellcheck", emoji="🩺", style=discord.ButtonStyle.success, row=1)
     async def quick_check(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await run_quick_check(interaction, self.bot, self.user_id)
 
-    @discord.ui.button(label="Systemstatus", emoji="🖥️", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="Systemstatus", emoji="🖥️", style=discord.ButtonStyle.primary, row=1)
     async def system_status(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await show_system_status(interaction, self.bot, self.user_id)
 
-    @discord.ui.button(label="Diagnose", emoji="🔬", style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(label="Diagnose", emoji="🔬", style=discord.ButtonStyle.secondary, row=1)
     async def diagnose(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await run_diagnostics(interaction, self.bot, self.user_id)
 
-    @discord.ui.button(label="Home", emoji="⌂", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="Home", emoji="⌂", style=discord.ButtonStyle.secondary, row=2)
     async def home(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await interaction.response.edit_message(
             embed=control_center_embed(),
@@ -311,7 +311,7 @@ async def run_diagnostics(interaction: discord.Interaction, bot: commands.Bot, u
     states = ["pending"] * len(stages)
 
     def render(current: int | None = None) -> discord.Embed:
-        done = sum(state == "done" for state in states)
+        done = sum(state in {"done", "warn"} for state in states)
         lines = []
         for index, label in enumerate(stages):
             if current == index:
