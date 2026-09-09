@@ -172,7 +172,7 @@ class ActionSuggestionsView(discord.ui.View):
     async def diagnose(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await run_diagnostics(interaction, self.bot, self.user_id)
 
-    @discord.ui.button(label="Home", emoji="⌂", style=discord.ButtonStyle.secondary, row=2)
+    @discord.ui.button(label="Home", emoji="🏠", style=discord.ButtonStyle.secondary, row=2)
     async def home(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await interaction.response.edit_message(
             embed=control_center_embed(),
