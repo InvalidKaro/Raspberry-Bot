@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -47,6 +48,7 @@ CREATE TABLE IF NOT EXISTS md_weekly_entries(
     draft_id INTEGER NOT NULL,
     day_index INTEGER NOT NULL,
     start_sort TEXT NOT NULL,
+    sort_time TEXT,
     time_text TEXT NOT NULL,
     kind TEXT NOT NULL,
     teachers TEXT,
@@ -56,8 +58,6 @@ CREATE TABLE IF NOT EXISTS md_weekly_entries(
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(draft_id) REFERENCES md_weekly_drafts(id) ON DELETE CASCADE
 );
-CREATE INDEX IF NOT EXISTS idx_md_weekly_entries_draft_day
-    ON md_weekly_entries(draft_id, day_index, start_sort, id);
 """
 
 
@@ -81,13 +81,20 @@ def _week_monday(value: str | None) -> date:
 def _day_index(value: str) -> int:
     raw = value.strip().lower().replace(".", "")
     aliases = {
-        "montag": 0, "mo": 0,
-        "dienstag": 1, "di": 1,
-        "mittwoch": 2, "mi": 2,
-        "donnerstag": 3, "do": 3,
-        "freitag": 4, "fr": 4,
-        "samstag": 5, "sa": 5,
-        "sonntag": 6, "so": 6,
+        "montag": 0,
+        "mo": 0,
+        "dienstag": 1,
+        "di": 1,
+        "mittwoch": 2,
+        "mi": 2,
+        "donnerstag": 3,
+        "do": 3,
+        "freitag": 4,
+        "fr": 4,
+        "samstag": 5,
+        "sa": 5,
+        "sonntag": 6,
+        "so": 6,
     }
     if raw not in aliases:
         raise ValueError("Tag muss Montag–Sonntag sein")
@@ -184,7 +191,7 @@ def _row_value(row: Any, key: str, default: Any = "") -> Any:
 
 def _entry_text(row: Any) -> str:
     _, time_line = _time_line(str(_row_value(row, "time_text", "00:00")))
-    day_index = int(_row_value(row, "day_index", 0) or 0)
+    day_index = max(0, min(6, int(_row_value(row, "day_index", 0) or 0)))
     kind_line, theory = _kind_line(str(_row_value(row, "kind", "Termin")), day_index)
     lines = [time_line, kind_line]
     lines.extend(_teacher_lines(str(_row_value(row, "teachers", "") or "")))
@@ -209,7 +216,7 @@ def _split_text(text: str, limit: int) -> list[str]:
                     if line_buf:
                         pieces.append(line_buf)
                         line_buf = ""
-                    pieces.extend(line[i:i + limit] for i in range(0, len(line), limit))
+                    pieces.extend(line[i : i + limit] for i in range(0, len(line), limit))
                     continue
                 candidate = f"{line_buf}\n{line}" if line_buf else line
                 if len(candidate) > limit:
@@ -264,7 +271,7 @@ async def _table_columns(database: Any, table: str) -> set[str]:
 
 
 async def ensure_md_schema(database: Any) -> None:
-    """Create the current schema and repair old MD-plan database layouts in place."""
+    """Create/repair MD-plan tables and keep Dashboard Pro compatibility intact."""
     await database.connection.executescript(MD_SCHEMA)
     await database.connection.commit()
 
@@ -272,11 +279,11 @@ async def ensure_md_schema(database: Any) -> None:
     additions = {
         "day_index": "INTEGER NOT NULL DEFAULT 0",
         "start_sort": "TEXT NOT NULL DEFAULT '00:00'",
+        "sort_time": "TEXT",
         "time_text": "TEXT NOT NULL DEFAULT '00:00'",
         "kind": "TEXT NOT NULL DEFAULT 'Termin'",
         "teachers": "TEXT",
         "topic": "TEXT",
-        # Compatibility columns used by Dashboard Pro's calendar reader.
         "title": "TEXT",
         "owner_text": "TEXT",
         "created_at": "TEXT",
@@ -303,28 +310,90 @@ async def ensure_md_schema(database: Any) -> None:
 
     if "start_time" in entry_columns:
         await database.connection.execute(
-            "UPDATE md_weekly_entries SET start_sort=COALESCE(NULLIF(start_sort,''),start_time,'00:00'), "
+            "UPDATE md_weekly_entries SET "
+            "start_sort=COALESCE(NULLIF(start_sort,''),start_time,'00:00'), "
             "time_text=COALESCE(NULLIF(time_text,''),start_time,'00:00')"
         )
+
     await database.connection.execute(
         "UPDATE md_weekly_entries SET "
+        "start_sort=COALESCE(NULLIF(start_sort,''),NULLIF(sort_time,''),'00:00'), "
+        "sort_time=COALESCE(NULLIF(sort_time,''),NULLIF(start_sort,''),'00:00'), "
         "kind=COALESCE(NULLIF(kind,''),NULLIF(title,''),'Termin'), "
         "teachers=COALESCE(NULLIF(teachers,''),owner_text,''), "
         "topic=COALESCE(topic,''), "
         "title=CASE WHEN TRIM(COALESCE(topic,''))<>'' THEN topic ELSE COALESCE(NULLIF(kind,''),'Termin') END, "
         "owner_text=COALESCE(teachers,'')"
     )
+
+    cursor = await database.connection.execute(
+        """
+        SELECT id,draft_id FROM md_weekly_entries
+        WHERE day_index=3
+          AND COALESCE(NULLIF(start_sort,''),sort_time)='22:30'
+          AND lower(trim(COALESCE(kind,'')))='rp mit staatsfraktionen'
+          AND trim(COALESCE(teachers,''))=''
+          AND trim(COALESCE(topic,''))=''
+        """
+    )
+    legacy_rows = await cursor.fetchall()
+    await cursor.close()
+    for row in legacy_rows:
+        cursor = await database.connection.execute(
+            """
+            SELECT id FROM md_weekly_entries
+            WHERE draft_id=? AND day_index=2
+              AND COALESCE(NULLIF(start_sort,''),sort_time)='22:30'
+              AND lower(trim(COALESCE(kind,'')))='rp mit staatsfraktionen'
+              AND trim(COALESCE(teachers,''))=''
+              AND trim(COALESCE(topic,''))=''
+            LIMIT 1
+            """,
+            (int(row["draft_id"]),),
+        )
+        duplicate = await cursor.fetchone()
+        await cursor.close()
+        if duplicate:
+            await database.connection.execute("DELETE FROM md_weekly_entries WHERE id=?", (int(row["id"]),))
+        else:
+            await database.connection.execute(
+                "UPDATE md_weekly_entries SET day_index=2 WHERE id=?", (int(row["id"]),)
+            )
+
     await database.connection.executescript(
         """
-        CREATE TRIGGER IF NOT EXISTS trg_md_weekly_entries_compat_insert
+        CREATE INDEX IF NOT EXISTS idx_md_weekly_entries_draft_day
+            ON md_weekly_entries(draft_id, day_index, start_sort, id);
+
+        DROP TRIGGER IF EXISTS trg_md_weekly_entries_compat_insert;
+        DROP TRIGGER IF EXISTS trg_md_weekly_entries_compat_update;
+        DROP TRIGGER IF EXISTS trg_md_weekly_entries_start_sort_sync;
+        DROP TRIGGER IF EXISTS trg_md_weekly_entries_sort_time_sync;
+        DROP TRIGGER IF EXISTS trg_md_weekly_entries_metadata_sync;
+
+        CREATE TRIGGER trg_md_weekly_entries_compat_insert
         AFTER INSERT ON md_weekly_entries
         BEGIN
             UPDATE md_weekly_entries
-            SET title=CASE WHEN TRIM(COALESCE(NEW.topic,''))<>'' THEN NEW.topic ELSE NEW.kind END,
+            SET start_sort=COALESCE(NULLIF(NEW.start_sort,''),NULLIF(NEW.sort_time,''),'00:00'),
+                sort_time=COALESCE(NULLIF(NEW.start_sort,''),NULLIF(NEW.sort_time,''),'00:00'),
+                title=CASE WHEN TRIM(COALESCE(NEW.topic,''))<>'' THEN NEW.topic ELSE NEW.kind END,
                 owner_text=COALESCE(NEW.teachers,'')
             WHERE id=NEW.id;
         END;
-        CREATE TRIGGER IF NOT EXISTS trg_md_weekly_entries_compat_update
+        CREATE TRIGGER trg_md_weekly_entries_start_sort_sync
+        AFTER UPDATE OF start_sort ON md_weekly_entries
+        WHEN NEW.sort_time IS NOT NEW.start_sort
+        BEGIN
+            UPDATE md_weekly_entries SET sort_time=NEW.start_sort WHERE id=NEW.id;
+        END;
+        CREATE TRIGGER trg_md_weekly_entries_sort_time_sync
+        AFTER UPDATE OF sort_time ON md_weekly_entries
+        WHEN NEW.start_sort IS NOT NEW.sort_time
+        BEGIN
+            UPDATE md_weekly_entries SET start_sort=NEW.sort_time WHERE id=NEW.id;
+        END;
+        CREATE TRIGGER trg_md_weekly_entries_metadata_sync
         AFTER UPDATE OF kind,teachers,topic ON md_weekly_entries
         BEGIN
             UPDATE md_weekly_entries
@@ -344,6 +413,13 @@ async def _touch_draft(bot: commands.Bot, draft_id: int) -> None:
     )
 
 
+async def _latest_draft(bot: commands.Bot, guild_id: int, owner_id: int):
+    return await bot.database.fetchone(
+        "SELECT * FROM md_weekly_drafts WHERE guild_id=? AND owner_id=? ORDER BY id DESC LIMIT 1",
+        (int(guild_id), int(owner_id)),
+    )
+
+
 async def _insert_entry(
     bot: commands.Bot,
     draft_id: int,
@@ -354,15 +430,24 @@ async def _insert_entry(
     topic: str = "",
 ) -> int:
     sort_time, _ = _time_line(time_text)
+    clean_kind = kind.strip() or "Termin"
     return await bot.database.execute(
         """
         INSERT INTO md_weekly_entries(
-            draft_id,day_index,start_sort,time_text,kind,teachers,topic,title,owner_text
-        ) VALUES(?,?,?,?,?,?,?,?,?)
+            draft_id,day_index,start_sort,sort_time,time_text,kind,teachers,topic,title,owner_text
+        ) VALUES(?,?,?,?,?,?,?,?,?,?)
         """,
         (
-            int(draft_id), int(day_index), sort_time, time_text.strip(), kind.strip(),
-            teachers.strip(), topic.strip(), topic.strip() or kind.strip(), teachers.strip(),
+            int(draft_id),
+            max(0, min(6, int(day_index))),
+            sort_time,
+            sort_time,
+            time_text.strip(),
+            clean_kind,
+            teachers.strip(),
+            topic.strip(),
+            topic.strip() or clean_kind,
+            teachers.strip(),
         ),
     )
 
@@ -376,6 +461,39 @@ async def _insert_standard_rp(bot: commands.Bot, draft_id: int) -> None:
             f"ab {STANDARD_RP_TIME}",
             "RP mit Staatsfraktionen",
         )
+
+
+async def _create_or_reset_draft(
+    bot: commands.Bot,
+    guild_id: int,
+    owner_id: int,
+    channel_id: int,
+    monday: date,
+    *,
+    standard_rp: bool = True,
+    reset_existing: bool = True,
+) -> int:
+    old = await _latest_draft(bot, guild_id, owner_id)
+    if old and not reset_existing:
+        return int(old["id"])
+
+    if old:
+        draft_id = int(old["id"])
+        await bot.database.execute("DELETE FROM md_weekly_entries WHERE draft_id=?", (draft_id,))
+        await bot.database.execute(
+            "UPDATE md_weekly_drafts SET week_start=?,channel_id=?,updated_at=CURRENT_TIMESTAMP,published_at=NULL WHERE id=?",
+            (monday.isoformat(), int(channel_id), draft_id),
+        )
+    else:
+        draft_id = await bot.database.execute(
+            "INSERT INTO md_weekly_drafts(guild_id,owner_id,week_start,channel_id) VALUES(?,?,?,?)",
+            (int(guild_id), int(owner_id), monday.isoformat(), int(channel_id)),
+        )
+
+    if standard_rp:
+        await _insert_standard_rp(bot, draft_id)
+    await _touch_draft(bot, draft_id)
+    return draft_id
 
 
 async def _render_draft(
@@ -420,6 +538,19 @@ async def _entry_rows(bot: commands.Bot, draft_id: int) -> list[Any]:
     )
 
 
+async def _send_no_draft(
+    interaction: discord.Interaction,
+    bot: commands.Bot,
+    owner_id: int,
+    text: str = "Kein aktiver Wochenplan-Entwurf vorhanden.",
+) -> None:
+    await interaction.response.send_message(
+        text + " Du kannst ihn direkt über den Button öffnen oder neu anlegen.",
+        view=PlannerRecoveryView(bot, owner_id),
+        ephemeral=True,
+    )
+
+
 async def _send_preview(
     interaction: discord.Interaction,
     bot: commands.Bot,
@@ -428,11 +559,66 @@ async def _send_preview(
 ) -> None:
     chunks = await _render_draft(bot, draft_id, interaction.guild_id, owner_id)
     if not chunks:
-        await interaction.response.send_message("Entwurf nicht gefunden.", ephemeral=True)
+        await _send_no_draft(interaction, bot, owner_id, "Dieser Entwurf existiert nicht mehr.")
         return
-    await interaction.response.send_message(chunks[0], ephemeral=True)
+    await interaction.response.send_message(
+        chunks[0],
+        view=PlannerBuilderView(bot, draft_id, owner_id),
+        ephemeral=True,
+    )
     for chunk in chunks[1:]:
         await interaction.followup.send(chunk, ephemeral=True)
+
+
+class PlannerRecoveryView(discord.ui.View):
+    """No dead-end command hints: open an existing plan or create one in-place."""
+
+    def __init__(self, bot: commands.Bot, owner_id: int) -> None:
+        super().__init__(timeout=300)
+        self.bot = bot
+        self.owner_id = int(owner_id)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.owner_id:
+            return True
+        await interaction.response.send_message("Das ist nicht deine Wochenplan-Session.", ephemeral=True)
+        return False
+
+    @discord.ui.button(label="Wochenplan öffnen", emoji="📅", style=discord.ButtonStyle.primary)
+    async def open_or_create(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        if interaction.guild_id is None or interaction.channel is None or not hasattr(interaction.channel, "id"):
+            await interaction.response.send_message("Wochenplan kann hier nicht geöffnet werden.", ephemeral=True)
+            return
+
+        draft = await _latest_draft(self.bot, interaction.guild_id, self.owner_id)
+        created = False
+        if draft:
+            draft_id = int(draft["id"])
+        else:
+            draft_id = await _create_or_reset_draft(
+                self.bot,
+                interaction.guild_id,
+                self.owner_id,
+                int(interaction.channel.id),
+                _week_monday(None),
+                standard_rp=True,
+                reset_existing=False,
+            )
+            created = True
+
+        rows = await _entry_rows(self.bot, draft_id)
+        embed = EmbedFactory.success(
+            title="MD Bell Wochenplaner",
+            description=(
+                ("Neuer Entwurf angelegt.\n" if created else "Aktueller Entwurf geöffnet.\n")
+                + f"**{len(rows)} Termine** · Steuerung direkt über die Buttons."
+            ),
+        )
+        await interaction.response.edit_message(
+            content=None,
+            embed=embed,
+            view=PlannerBuilderView(self.bot, draft_id, self.owner_id),
+        )
 
 
 class PlannerEntryModal(discord.ui.Modal, title="Termin hinzufügen"):
@@ -474,13 +660,20 @@ class PlannerEntryModal(discord.ui.Modal, title="Termin hinzufügen"):
         except ValueError as exc:
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
+
         draft = await self.bot.database.fetchone(
             "SELECT id FROM md_weekly_drafts WHERE id=? AND guild_id=? AND owner_id=?",
             (self.draft_id, interaction.guild_id, self.owner_id),
         )
         if not draft:
-            await interaction.response.send_message("Entwurf nicht mehr gefunden. Nutze `/mdplan start`.", ephemeral=True)
+            await _send_no_draft(
+                interaction,
+                self.bot,
+                self.owner_id,
+                "Der Entwurf aus diesem Formular existiert nicht mehr.",
+            )
             return
+
         await _insert_entry(
             self.bot,
             self.draft_id,
@@ -505,26 +698,44 @@ class PlannerEntryModal(discord.ui.Modal, title="Termin hinzufügen"):
 
 
 class RemoveEntrySelect(discord.ui.Select):
-    def __init__(self, bot: commands.Bot, draft_id: int, owner_id: int, rows: list[Any]) -> None:
+    def __init__(
+        self,
+        bot: commands.Bot,
+        draft_id: int,
+        owner_id: int,
+        rows: list[Any],
+        page: int,
+    ) -> None:
         self.bot = bot
         self.draft_id = int(draft_id)
         self.owner_id = int(owner_id)
+        self.page = max(0, int(page))
+
+        start = self.page * 25
+        page_rows = rows[start : start + 25]
         options: list[discord.SelectOption] = []
-        for row in rows[:25]:
+        for row in page_rows:
             entry_id = int(_row_value(row, "id", 0) or 0)
-            day = int(_row_value(row, "day_index", 0) or 0)
+            day = max(0, min(6, int(_row_value(row, "day_index", 0) or 0)))
             label = _short(
-                f"{DAY_NAMES[max(0, min(6, day))]} · {_row_value(row, 'time_text', '')} · {_row_value(row, 'kind', 'Termin')}",
+                f"{DAY_NAMES[day]} · {_row_value(row, 'time_text', '')} · {_row_value(row, 'kind', 'Termin')}",
                 100,
             )
-            detail = _short(_row_value(row, "topic", "") or _row_value(row, "teachers", "") or f"Termin #{entry_id}", 100)
+            detail = _short(
+                _row_value(row, "topic", "")
+                or _row_value(row, "teachers", "")
+                or f"Termin #{entry_id}",
+                100,
+            )
             options.append(discord.SelectOption(label=label, description=detail, value=str(entry_id)))
+
         super().__init__(
-            placeholder="Welchen Termin entfernen?",
+            placeholder=f"Termin entfernen · Seite {self.page + 1}",
             min_values=1,
             max_values=1,
             options=options,
-            custom_id=f"mdplan:remove:{draft_id}",
+            custom_id=f"mdplan:remove:{draft_id}:{self.page}",
+            row=0,
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
@@ -534,31 +745,84 @@ class RemoveEntrySelect(discord.ui.Select):
             (entry_id, self.draft_id),
         )
         if not row:
-            await interaction.response.send_message("Dieser Termin existiert nicht mehr.", ephemeral=True)
+            rows = await _entry_rows(self.bot, self.draft_id)
+            await interaction.response.edit_message(
+                content="Dieser Termin existiert nicht mehr. Liste wurde aktualisiert.",
+                view=(
+                    RemoveEntryView(self.bot, self.draft_id, self.owner_id, rows, self.page)
+                    if rows
+                    else PlannerBuilderView(self.bot, self.draft_id, self.owner_id)
+                ),
+            )
             return
+
         await self.bot.database.execute(
             "DELETE FROM md_weekly_entries WHERE id=? AND draft_id=?",
             (entry_id, self.draft_id),
         )
         await _touch_draft(self.bot, self.draft_id)
-        await interaction.response.send_message(
-            f"Termin `#{entry_id}` entfernt.",
-            view=PlannerBuilderView(self.bot, self.draft_id, self.owner_id),
-            ephemeral=True,
+        rows = await _entry_rows(self.bot, self.draft_id)
+        if not rows:
+            await interaction.response.edit_message(
+                content=f"Termin `#{entry_id}` entfernt. Keine Termine mehr vorhanden.",
+                view=PlannerBuilderView(self.bot, self.draft_id, self.owner_id),
+            )
+            return
+
+        page_count = max(1, math.ceil(len(rows) / 25))
+        page = min(self.page, page_count - 1)
+        await interaction.response.edit_message(
+            content=f"Termin `#{entry_id}` entfernt. Du kannst direkt den nächsten auswählen.",
+            view=RemoveEntryView(self.bot, self.draft_id, self.owner_id, rows, page),
         )
 
 
 class RemoveEntryView(discord.ui.View):
-    def __init__(self, bot: commands.Bot, draft_id: int, owner_id: int, rows: list[Any]) -> None:
-        super().__init__(timeout=300)
+    def __init__(
+        self,
+        bot: commands.Bot,
+        draft_id: int,
+        owner_id: int,
+        rows: list[Any],
+        page: int = 0,
+    ) -> None:
+        super().__init__(timeout=600)
+        self.bot = bot
+        self.draft_id = int(draft_id)
         self.owner_id = int(owner_id)
-        self.add_item(RemoveEntrySelect(bot, draft_id, owner_id, rows))
+        self.rows = rows
+        self.page_count = max(1, math.ceil(len(rows) / 25))
+        self.page = max(0, min(int(page), self.page_count - 1))
+        self.add_item(RemoveEntrySelect(bot, draft_id, owner_id, rows, self.page))
+        self.previous.disabled = self.page <= 0
+        self.next.disabled = self.page >= self.page_count - 1
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.owner_id:
-            await interaction.response.send_message("Das ist nicht dein Wochenplan.", ephemeral=True)
-            return False
-        return True
+        if interaction.user.id == self.owner_id:
+            return True
+        await interaction.response.send_message("Das ist nicht dein Wochenplan.", ephemeral=True)
+        return False
+
+    @discord.ui.button(label="Zurück", emoji="⬅️", style=discord.ButtonStyle.secondary, row=1)
+    async def previous(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        await interaction.response.edit_message(
+            content=f"Wähle einen Termin aus. Seite {self.page}/{self.page_count}",
+            view=RemoveEntryView(self.bot, self.draft_id, self.owner_id, self.rows, self.page - 1),
+        )
+
+    @discord.ui.button(label="Weiter", emoji="➡️", style=discord.ButtonStyle.secondary, row=1)
+    async def next(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        await interaction.response.edit_message(
+            content=f"Wähle einen Termin aus. Seite {self.page + 2}/{self.page_count}",
+            view=RemoveEntryView(self.bot, self.draft_id, self.owner_id, self.rows, self.page + 1),
+        )
+
+    @discord.ui.button(label="Zum Plan", emoji="📅", style=discord.ButtonStyle.primary, row=1)
+    async def back_to_builder(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        await interaction.response.edit_message(
+            content="Wochenplan-Steuerung",
+            view=PlannerBuilderView(self.bot, self.draft_id, self.owner_id),
+        )
 
 
 class PlannerBuilderView(discord.ui.View):
@@ -569,10 +833,10 @@ class PlannerBuilderView(discord.ui.View):
         self.owner_id = int(owner_id)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.owner_id:
-            await interaction.response.send_message("Das ist nicht dein Wochenplan-Builder.", ephemeral=True)
-            return False
-        return True
+        if interaction.user.id == self.owner_id:
+            return True
+        await interaction.response.send_message("Das ist nicht dein Wochenplan-Builder.", ephemeral=True)
+        return False
 
     @discord.ui.button(label="Hinzufügen", emoji="➕", style=discord.ButtonStyle.primary, row=0)
     async def add_entry(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
@@ -582,13 +846,14 @@ class PlannerBuilderView(discord.ui.View):
     async def remove_entry(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
         rows = await _entry_rows(self.bot, self.draft_id)
         if not rows:
-            await interaction.response.send_message("Noch keine Termine vorhanden.", ephemeral=True)
+            await interaction.response.send_message(
+                "Noch keine Termine vorhanden.",
+                view=PlannerBuilderView(self.bot, self.draft_id, self.owner_id),
+                ephemeral=True,
+            )
             return
-        note = "Wähle den Termin aus, den du entfernen möchtest."
-        if len(rows) > 25:
-            note += " Es werden die ersten 25 Termine angezeigt; weitere kannst du mit `/mdplan remove` löschen."
         await interaction.response.send_message(
-            note,
+            f"Wähle den Termin aus, den du entfernen möchtest. Seite 1/{max(1, math.ceil(len(rows) / 25))}",
             view=RemoveEntryView(self.bot, self.draft_id, self.owner_id, rows),
             ephemeral=True,
         )
@@ -601,13 +866,17 @@ class PlannerBuilderView(discord.ui.View):
     async def entries(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
         rows = await _entry_rows(self.bot, self.draft_id)
         lines = [
-            f"`#{int(_row_value(row, 'id', 0))}` **{DAY_NAMES[int(_row_value(row, 'day_index', 0))]}** · "
+            f"`#{int(_row_value(row, 'id', 0))}` **{DAY_NAMES[max(0, min(6, int(_row_value(row, 'day_index', 0) or 0)))]}** · "
             f"{_row_value(row, 'time_text', '')} · {_row_value(row, 'kind', 'Termin')}"
             for row in rows
         ]
         text = "**Aktuelle Termine**\n" + ("\n".join(lines) if lines else "Noch keine Termine.")
         chunks = _split_text(text, 1900)
-        await interaction.response.send_message(chunks[0], ephemeral=True)
+        await interaction.response.send_message(
+            chunks[0],
+            view=PlannerBuilderView(self.bot, self.draft_id, self.owner_id),
+            ephemeral=True,
+        )
         for chunk in chunks[1:]:
             await interaction.followup.send(chunk, ephemeral=True)
 
@@ -621,7 +890,7 @@ class PlannerBuilderView(discord.ui.View):
             (self.draft_id, interaction.guild_id, self.owner_id),
         )
         if not draft:
-            await interaction.response.send_message("Entwurf nicht gefunden.", ephemeral=True)
+            await _send_no_draft(interaction, self.bot, self.owner_id, "Dieser Entwurf existiert nicht mehr.")
             return
         channel = (
             interaction.guild.get_channel(int(draft["channel_id"]))
@@ -629,11 +898,15 @@ class PlannerBuilderView(discord.ui.View):
             else interaction.channel
         )
         if not isinstance(channel, discord.abc.Messageable):
-            await interaction.response.send_message("Zielkanal nicht gefunden.", ephemeral=True)
+            await interaction.response.send_message(
+                "Zielkanal nicht gefunden.",
+                view=PlannerBuilderView(self.bot, self.draft_id, self.owner_id),
+                ephemeral=True,
+            )
             return
         chunks = await _render_draft(self.bot, self.draft_id, interaction.guild_id, self.owner_id)
         if not chunks:
-            await interaction.response.send_message("Entwurf nicht gefunden.", ephemeral=True)
+            await _send_no_draft(interaction, self.bot, self.owner_id, "Dieser Entwurf existiert nicht mehr.")
             return
         for chunk in chunks:
             await channel.send(
@@ -644,18 +917,24 @@ class PlannerBuilderView(discord.ui.View):
             "UPDATE md_weekly_drafts SET published_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",
             (self.draft_id,),
         )
-        await interaction.response.send_message(f"Wochenplan in {channel.mention} veröffentlicht.", ephemeral=True)
+        await interaction.response.send_message(
+            f"Wochenplan in {channel.mention} veröffentlicht.",
+            view=PlannerBuilderView(self.bot, self.draft_id, self.owner_id),
+            ephemeral=True,
+        )
 
     @discord.ui.button(label="Hilfe", emoji="❓", style=discord.ButtonStyle.secondary, row=1)
     async def help_button(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
         await interaction.response.send_message(
             "**MD-Plan Bedienung**\n"
             "➕ **Hinzufügen** – Termin per Formular eintragen\n"
-            "🗑️ **Entfernen** – Termin direkt aus einer Liste auswählen\n"
+            "🗑️ **Entfernen** – Termin direkt aus der Liste auswählen; bei >25 Einträgen mit Seitensteuerung\n"
             "👁️ **Vorschau** – fertigen Wochenplan ansehen\n"
             "📋 **Termine** – alle Einträge mit IDs anzeigen\n"
             "📨 **Veröffentlichen** – Wochenplan in den Zielkanal senden\n\n"
-            "Neue Entwürfe enthalten standardmäßig **Mittwoch und Samstag ab 22:30 Uhr RP mit Staatsfraktionen**.",
+            "Neue Entwürfe enthalten standardmäßig **Mittwoch und Samstag ab 22:30 Uhr RP mit Staatsfraktionen**.\n"
+            "Wenn eine Aktion einen anderen Schritt braucht, bekommst du dafür direkt einen Button statt nur eines Command-Hinweises.",
+            view=PlannerBuilderView(self.bot, self.draft_id, self.owner_id),
             ephemeral=True,
         )
 
@@ -674,10 +953,7 @@ class MDBellWeeklyPlanner(
     async def _draft(self, interaction: discord.Interaction):
         if interaction.guild_id is None:
             return None
-        return await self.bot.database.fetchone(
-            "SELECT * FROM md_weekly_drafts WHERE guild_id=? AND owner_id=? ORDER BY id DESC LIMIT 1",
-            (interaction.guild_id, interaction.user.id),
-        )
+        return await _latest_draft(self.bot, interaction.guild_id, interaction.user.id)
 
     @app_commands.command(name="start", description="Neuen MD-Bell-Wochenplan starten und Button-Menü öffnen.")
     @app_commands.describe(
@@ -706,24 +982,15 @@ class MDBellWeeklyPlanner(
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
 
-        old = await self._draft(interaction)
-        if old:
-            draft_id = int(old["id"])
-            await self.bot.database.execute("DELETE FROM md_weekly_entries WHERE draft_id=?", (draft_id,))
-            await self.bot.database.execute(
-                "UPDATE md_weekly_drafts SET week_start=?,channel_id=?,updated_at=CURRENT_TIMESTAMP,published_at=NULL WHERE id=?",
-                (monday.isoformat(), int(target.id), draft_id),
-            )
-        else:
-            draft_id = await self.bot.database.execute(
-                "INSERT INTO md_weekly_drafts(guild_id,owner_id,week_start,channel_id) VALUES(?,?,?,?)",
-                (interaction.guild_id, interaction.user.id, monday.isoformat(), int(target.id)),
-            )
-
-        if standard_rp:
-            await _insert_standard_rp(self.bot, draft_id)
-        await _touch_draft(self.bot, draft_id)
-
+        draft_id = await _create_or_reset_draft(
+            self.bot,
+            interaction.guild_id,
+            interaction.user.id,
+            int(target.id),
+            monday,
+            standard_rp=standard_rp,
+            reset_existing=True,
+        )
         count = len(await _entry_rows(self.bot, draft_id))
         await interaction.response.send_message(
             embed=EmbedFactory.success(
@@ -744,7 +1011,7 @@ class MDBellWeeklyPlanner(
     async def builder(self, interaction: discord.Interaction) -> None:
         draft = await self._draft(interaction)
         if not draft:
-            await interaction.response.send_message("Kein Entwurf. Starte mit `/mdplan start`.", ephemeral=True)
+            await _send_no_draft(interaction, self.bot, interaction.user.id)
             return
         rows = await _entry_rows(self.bot, int(draft["id"]))
         await interaction.response.send_message(
@@ -761,7 +1028,7 @@ class MDBellWeeklyPlanner(
     async def add(self, interaction: discord.Interaction) -> None:
         draft = await self._draft(interaction)
         if not draft:
-            await interaction.response.send_message("Kein Entwurf. Starte mit `/mdplan start`.", ephemeral=True)
+            await _send_no_draft(interaction, self.bot, interaction.user.id)
             return
         await interaction.response.send_modal(PlannerEntryModal(self.bot, int(draft["id"]), interaction.user.id))
 
@@ -770,7 +1037,7 @@ class MDBellWeeklyPlanner(
     async def preview(self, interaction: discord.Interaction) -> None:
         draft = await self._draft(interaction)
         if not draft:
-            await interaction.response.send_message("Kein Entwurf.", ephemeral=True)
+            await _send_no_draft(interaction, self.bot, interaction.user.id)
             return
         await _send_preview(interaction, self.bot, int(draft["id"]), interaction.user.id)
 
@@ -783,7 +1050,7 @@ class MDBellWeeklyPlanner(
     ) -> None:
         draft = await self._draft(interaction)
         if not draft or interaction.guild is None:
-            await interaction.response.send_message("Kein Entwurf.", ephemeral=True)
+            await _send_no_draft(interaction, self.bot, interaction.user.id)
             return
         target = kanal or (
             interaction.guild.get_channel(int(draft["channel_id"]))
@@ -791,11 +1058,15 @@ class MDBellWeeklyPlanner(
             else interaction.channel
         )
         if not isinstance(target, discord.abc.Messageable):
-            await interaction.response.send_message("Zielkanal nicht gefunden.", ephemeral=True)
+            await interaction.response.send_message(
+                "Zielkanal nicht gefunden.",
+                view=PlannerBuilderView(self.bot, int(draft["id"]), interaction.user.id),
+                ephemeral=True,
+            )
             return
         chunks = await _render_draft(self.bot, int(draft["id"]), interaction.guild_id, interaction.user.id)
         if not chunks:
-            await interaction.response.send_message("Entwurf nicht gefunden.", ephemeral=True)
+            await _send_no_draft(interaction, self.bot, interaction.user.id, "Dieser Entwurf existiert nicht mehr.")
             return
         for chunk in chunks:
             await target.send(
@@ -806,18 +1077,22 @@ class MDBellWeeklyPlanner(
             "UPDATE md_weekly_drafts SET published_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",
             (int(draft["id"]),),
         )
-        await interaction.response.send_message(f"Wochenplan in {target.mention} veröffentlicht.", ephemeral=True)
+        await interaction.response.send_message(
+            f"Wochenplan in {target.mention} veröffentlicht.",
+            view=PlannerBuilderView(self.bot, int(draft["id"]), interaction.user.id),
+            ephemeral=True,
+        )
 
     @app_commands.command(name="list", description="Termine im aktuellen Entwurf mit IDs anzeigen.")
     @app_commands.default_permissions(manage_messages=True)
     async def list_entries(self, interaction: discord.Interaction) -> None:
         draft = await self._draft(interaction)
         if not draft:
-            await interaction.response.send_message("Kein Entwurf.", ephemeral=True)
+            await _send_no_draft(interaction, self.bot, interaction.user.id)
             return
         rows = await _entry_rows(self.bot, int(draft["id"]))
         lines = [
-            f"`#{int(_row_value(row, 'id', 0))}` **{DAY_NAMES[int(_row_value(row, 'day_index', 0))]}** · "
+            f"`#{int(_row_value(row, 'id', 0))}` **{DAY_NAMES[max(0, min(6, int(_row_value(row, 'day_index', 0) or 0)))]}** · "
             f"{_row_value(row, 'time_text', '')} · {_row_value(row, 'kind', 'Termin')}"
             for row in rows
         ]
@@ -826,6 +1101,7 @@ class MDBellWeeklyPlanner(
                 title="Wochenplan-Termine",
                 description="\n".join(lines)[:3900] if lines else "Noch keine Termine.",
             ),
+            view=PlannerBuilderView(self.bot, int(draft["id"]), interaction.user.id),
             ephemeral=True,
         )
 
@@ -834,7 +1110,7 @@ class MDBellWeeklyPlanner(
     async def remove(self, interaction: discord.Interaction, termin_id: int) -> None:
         draft = await self._draft(interaction)
         if not draft:
-            await interaction.response.send_message("Kein Entwurf.", ephemeral=True)
+            await _send_no_draft(interaction, self.bot, interaction.user.id)
             return
         draft_id = int(draft["id"])
         row = await self.bot.database.fetchone(
@@ -842,7 +1118,11 @@ class MDBellWeeklyPlanner(
             (termin_id, draft_id),
         )
         if not row:
-            await interaction.response.send_message("Termin nicht gefunden.", ephemeral=True)
+            await interaction.response.send_message(
+                "Termin nicht gefunden.",
+                view=PlannerBuilderView(self.bot, draft_id, interaction.user.id),
+                ephemeral=True,
+            )
             return
         await self.bot.database.execute(
             "DELETE FROM md_weekly_entries WHERE id=? AND draft_id=?",
