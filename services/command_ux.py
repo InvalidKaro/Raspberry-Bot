@@ -14,6 +14,7 @@ from views.command_actions import CommandActionsView, ErrorActionsView
 logger = logging.getLogger(__name__)
 
 _PROGRESS_MARKER = "raspberry-bot:command-progress"
+_RESPONSE_EXCEPTIONS = (discord.NotFound, discord.HTTPException, discord.ClientException)
 
 
 def _bar(done: int, total: int, width: int = 12) -> str:
@@ -81,6 +82,10 @@ def _message_has_progress_marker(message: discord.InteractionMessage) -> bool:
     )
 
 
+def _message_has_visible_payload(message: discord.InteractionMessage) -> bool:
+    return bool(message.content or message.embeds or message.attachments or message.components)
+
+
 class CommandUXService:
     """Cross-cutting UI behavior for every application command.
 
@@ -135,12 +140,12 @@ class CommandUXService:
 
             try:
                 message = await interaction.original_response()
-            except (discord.NotFound, discord.HTTPException):
+            except _RESPONSE_EXCEPTIONS:
                 return
 
             # A command that already rendered content or a custom View owns its
             # UX. Do not overwrite it with the generic progress fallback.
-            if message.content or message.embeds or message.components:
+            if _message_has_visible_payload(message):
                 return
 
             started = self._started.get(interaction.id)
@@ -151,7 +156,7 @@ class CommandUXService:
             self._auto_progress.add(interaction.id)
         except asyncio.CancelledError:
             raise
-        except (discord.NotFound, discord.HTTPException):
+        except _RESPONSE_EXCEPTIONS:
             logger.debug("Could not render automatic command progress for %s", command_name)
         except Exception:
             logger.exception("Automatic command progress failed for %s", command_name)
@@ -170,7 +175,7 @@ class CommandUXService:
 
         try:
             message = await interaction.original_response()
-        except (discord.NotFound, discord.HTTPException):
+        except _RESPONSE_EXCEPTIONS:
             self._auto_progress.discard(interaction.id)
             return
 
@@ -186,10 +191,16 @@ class CommandUXService:
             if message.components:
                 return
 
+            # A quick deferred command can finish before the automatic progress
+            # card appears and may put its result in a follow-up. Never create a
+            # blank original response just to host buttons.
+            if not _message_has_visible_payload(message):
+                return
+
             await interaction.edit_original_response(
                 view=CommandActionsView(self.bot, interaction.user.id, command_name),
             )
-        except (discord.NotFound, discord.HTTPException):
+        except _RESPONSE_EXCEPTIONS:
             logger.debug("Could not attach action suggestions for %s", command_name)
         finally:
             self._auto_progress.discard(interaction.id)
@@ -216,7 +227,7 @@ class CommandUXService:
                     embed=_failed_progress_embed(command_name, duration_ms),
                     view=ErrorActionsView(self.bot, interaction.user.id, command_name),
                 )
-        except (discord.NotFound, discord.HTTPException):
+        except _RESPONSE_EXCEPTIONS:
             logger.debug("Could not finalize failed command progress for %s", command_name)
         finally:
             self._auto_progress.discard(interaction.id)
