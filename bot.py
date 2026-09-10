@@ -23,6 +23,8 @@ from services.system_metrics import SystemMetricsSampler
 from services.audit import AuditService
 from services.access_control import AccessControl
 from services.command_hubs import compact_command_tree, prepare_extension_unload
+from services.command_ux import CommandUXService
+from services.discord_ui_guard import install_discord_ui_guard
 from services.feature_flags import FeatureFlagService
 
 logger = logging.getLogger(__name__)
@@ -108,6 +110,11 @@ class RaspberryBot(commands.Bot):
             activity=discord.Game(name="/help • Raspberry-Bot"),
         )
 
+        # Install before any persistent or temporary View is serialized. This
+        # protects the entire bot from Discord 50035 errors caused by text
+        # symbols that are not valid component emoji.
+        install_discord_ui_guard()
+
         self.settings = settings
         self.database = Database(settings.database_path)
         self.cache = CacheManager()
@@ -118,6 +125,7 @@ class RaspberryBot(commands.Bot):
         self.audit = AuditService(self.database)
         self.access = AccessControl(self)
         self.feature_flags = FeatureFlagService(self.database)
+        self.command_ux = CommandUXService(self)
         self._command_started: dict[int, float] = {}
         self._handled_check_interactions: set[int] = set()
 
@@ -182,6 +190,8 @@ class RaspberryBot(commands.Bot):
                 self._command_started.pop(interaction.id, None)
                 await interaction.response.send_message(embed=embed, ephemeral=True)
                 return False
+
+            self.command_ux.begin(interaction, command_name)
             return True
 
         self.tree.interaction_check = _maintenance_check
@@ -248,13 +258,14 @@ class RaspberryBot(commands.Bot):
         interaction: discord.Interaction,
         command: app_commands.Command | app_commands.ContextMenu,
     ) -> None:
+        started = self._command_started.pop(interaction.id, None)
+        duration_ms = (time.perf_counter() - started) * 1000 if started else None
+
         try:
             await self.database.execute(
                 "INSERT INTO command_usage (guild_id, user_id, command_name) VALUES (?, ?, ?)",
                 (interaction.guild_id, interaction.user.id, command.qualified_name),
             )
-            started = self._command_started.pop(interaction.id, None)
-            duration_ms = (time.perf_counter() - started) * 1000 if started else None
             await self.database.execute(
                 "INSERT INTO command_analytics(guild_id,user_id,command_name,success,duration_ms) VALUES(?,?,?,?,?)",
                 (interaction.guild_id, interaction.user.id, command.qualified_name, 1, duration_ms),
@@ -262,7 +273,17 @@ class RaspberryBot(commands.Bot):
         except Exception:
             logger.exception("Failed to persist command usage for %s", command.qualified_name)
 
+        try:
+            await self.command_ux.complete(
+                interaction,
+                command.qualified_name,
+                duration_ms=duration_ms,
+            )
+        except Exception:
+            logger.exception("Failed to finalize command UX for %s", command.qualified_name)
+
     async def close(self) -> None:
+        await self.command_ux.close()
         await self.system_metrics.stop()
         await self.database.close()
         await super().close()
@@ -280,15 +301,27 @@ async def handle_tree_error(
 
     original = getattr(error, "original", error)
     command_name = interaction.command.qualified_name if interaction.command else "unknown"
+    started = getattr(interaction.client, "_command_started", {}).pop(interaction.id, None)
+    duration_ms = (time.perf_counter() - started) * 1000 if started else None
+
     try:
-        started = getattr(interaction.client, "_command_started", {}).pop(interaction.id, None)
-        duration_ms = (time.perf_counter() - started) * 1000 if started else None
         await interaction.client.database.execute(
             "INSERT INTO command_analytics(guild_id,user_id,command_name,success,duration_ms,error_type) VALUES(?,?,?,?,?,?)",
             (interaction.guild_id, interaction.user.id, command_name, 0, duration_ms, type(original).__name__),
         )
     except Exception:
         pass
+
+    command_ux = getattr(interaction.client, "command_ux", None)
+    if command_ux is not None:
+        try:
+            await command_ux.fail(
+                interaction,
+                command_name,
+                duration_ms=duration_ms,
+            )
+        except Exception:
+            logger.exception("Failed to finalize failed command UX for %s", command_name)
 
     expected_error = isinstance(
         error,
@@ -348,11 +381,13 @@ async def handle_tree_error(
             description=f"An unexpected error occurred.\n\nReference: `{error_id}`",
         )
 
+    view = command_ux.error_view(interaction, command_name) if command_ux is not None else None
+
     try:
         if interaction.response.is_done():
-            await interaction.followup.send(embed=embed, ephemeral=True)
+            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
         else:
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
     except discord.HTTPException:
         logger.exception("Failed to send application command error response")
 
