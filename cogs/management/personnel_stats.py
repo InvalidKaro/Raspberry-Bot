@@ -196,7 +196,7 @@ class Personnel(
         )
 
     @app_commands.command(name="record", description="Einweisungen/BWG eintragen.")
-    @app_commands.autocomplete(person=_name_auto)
+    @app_commands.autocomplete(person=_name_auto, zeitraum=_period_auto)
     @app_commands.default_permissions(manage_messages=True)
     async def record(
         self,
@@ -257,6 +257,7 @@ class Personnel(
         )
 
     @app_commands.command(name="bulkrecord", description="Gleiche Aktivität für mehrere gespeicherte Personen eintragen.")
+    @app_commands.autocomplete(zeitraum=_period_auto)
     @app_commands.default_permissions(manage_messages=True)
     async def bulkrecord(
         self,
@@ -371,6 +372,68 @@ class Personnel(
             ephemeral=True,
         )
 
+    @app_commands.command(name="clearall", description="Löscht ALLE Perso-Aktivitätseinträge aus allen Zeiträumen.")
+    @app_commands.describe(
+        bestaetigung="Zum Löschen exakt ALLE EINTRÄGE LÖSCHEN eingeben",
+    )
+    @app_commands.default_permissions(manage_messages=True)
+    async def clearall(self, interaction: discord.Interaction, bestaetigung: str):
+        required = "ALLE EINTRÄGE LÖSCHEN"
+        if bestaetigung.strip() != required:
+            await interaction.response.send_message(
+                embed=EmbedFactory.error(
+                    title="Perso-Komplettreset nicht ausgeführt",
+                    description=(
+                        "Dieser Befehl löscht **alle Einweisungs-/BWG-Einträge aus allen Wochen**.\n\n"
+                        f"Zur Bestätigung exakt eingeben:\n`{required}`\n\n"
+                        "Mitarbeiterprofile, Notizen, Qualifikationen, Ziele und Ranghistorie bleiben erhalten."
+                    ),
+                ),
+                ephemeral=True,
+            )
+            return
+
+        summary = await self.bot.database.fetchone(
+            "SELECT COUNT(*) AS records,COALESCE(SUM(inductions),0) AS inductions,"
+            "COALESCE(SUM(bwg),0) AS bwg,COUNT(DISTINCT period_key) AS periods FROM personnel_records"
+        )
+        records = int(summary["records"] or 0) if summary else 0
+        inductions = int(summary["inductions"] or 0) if summary else 0
+        bwg = int(summary["bwg"] or 0) if summary else 0
+        periods = int(summary["periods"] or 0) if summary else 0
+
+        await self.bot.database.execute("DELETE FROM personnel_records")
+
+        if hasattr(self.bot, "audit"):
+            await self.bot.audit.record(
+                "perso.records.clear_all",
+                guild_id=interaction.guild_id,
+                actor_id=interaction.user.id,
+                target_type="personnel_records",
+                target_id="all",
+                before={
+                    "records": records,
+                    "periods": periods,
+                    "einweisungen": inductions,
+                    "bwg": bwg,
+                },
+                after={"records": 0, "periods": 0, "einweisungen": 0, "bwg": 0},
+            )
+
+        await interaction.response.send_message(
+            embed=EmbedFactory.success(
+                title="Alle Perso-Aktivitätseinträge gelöscht",
+                description=(
+                    f"Gelöschte Einträge: **{records}**\n"
+                    f"Zeiträume: **{periods}**\n"
+                    f"Einweisungen: **{inductions} → 0**\n"
+                    f"BWG: **{bwg} → 0**\n\n"
+                    "Mitarbeiterprofile und Personalakten wurden **nicht** gelöscht."
+                ),
+            ),
+            ephemeral=True,
+        )
+
     @app_commands.command(name="note", description="Interne Notiz zur Personalakte hinzufügen.")
     @app_commands.autocomplete(person=_name_auto)
     @app_commands.default_permissions(manage_messages=True)
@@ -416,7 +479,7 @@ class Personnel(
         )
 
     @app_commands.command(name="goal", description="Zielwert für eine Person und einen Zeitraum setzen.")
-    @app_commands.autocomplete(person=_name_auto)
+    @app_commands.autocomplete(person=_name_auto, zeitraum=_period_auto)
     @app_commands.choices(
         typ=[
             app_commands.Choice(name="Gesamt", value="activity"),
@@ -453,6 +516,7 @@ class Personnel(
         )
 
     @app_commands.command(name="overview", description="Gesamtübersicht aller aktiven Angestellten.")
+    @app_commands.autocomplete(zeitraum=_period_auto)
     async def overview(self, interaction: discord.Interaction, zeitraum: str | None = None):
         rows = await self.service.totals(interaction.guild_id, period_like=zeitraum)
         if not rows:
@@ -470,6 +534,7 @@ class Personnel(
         )
 
     @app_commands.command(name="leaderboard", description="Ranking nach Einweisungen, BWG oder Gesamtaktivität.")
+    @app_commands.autocomplete(zeitraum=_period_auto)
     @app_commands.choices(
         metric=[
             app_commands.Choice(name="Gesamt", value="activity"),
@@ -600,6 +665,7 @@ class Personnel(
         )
 
     @app_commands.command(name="report", description="Kompletten Perso-Bericht mit Übersicht und Diagramm erstellen.")
+    @app_commands.autocomplete(zeitraum=_period_auto)
     async def report(self, interaction: discord.Interaction, zeitraum: str | None = None):
         await interaction.response.defer(ephemeral=True)
         rows = await self.service.totals(interaction.guild_id, period_like=zeitraum)
@@ -621,6 +687,7 @@ class Personnel(
         )
 
     @app_commands.command(name="export", description="Perso-Daten als Übersicht, Diagramm oder CSV exportieren.")
+    @app_commands.autocomplete(zeitraum=_period_auto)
     @app_commands.choices(
         format=[
             app_commands.Choice(name="Übersicht PNG", value="png"),
@@ -651,6 +718,7 @@ class Personnel(
         )
 
     @app_commands.command(name="import", description="CSV mit Name;Einweisungen;BWG importieren.")
+    @app_commands.autocomplete(zeitraum=_period_auto)
     @app_commands.default_permissions(manage_messages=True)
     async def import_csv(
         self,
@@ -697,11 +765,11 @@ class Personnel(
     async def stats(self, interaction: discord.Interaction):
         await interaction.response.send_message(
             embed=EmbedFactory.info(
-                title="Perso 2.3",
+                title="Perso 2.4",
                 description=(
-                    "Profile, Einträge, Wochenreset, Zeitraum-Autocomplete, Bulk-Import, Notizen, "
-                    "Qualifikationen, Ziele, Ranghistorie, Leaderboard, Trends, Reports, PNG/CSV und "
-                    "Archivierung sind aktiv."
+                    "Profile, Einträge, Wochenreset, Komplettreset, Zeitraum-Autocomplete, automatische "
+                    "Kalenderwochen, Bulk-Import, Notizen, Qualifikationen, Ziele, Ranghistorie, "
+                    "Leaderboard, Trends, Reports, PNG/CSV und Archivierung sind aktiv."
                 ),
             ),
             ephemeral=True,
