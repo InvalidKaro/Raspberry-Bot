@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import csv
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from io import StringIO
 
 
@@ -135,13 +135,25 @@ class PersonnelService:
         )
 
     async def totals(self, guild_id: int, *, period_like: str | None = None):
-        """Return every active profile and all linked records, globally."""
+        """Return active personnel statistics.
+
+        Without an explicit period, only records from the current Monday-Sunday
+        calendar week are included. Explicit period filters keep historical
+        reports/comparisons available.
+        """
         del guild_id
         params: list[object] = []
         join = "LEFT JOIN personnel_records r ON r.personnel_id=m.id"
+
         if period_like:
             join += " AND r.period_key LIKE ?"
             params.append(period_like)
+        else:
+            today = date.today()
+            week_start = today - timedelta(days=today.weekday())
+            week_end = week_start + timedelta(days=6)
+            join += " AND r.record_date>=? AND r.record_date<=?"
+            params.extend((week_start.isoformat(), week_end.isoformat()))
 
         sql = f"""
             SELECT
