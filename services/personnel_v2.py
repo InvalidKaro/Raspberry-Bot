@@ -127,7 +127,9 @@ class PersonnelService:
         note: str | None = None,
     ):
         d = record_date or date.today().isoformat()
-        p = period_key or datetime.fromisoformat(d).strftime("%Y-%m")
+        record_day = datetime.fromisoformat(d).date()
+        iso_year, iso_week, _ = record_day.isocalendar()
+        p = period_key or f"{iso_year}-KW{iso_week:02d}"
         return await self.bot.database.execute(
             "INSERT INTO personnel_records(guild_id,personnel_id,record_date,period_key,inductions,bwg,note,created_by) "
             "VALUES(?,?,?,?,?,?,?,?)",
