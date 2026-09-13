@@ -1,8 +1,14 @@
 from __future__ import annotations
 
-from services.action_registry import action_ids_for_command, action_specs_for_command
-from services.health_checks import HEALTH_SERVICES, HealthResult, summarize
-from services.server_score import ScoreInput, calculate_server_score
+import pathlib
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from services.action_registry import action_ids_for_command, action_specs_for_command  # noqa: E402
+from services.health_checks import HEALTH_SERVICES, HealthResult, summarize  # noqa: E402
+from services.server_score import ScoreInput, calculate_server_score  # noqa: E402
 
 
 def test_action_contexts() -> None:
