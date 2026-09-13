@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import math
+import re
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from aiohttp import ClientSession, ClientTimeout, web
 
@@ -13,7 +15,11 @@ TEMPLATE = BASE_DIR / "templates" / "index.html"
 
 PRIMARY = "https://api.adsb.lol/v2/point/{lat}/{lon}/{radius}"
 FALLBACK = "https://api.airplanes.live/v2/point/{lat}/{lon}/{radius}"
+PHOTO_BY_REG = "https://api.planespotters.net/pub/photos/reg/{value}"
+PHOTO_BY_HEX = "https://api.planespotters.net/pub/photos/hex/{value}"
+PHOTO_USER_AGENT = "HomePi-FlightRadar/1.1 (+https://github.com/InvalidKaro/Raspberry-Bot)"
 CACHE_TTL = 4.0
+PHOTO_CACHE_TTL = 21600.0
 MAX_RADIUS_NM = 250.0
 
 MOBILE_PATCH = r"""
@@ -133,6 +139,8 @@ MOBILE_PATCH = r"""
 
 _cache: dict[tuple[float, float, float], tuple[float, dict[str, Any]]] = {}
 _cache_lock = asyncio.Lock()
+_photo_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_photo_lock = asyncio.Lock()
 
 
 def _num(value: str | None, default: float, low: float, high: float) -> float:
@@ -250,6 +258,57 @@ async def _aircraft_snapshot(lat: float, lon: float, radius: float) -> dict[str,
     return result
 
 
+async def _aircraft_photo(registration: str, hex_code: str) -> dict[str, Any]:
+    registration = registration.strip().upper()
+    hex_code = hex_code.strip().upper()
+    lookup_type = "reg" if registration else "hex"
+    value = registration or hex_code
+    if not value or not re.fullmatch(r"[A-Z0-9-]{2,16}", value):
+        return {"ok": True, "photo": None}
+
+    cache_key = f"{lookup_type}:{value}"
+    now = time.monotonic()
+    async with _photo_lock:
+        cached = _photo_cache.get(cache_key)
+        if cached and now - cached[0] < PHOTO_CACHE_TTL:
+            return {**cached[1], "cached": True}
+
+    template = PHOTO_BY_REG if lookup_type == "reg" else PHOTO_BY_HEX
+    url = template.format(value=quote(value, safe="-"))
+    result: dict[str, Any] = {"ok": True, "photo": None, "cached": False}
+    try:
+        timeout = ClientTimeout(total=7)
+        async with ClientSession(timeout=timeout) as session:
+            async with session.get(url, headers={"User-Agent": PHOTO_USER_AGENT}) as response:
+                if response.status == 404:
+                    payload: dict[str, Any] = {}
+                else:
+                    response.raise_for_status()
+                    payload = await response.json(content_type=None)
+        photos = payload.get("photos") if isinstance(payload, dict) else None
+        first = photos[0] if isinstance(photos, list) and photos and isinstance(photos[0], dict) else None
+        if first:
+            large = first.get("thumbnail_large") if isinstance(first.get("thumbnail_large"), dict) else {}
+            thumb = first.get("thumbnail") if isinstance(first.get("thumbnail"), dict) else {}
+            src = large.get("src") or thumb.get("src")
+            if src:
+                result["photo"] = {
+                    "src": src,
+                    "link": first.get("link"),
+                    "photographer": first.get("photographer"),
+                    "source": "Planespotters.net",
+                }
+    except Exception:
+        result = {"ok": False, "photo": None, "message": "Aircraft photo temporarily unavailable", "cached": False}
+
+    async with _photo_lock:
+        _photo_cache[cache_key] = (now, result)
+        if len(_photo_cache) > 512:
+            oldest = min(_photo_cache.items(), key=lambda item: item[1][0])[0]
+            _photo_cache.pop(oldest, None)
+    return result
+
+
 async def index(_: web.Request) -> web.Response:
     html = TEMPLATE.read_text(encoding="utf-8")
     # CARTO began requiring an API key for its raster basemaps in 2026.
@@ -283,6 +342,11 @@ async def api_aircraft(request: web.Request) -> web.Response:
     return web.json_response(result, headers={"Cache-Control": "no-store"})
 
 
+async def api_photo(request: web.Request) -> web.Response:
+    result = await _aircraft_photo(request.query.get("registration", ""), request.query.get("hex", ""))
+    return web.json_response(result, headers={"Cache-Control": "private, max-age=300"})
+
+
 async def health(_: web.Request) -> web.Response:
     return web.json_response({"ok": True, "service": "homepi-flight-radar"})
 
@@ -291,6 +355,7 @@ def create_app() -> web.Application:
     app = web.Application()
     app.router.add_get("/", index)
     app.router.add_get("/api/aircraft", api_aircraft)
+    app.router.add_get("/api/photo", api_photo)
     app.router.add_get("/health", health)
     return app
 
