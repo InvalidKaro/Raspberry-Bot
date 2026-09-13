@@ -11,7 +11,12 @@ class ScoreInput:
     disk_percent: float
     services_online_ratio: float
     network_ok: bool
-    errors_24h: int = 0
+    latency_ms: float | None = None
+    dns_ok: bool = True
+    internet_outages_24h: int = 0
+    service_crashes_24h: int = 0
+    bot_errors_24h: int = 0
+    reboots_24h: int = 0
     uptime_seconds: int = 0
 
 
@@ -33,8 +38,10 @@ WEIGHTS: dict[str, float] = {
     "disk": 0.12,
     "services": 0.20,
     "network": 0.08,
-    "errors": 0.05,
+    "stability": 0.05,
 }
+
+SYSTEM_COMPONENTS = ("cpu", "ram", "temperature", "disk")
 
 
 def _clamp(value: float, low: float = 0.0, high: float = 100.0) -> float:
@@ -60,13 +67,26 @@ def _temperature_score(value: float | None) -> float:
     return 100.0 * (85.0 - value) / 30.0
 
 
-def _error_score(errors_24h: int) -> float:
-    errors = max(0, int(errors_24h))
-    if errors == 0:
-        return 100.0
-    if errors >= 20:
+def _network_score(data: ScoreInput) -> float:
+    if not data.network_ok:
         return 0.0
-    return max(0.0, 100.0 - errors * 5.0)
+    score = 100.0
+    if data.latency_ms is not None:
+        latency = max(0.0, float(data.latency_ms))
+        if latency > 80:
+            score -= min(45.0, (latency - 80.0) * 0.22)
+    if not data.dns_ok:
+        score -= 35.0
+    return _clamp(score)
+
+
+def _stability_score(data: ScoreInput) -> float:
+    score = 100.0
+    score -= max(0, int(data.internet_outages_24h)) * 12.0
+    score -= max(0, int(data.service_crashes_24h)) * 10.0
+    score -= max(0, int(data.bot_errors_24h)) * 3.0
+    score -= max(0, int(data.reboots_24h)) * 4.0
+    return _clamp(score)
 
 
 def grade_for(score: int) -> str:
@@ -79,12 +99,22 @@ def grade_for(score: int) -> str:
     return "critical"
 
 
-def calculate_server_score(data: ScoreInput) -> ScoreBreakdown:
-    """Return a stable 0-100 score from smoothed metrics.
+def status_for(score: int) -> str:
+    if score >= 90:
+        return "GREEN"
+    if score >= 75:
+        return "YELLOW"
+    if score >= 55:
+        return "ORANGE"
+    return "RED"
 
-    The caller should pass rolling CPU/RAM values where available. The scoring
-    function deliberately uses broad soft/hard ranges so a brief CPU spike does
-    not collapse the entire HomePi health score.
+
+def calculate_server_score(data: ScoreInput) -> ScoreBreakdown:
+    """Return a stable, explainable 0-100 HomePi score.
+
+    Broad soft/hard thresholds keep short Raspberry-Pi CPU spikes from dominating
+    the result. Service availability has the largest single operational weight,
+    while recurring incidents are reflected separately as stability.
     """
 
     components = {
@@ -93,8 +123,8 @@ def calculate_server_score(data: ScoreInput) -> ScoreBreakdown:
         "temperature": _temperature_score(data.temperature_c),
         "disk": _inverse_usage_score(data.disk_percent, soft=70, hard=97),
         "services": _clamp(data.services_online_ratio * 100.0),
-        "network": 100.0 if data.network_ok else 0.0,
-        "errors": _error_score(data.errors_24h),
+        "network": _network_score(data),
+        "stability": _stability_score(data),
     }
     weighted = sum(components[name] * WEIGHTS[name] for name in WEIGHTS)
     score = int(round(_clamp(weighted)))
@@ -104,3 +134,20 @@ def calculate_server_score(data: ScoreInput) -> ScoreBreakdown:
         components={name: round(value, 1) for name, value in components.items()},
         weights=dict(WEIGHTS),
     )
+
+
+def compatibility_breakdown(data: ScoreInput) -> dict[str, int | str]:
+    """Expose the legacy Intelligence score fields from the shared calculation."""
+
+    result = calculate_server_score(data)
+    components = result.components
+    system_weight = sum(WEIGHTS[name] for name in SYSTEM_COMPONENTS)
+    system = sum(components[name] * WEIGHTS[name] for name in SYSTEM_COMPONENTS) / system_weight
+    return {
+        "overall": result.score,
+        "status": status_for(result.score),
+        "system": round(system),
+        "network": round(components["network"]),
+        "services": round(components["services"]),
+        "stability": round(components["stability"]),
+    }
