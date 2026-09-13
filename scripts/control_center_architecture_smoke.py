@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from services.action_registry import action_ids_for_command, action_specs_for_command
+from services.health_checks import HEALTH_SERVICES, HealthResult, summarize
 from services.server_score import ScoreInput, calculate_server_score
 
 
@@ -13,6 +14,18 @@ def test_action_contexts() -> None:
     assert "related" in media
     assert generic == ("related", "control_center")
     assert len(action_specs_for_command("admin diagnose")) <= 5
+
+
+def test_health_model() -> None:
+    assert HEALTH_SERVICES["radar"] == "homepi-flight-radar"
+    results = [
+        HealthResult("bot", "online", 3.0, 10.0, "ok"),
+        HealthResult("radar", "degraded", 5.0, 11.0, "starting"),
+    ]
+    summary = summarize(results)
+    assert summary["status"] == "degraded"
+    assert summary["counts"] == {"online": 1, "degraded": 1, "offline": 0}
+    assert summary["last_check"] == 11.0
 
 
 def test_server_score() -> None:
@@ -61,6 +74,7 @@ def test_server_score() -> None:
 
 def main() -> None:
     test_action_contexts()
+    test_health_model()
     test_server_score()
     print("control-center architecture smoke: ok")
 
