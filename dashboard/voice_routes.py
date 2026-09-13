@@ -21,8 +21,11 @@ MAX_TEXT = 500
 RATE_LIMIT = 30
 RATE_WINDOW = 60.0
 CONFIRM_TTL = 60.0
+MAX_CLIENT_STATE = 256
 
 _SERVICE_ALIASES: list[tuple[tuple[str, ...], str]] = [
+    (("flight radar", "flug radar", "radar service", "radar"), "homepi-flight-radar"),
+    (("intelligence", "blackbox service", "intelligence service"), "raspberry-intelligence"),
     (("display 2", "display zwei", "zweites display", "oled 2", "oled zwei"), "raspberry-display2"),
     (("meshtastic", "mesh service", "lora service"), "raspberry-meshtastic"),
     (("discord bot", "raspberry bot", "bot service", "der bot", "bot"), "raspberry-bot"),
@@ -30,9 +33,14 @@ _SERVICE_ALIASES: list[tuple[tuple[str, ...], str]] = [
     (("display 1", "display eins", "erstes display", "oled 1", "oled eins", "display"), "raspberry-display"),
     (("pi hole", "pihole", "dns service"), "pihole-FTL"),
     (("tailscale", "tailscaled"), "tailscaled"),
+    (("ssh", "ssh service"), "ssh"),
 ]
 
 _UNIT_NAMES = {
+    "homepi-flight-radar": "Flight Radar",
+    "homepi-flight-radar.service": "Flight Radar",
+    "raspberry-intelligence": "Intelligence",
+    "raspberry-intelligence.service": "Intelligence",
     "raspberry-bot": "Discord-Bot",
     "raspberry-bot.service": "Discord-Bot",
     "raspberry-dashboard": "Dashboard",
@@ -50,6 +58,7 @@ _UNIT_NAMES = {
     "ssh": "SSH",
     "ssh.service": "SSH",
 }
+_ALLOWED_REMOTE_UNITS = frozenset(_UNIT_NAMES)
 
 _UNIT_RE = re.compile(r"^[A-Za-z0-9_.@:-]{1,128}$")
 _DIRECT_SYSTEMCTL_RE = re.compile(
@@ -122,6 +131,27 @@ def _client_key(request: web.Request) -> str:
     return f"{request.remote or 'unknown'}:{digest}"
 
 
+def _prune_client_state(now: float | None = None) -> None:
+    current = time.monotonic() if now is None else now
+    for key, bucket in list(_rate_buckets.items()):
+        while bucket and current - bucket[0] > RATE_WINDOW:
+            bucket.popleft()
+        if not bucket:
+            _rate_buckets.pop(key, None)
+    for key, pending in list(_pending_confirmations.items()):
+        if current - float(pending.get("created_at", 0.0)) > CONFIRM_TTL:
+            _pending_confirmations.pop(key, None)
+
+    if len(_rate_buckets) > MAX_CLIENT_STATE:
+        oldest = sorted(_rate_buckets, key=lambda key: _rate_buckets[key][-1] if _rate_buckets[key] else 0.0)
+        for key in oldest[: len(_rate_buckets) - MAX_CLIENT_STATE]:
+            _rate_buckets.pop(key, None)
+    if len(_pending_confirmations) > MAX_CLIENT_STATE:
+        oldest_pending = sorted(_pending_confirmations, key=lambda key: float(_pending_confirmations[key].get("created_at", 0.0)))
+        for key in oldest_pending[: len(_pending_confirmations) - MAX_CLIENT_STATE]:
+            _pending_confirmations.pop(key, None)
+
+
 def _rate_allowed(request: web.Request) -> bool:
     key = request.remote or "unknown"
     now = time.monotonic()
@@ -131,6 +161,8 @@ def _rate_allowed(request: web.Request) -> bool:
     if len(bucket) >= RATE_LIMIT:
         return False
     bucket.append(now)
+    if len(_rate_buckets) > MAX_CLIENT_STATE:
+        _prune_client_state(now)
     return True
 
 
@@ -156,21 +188,29 @@ def _pending_for(request: web.Request) -> dict[str, Any] | None:
 
 def _store_pending(request: web.Request, action: str, unit: str | None) -> None:
     _pending_confirmations[_client_key(request)] = {"action": action, "unit": unit, "created_at": time.monotonic()}
+    if len(_pending_confirmations) > MAX_CLIENT_STATE:
+        _prune_client_state()
 
 
 def _clear_pending(request: web.Request) -> None:
     _pending_confirmations.pop(_client_key(request), None)
 
 
+def _allowed_unit(unit: str) -> bool:
+    if not _UNIT_RE.fullmatch(unit):
+        return False
+    return unit in _ALLOWED_REMOTE_UNITS or ("." not in unit and f"{unit}.service" in _ALLOWED_REMOTE_UNITS)
+
+
 def _service_from_text(text: str, normalised: str) -> tuple[str | None, bool]:
     direct = _DIRECT_SYSTEMCTL_RE.search(text)
     if direct:
         unit = direct.group(2)
-        return (unit if _UNIT_RE.fullmatch(unit) else None), False
+        return (unit if _allowed_unit(unit) else None), False
     generic = _GENERIC_UNIT_RE.search(text)
     if generic:
         unit = generic.group(1)
-        return (unit if _UNIT_RE.fullmatch(unit) else None), False
+        return (unit if _allowed_unit(unit) else None), False
     for aliases, unit in _SERVICE_ALIASES:
         if any(alias in normalised for alias in aliases):
             return unit, True
@@ -349,6 +389,8 @@ def _command_catalog() -> dict[str, list[str]]:
         "homepi_services": [
             "Starte den Bot neu",
             "Starte das Dashboard neu",
+            "Starte den Flight Radar neu",
+            "Starte Intelligence neu",
             "Starte Display eins neu",
             "Starte Display zwei neu",
             "Starte Meshtastic neu",
@@ -359,14 +401,10 @@ def _command_catalog() -> dict[str, list[str]]:
             "Liste Dienste",
             "Systemd neu laden",
             "Status Dienst ssh",
-            "Dienst nginx starten",
-            "Dienst nginx neu starten",
-            "Dienst nginx stoppen",
-            "Dienst nginx aktivieren",
-            "Dienst nginx deaktivieren",
-            "Dienst nginx maskieren",
-            "Dienst nginx entmaskieren",
-            "systemctl restart cron",
+            "Dienst raspberry-bot neu starten",
+            "Dienst homepi-flight-radar stoppen",
+            "Dienst raspberry-meshtastic aktivieren",
+            "systemctl status pihole-FTL",
         ],
         "power": ["Pi neu starten", "Pi herunterfahren"],
         "confirmation": ["Bestätigen", "Abbrechen"],
@@ -410,6 +448,11 @@ async def _execute_action(action: str, unit: str | None = None) -> web.Response:
 
     if not unit:
         return web.json_response({"ok": False, "speech": "Mir fehlt noch der Name des Dienstes."}, status=400)
+    if not _allowed_unit(unit):
+        return web.json_response(
+            {"ok": False, "speech": "Dieser Dienst ist nicht für HomePi Remote Control freigegeben."},
+            status=403,
+        )
 
     if unit in {"raspberry-dashboard", "raspberry-dashboard.service"} and action in {"restart", "stop"}:
         asyncio.create_task(_delayed_helper(action, unit), name=f"voice-{action}-dashboard")
