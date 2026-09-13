@@ -46,7 +46,7 @@ def test_server_score() -> None:
             disk_percent=35,
             services_online_ratio=1.0,
             network_ok=True,
-            errors_24h=0,
+            bot_errors_24h=0,
             uptime_seconds=86400,
         )
     )
@@ -58,7 +58,10 @@ def test_server_score() -> None:
             disk_percent=92,
             services_online_ratio=0.5,
             network_ok=False,
-            errors_24h=12,
+            internet_outages_24h=3,
+            service_crashes_24h=6,
+            bot_errors_24h=12,
+            reboots_24h=2,
             uptime_seconds=600,
         )
     )
@@ -70,7 +73,7 @@ def test_server_score() -> None:
             disk_percent=35,
             services_online_ratio=1.0,
             network_ok=True,
-            errors_24h=0,
+            bot_errors_24h=0,
             uptime_seconds=86400,
         )
     )
