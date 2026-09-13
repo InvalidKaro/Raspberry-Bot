@@ -13,7 +13,13 @@ from discord.ext import commands  # noqa: E402
 from services.action_registry import action_ids_for_command, action_specs_for_command  # noqa: E402
 from services.health_checks import HEALTH_SERVICES, HealthResult, summarize  # noqa: E402
 from services.server_score import ScoreInput, calculate_server_score  # noqa: E402
-from views.command_actions import RelatedCommandsView, _button_invokable, _related_commands  # noqa: E402
+from views.command_actions import (  # noqa: E402
+    RelatedCommandsView,
+    _button_invokable,
+    _execution_mode,
+    _parse_value,
+    _related_commands,
+)
 
 
 def test_action_contexts() -> None:
@@ -29,7 +35,7 @@ def test_action_contexts() -> None:
     assert len(action_specs_for_command("admin diagnose")) <= 5
 
 
-def test_related_command_buttons() -> None:
+def test_smart_command_flows() -> None:
     intents = discord.Intents.none()
     bot = commands.Bot(command_prefix="!", intents=intents)
     group = app_commands.Group(name="demo", description="Demo command group")
@@ -42,24 +48,42 @@ def test_related_command_buttons() -> None:
     async def demo_ping(interaction: discord.Interaction) -> None:
         del interaction
 
-    @group.command(name="lookup", description="Lookup requiring input")
+    @group.command(name="lookup", description="Lookup requiring text input")
     async def demo_lookup(interaction: discord.Interaction, query: str) -> None:
         del interaction, query
+
+    @group.command(name="count", description="Count with integer input")
+    async def demo_count(interaction: discord.Interaction, amount: int) -> None:
+        del interaction, amount
+
+    @group.command(name="member", description="Complex Discord object")
+    async def demo_member(interaction: discord.Interaction, member: discord.Member) -> None:
+        del interaction, member
 
     bot.tree.add_command(group)
 
     related = _related_commands(bot, "demo status")
     names = {command.qualified_name for command in related}
-    assert "demo ping" in names
-    assert "demo lookup" in names
+    assert {"demo ping", "demo lookup", "demo count", "demo member"}.issubset(names)
 
     assert _button_invokable(demo_ping) is True
-    assert _button_invokable(demo_lookup) is False
+    assert _execution_mode(demo_ping) == "direct"
+    assert _execution_mode(demo_lookup) == "modal"
+    assert _execution_mode(demo_count) == "modal"
+    assert _execution_mode(demo_member) == "slash"
+
+    query_param = next(parameter for parameter in demo_lookup.parameters if parameter.name == "query")
+    count_param = next(parameter for parameter in demo_count.parameters if parameter.name == "amount")
+    assert _parse_value(query_param, "hello world") == "hello world"
+    assert _parse_value(count_param, "42") == 42
 
     view = RelatedCommandsView(bot, 123, "demo status")
     labels = {str(getattr(item, "label", "")) for item in view.children}
     assert "/demo ping" in labels
-    assert "/demo lookup" not in labels
+    assert "/demo lookup" in labels
+    assert "/demo count" in labels
+    assert "/demo member" not in labels
+    assert any(isinstance(item, discord.ui.Select) for item in view.children)
 
 
 def test_health_model() -> None:
@@ -124,7 +148,7 @@ def test_server_score() -> None:
 
 def main() -> None:
     test_action_contexts()
-    test_related_command_buttons()
+    test_smart_command_flows()
     test_health_model()
     test_server_score()
     print("control-center architecture smoke: ok")
