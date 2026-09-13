@@ -16,6 +16,121 @@ FALLBACK = "https://api.airplanes.live/v2/point/{lat}/{lon}/{radius}"
 CACHE_TTL = 4.0
 MAX_RADIUS_NM = 250.0
 
+MOBILE_PATCH = r"""
+<style id="mobile-hotfix">
+.detail-close{
+  position:absolute;right:12px;top:12px;z-index:5;width:38px;height:38px;
+  display:grid;place-items:center;border:1px solid rgba(120,255,210,.22);
+  background:rgba(3,12,10,.88);color:#ecfff8;border-radius:12px;
+  font:600 22px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  cursor:pointer;box-shadow:0 8px 30px rgba(0,0,0,.32);backdrop-filter:blur(10px)
+}
+.detail-close:hover{background:#78ffd2;color:#06100e;border-color:#78ffd2}
+.detailhero{position:relative;padding-right:62px!important}
+
+@media(max-width:900px){
+  .topbar{
+    left:8px!important;right:8px!important;top:max(8px,env(safe-area-inset-top))!important;
+    height:58px!important;padding:0 11px!important;border-radius:15px!important;gap:8px!important
+  }
+  .logo{width:34px!important;height:34px!important;font-size:16px!important}
+  .brand{gap:9px!important;min-width:0}.brand h1{font-size:14px!important;white-space:nowrap}
+  .eyebrow{display:none!important}
+  .statusrow{gap:5px!important;flex-wrap:nowrap!important}.statusrow .pill{display:none!important}
+  .statusrow .pill:first-child{display:block!important;padding:7px 9px!important;font-size:10px!important}
+
+  .side{
+    left:8px!important;right:8px!important;bottom:max(8px,env(safe-area-inset-bottom))!important;
+    top:auto!important;width:auto!important;height:min(32dvh,250px)!important;
+    display:flex!important;flex-direction:column!important;gap:7px!important
+  }
+  .stats{
+    display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;
+    flex:0 0 auto!important;border-radius:14px!important
+  }
+  .stat{
+    min-width:0!important;padding:8px 6px!important;border-bottom:0!important;
+    border-right:1px solid rgba(116,255,211,.10)!important;text-align:center
+  }
+  .stat:last-child{border-right:0!important}.stat span{font-size:8px!important;letter-spacing:.06em!important}
+  .stat strong{font-size:15px!important;margin-top:3px!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .controls{display:none!important}
+  .listcard{height:auto!important;min-height:0!important;flex:1 1 auto!important;border-radius:14px!important}
+  .listhead{padding:9px 11px 7px!important}.listhead h2{font-size:10px!important}.listhead .pill{padding:5px 7px!important;font-size:9px!important}
+  .airrow{padding:9px 11px!important}.callsign{font-size:12px!important}.type{font-size:10px!important}.airmeta{font-size:9px!important;gap:7px!important}
+
+  .detail{
+    left:8px!important;right:8px!important;bottom:max(8px,env(safe-area-inset-bottom))!important;
+    top:auto!important;width:auto!important;max-height:calc(100dvh - 84px - env(safe-area-inset-top))!important;
+    border-radius:18px!important;z-index:1300!important;overscroll-behavior:contain
+  }
+  .detailhero{padding:15px 58px 13px 15px!important}.detailhero h2{font-size:22px!important;margin-top:5px!important}
+  .detailhero .planeicon{font-size:22px!important}.grid{grid-template-columns:1fr 1fr!important}
+  .kv{padding:10px 11px!important}.kv span{font-size:8px!important}.kv strong{font-size:12px!important}
+  .detailfoot{padding:11px!important}
+  .detail-close{position:sticky;float:right;top:10px;margin:10px 10px -48px 0;width:40px;height:40px;border-radius:13px}
+
+  body.detail-open .side{opacity:0!important;pointer-events:none!important;transform:translateY(12px);transition:.18s}
+  .side{transition:.18s}
+  .leaflet-bottom{bottom:calc(min(32dvh,250px) + 12px)!important}
+  body.detail-open .leaflet-bottom{bottom:12px!important}
+  .leaflet-control-zoom a{width:34px!important;height:34px!important;line-height:34px!important}
+  .radar-overlay{width:92vw!important;max-width:560px}
+  .plane-label{display:none!important}
+  .toast{bottom:calc(min(32dvh,250px) + 18px)!important;max-width:calc(100vw - 28px);text-align:center}
+  body.detail-open .toast{bottom:18px!important}
+}
+
+@media(max-width:420px){
+  .side{height:min(30dvh,220px)!important}
+  .leaflet-bottom{bottom:calc(min(30dvh,220px) + 12px)!important}
+  .toast{bottom:calc(min(30dvh,220px) + 18px)!important}
+  .stat span{font-size:7px!important}.stat strong{font-size:14px!important}
+}
+</style>
+<script id="mobile-hotfix-js">
+(() => {
+  const detail = document.getElementById('detail');
+  if (!detail) return;
+
+  if (!document.getElementById('detailClose')) {
+    const button = document.createElement('button');
+    button.id = 'detailClose';
+    button.className = 'detail-close';
+    button.type = 'button';
+    button.setAttribute('aria-label', 'Flugzeugdetails schließen');
+    button.setAttribute('title', 'Schließen');
+    button.textContent = '×';
+    detail.prepend(button);
+  }
+
+  const syncDetailState = () => {
+    document.body.classList.toggle('detail-open', detail.classList.contains('show'));
+  };
+
+  const closeDetail = () => {
+    detail.classList.remove('show');
+    document.body.classList.remove('detail-open');
+    document.querySelectorAll('.airrow.active').forEach(el => el.classList.remove('active'));
+    try { selected = null; } catch (_) {}
+  };
+
+  document.getElementById('detailClose')?.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    closeDetail();
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') closeDetail();
+  });
+
+  new MutationObserver(syncDetailState).observe(detail, {attributes:true, attributeFilter:['class']});
+  syncDetailState();
+})();
+</script>
+"""
+
 _cache: dict[tuple[float, float, float], tuple[float, dict[str, Any]]] = {}
 _cache_lock = asyncio.Lock()
 
@@ -102,7 +217,7 @@ async def _aircraft_snapshot(lat: float, lon: float, radius: float) -> dict[str,
                 payload = await _fetch(session, url)
                 source = name
                 break
-            except Exception as exc:  # upstream/network errors are expected occasionally
+            except Exception as exc:
                 errors.append(f"{name}: {type(exc).__name__}")
 
     if payload is None:
@@ -136,8 +251,10 @@ async def _aircraft_snapshot(lat: float, lon: float, radius: float) -> dict[str,
 
 
 async def index(_: web.Request) -> web.Response:
+    html = TEMPLATE.read_text(encoding="utf-8")
+    html = html.replace("</body>", MOBILE_PATCH + "\n</body>")
     return web.Response(
-        text=TEMPLATE.read_text(encoding="utf-8"),
+        text=html,
         content_type="text/html",
         headers={"Cache-Control": "no-store"},
     )
