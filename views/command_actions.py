@@ -12,6 +12,8 @@ from discord.ext import commands
 
 from helpers.embeds import EmbedFactory
 from services.action_registry import ActionSpec, action_specs_for_command, permission_allowed
+from services.system_diagnostics import diagnose_system
+from services.system_metrics import collect_system_metrics
 
 logger = logging.getLogger(__name__)
 ExecutionMode = Literal["direct", "modal", "slash"]
@@ -22,6 +24,7 @@ _SIMPLE_TYPES = {
     discord.AppCommandOptionType.boolean,
 }
 _USAGE_CACHE: dict[tuple[int | None, int], tuple[float, dict[str, float]]] = {}
+_CONTEXT_CACHE: tuple[float, dict[str, tuple[float, str]]] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +115,24 @@ async def _usage_scores(bot: commands.Bot, guild_id: int | None, user_id: int) -
     return scores
 
 
+async def _system_context_scores(bot: commands.Bot, command_name: str) -> dict[str, tuple[float, str]]:
+    global _CONTEXT_CACHE
+    root = command_name.strip().lstrip("/").split(" ", 1)[0].casefold()
+    if root not in {"system", "admin", "overview", "pi", "config"}:
+        return {}
+    now = time.monotonic()
+    if _CONTEXT_CACHE is not None and now - _CONTEXT_CACHE[0] < 20:
+        return _CONTEXT_CACHE[1]
+    try:
+        metrics = await collect_system_metrics(bot)
+        bonuses = diagnose_system(metrics).command_bonuses()
+    except Exception:
+        logger.exception("Could not build live Smart Action context")
+        bonuses = {}
+    _CONTEXT_CACHE = (now, bonuses)
+    return bonuses
+
+
 async def _rank_related(
     bot: commands.Bot,
     interaction: discord.Interaction,
@@ -120,6 +141,7 @@ async def _rank_related(
 ) -> list[RelatedCandidate]:
     current = _find_command(bot, command_name)
     usage = await _usage_scores(bot, interaction.guild_id, interaction.user.id)
+    live = await _system_context_scores(bot, command_name)
     visited_cf = {v.casefold() for v in visited}
     current_cf = command_name.strip().lstrip("/").casefold()
     ranked: list[RelatedCandidate] = []
@@ -127,18 +149,25 @@ async def _rank_related(
     for item in _walk_commands(bot):
         if not isinstance(item, app_commands.Command) or item.qualified_name.casefold() == current_cf:
             continue
-        score = usage.get(item.qualified_name.casefold(), 0.0)
+        name_cf = item.qualified_name.casefold()
+        score = usage.get(name_cf, 0.0)
         reason = "häufig genutzt"
+        live_bonus = live.get(name_cf)
+        if live_bonus is not None:
+            score += live_bonus[0]
+            reason = f"Live-Diagnose: {live_bonus[1]}"
         if current is not None and getattr(current, "parent", None) is not None and getattr(current, "parent", None) is getattr(item, "parent", None):
             score += 120
-            reason = "gleiche Command-Gruppe"
+            if live_bonus is None:
+                reason = "gleiche Command-Gruppe"
         elif current is not None and current.qualified_name.split(" ", 1)[0] == item.qualified_name.split(" ", 1)[0]:
             score += 70
-            reason = "gleicher Funktionsbereich"
+            if live_bonus is None:
+                reason = "gleicher Funktionsbereich"
         elif score < 12:
             continue
         score += {"direct": 12, "modal": 7, "slash": 0}[_execution_mode(item)]
-        if item.qualified_name.casefold() in visited_cf:
+        if name_cf in visited_cf:
             score -= 150
         ranked.append(RelatedCandidate(item, score, _execution_mode(item), reason))
 
@@ -434,7 +463,7 @@ def _smart_embed(command_name: str, candidates: list[RelatedCandidate], visited:
     )
     if visited:
         embed.add_field(name="Flow", value=" → ".join(f"/{v}" for v in visited[-4:])[:1024], inline=False)
-    embed.set_footer(text="▶️ direkt · 📝 Formular · ⌨️ Slash | Ranking: Kontext + Verlauf + Nutzung")
+    embed.set_footer(text="▶️ direkt · 📝 Formular · ⌨️ Slash | Ranking: Live-Zustand + Kontext + Verlauf + Nutzung")
     return embed
 
 
