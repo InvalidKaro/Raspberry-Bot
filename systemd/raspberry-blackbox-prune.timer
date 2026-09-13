@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily HomePi Blackbox retention cleanup
+
+[Timer]
+OnBootSec=20min
+OnUnitActiveSec=24h
+RandomizedDelaySec=20min
+Persistent=true
+Unit=raspberry-blackbox-prune.service
+
+[Install]
+WantedBy=timers.target
