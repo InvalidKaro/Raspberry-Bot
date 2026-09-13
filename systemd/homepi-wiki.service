@@ -1,0 +1,26 @@
+[Unit]
+Description=HomePi Wiki
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=stefano
+WorkingDirectory=/home/stefano/Raspberry-Bot
+Environment=PYTHONUNBUFFERED=1
+Environment=HOMEPI_WIKI_HOST=127.0.0.1
+Environment=HOMEPI_WIKI_PORT=8092
+Environment=HOMEPI_WIKI_PREFIX=/wiki
+Environment=HOMEPI_KIWIX_URL=/wikipedia/
+Environment=HOMEPI_KIWIX_LIBRARY=/mnt/homepi-data/kiwix
+ExecStart=/home/stefano/Raspberry-Bot/.venv/bin/python -m homepi_wiki.app
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/stefano/Raspberry-Bot/homepi_wiki/data /mnt/homepi-data/kiwix
+
+[Install]
+WantedBy=multi-user.target
