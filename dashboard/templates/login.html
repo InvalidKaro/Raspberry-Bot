@@ -1,24 +1,27 @@
 <!doctype html>
-<html lang="en">
+<html lang="de">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <title>HomePi Control</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <meta name="theme-color" content="#070a0f">
+  <title>HomePi Control Center</title>
+  <link rel="stylesheet" href="/static/login.css">
 </head>
 <body class="login-body">
-  <main class="login-card">
-    <div class="brand-mark">HP</div>
-    <p class="eyebrow">HOMEPI CONTROL</p>
-    <h1>Welcome back</h1>
-    <p class="muted">Private control plane for your Raspberry-Bot.</p>
-    <!--ERROR-->
-    <form method="post" action="/login" class="login-form">
-      <label for="token">Dashboard password</label>
-      <input id="token" name="token" type="password" autocomplete="current-password" required minlength="12">
-      <button type="submit" class="primary">Sign in</button>
-    </form>
+  <main class="login-shell">
+    <section class="login-panel" aria-labelledby="login-title">
+      <p class="login-kicker">HOMEPI · PRIVATE CONTROL PLANE</p>
+      <h1 id="login-title">Control Center</h1>
+      <p>Authentifiziere dich für Systemstatus, Services, Bot-Verwaltung und Wartungsfunktionen.</p>
+      <!--ERROR-->
+      <form method="post" action="/login" class="login-form">
+        <label for="token">Dashboard-Passwort</label>
+        <input id="token" name="token" type="password" autocomplete="current-password" required minlength="12" autofocus>
+        <button type="submit">Anmelden</button>
+      </form>
+      <div class="login-meta">Lokale HomePi-Administration</div>
+    </section>
   </main>
 </body>
 </html>
