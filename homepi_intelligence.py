@@ -15,6 +15,8 @@ from typing import Any
 
 import psutil
 
+from services.server_score import ScoreInput, compatibility_breakdown
+
 REPO_ROOT = Path(os.getenv("BOT_REPO_PATH", "/home/stefano/services/Raspberry-Bot"))
 BLACKBOX_DB_PATH = Path(os.getenv("HOMEPI_BLACKBOX_DB", str(REPO_ROOT / "data" / "homepi_blackbox.sqlite3")))
 STATE_PATH = Path(os.getenv("HOMEPI_INTELLIGENCE_STATE", str(REPO_ROOT / "data" / "homepi_intelligence.json")))
@@ -35,9 +37,9 @@ WATCH_SERVICES = tuple(
     item.strip()
     for item in os.getenv(
         "HOMEPI_WATCH_SERVICES",
-        "raspberry-bot.service,raspberry-dashboard.service,raspberry-display.service,"
-        "raspberry-display2.service,raspberry-meshtastic.service,pihole-FTL.service,"
-        "tailscaled.service,ssh.service",
+        "raspberry-bot.service,raspberry-dashboard.service,homepi-flight-radar.service,"
+        "raspberry-intelligence.service,raspberry-display.service,raspberry-display2.service,"
+        "raspberry-meshtastic.service,pihole-FTL.service,tailscaled.service,ssh.service",
     ).split(",")
     if item.strip()
 )
@@ -45,6 +47,7 @@ WATCH_SERVICES = tuple(
 _SEVERITY_RANK = {"minor": 1, "moderate": 2, "severe": 3, "extreme": 4}
 _SEVERITY_LABEL = {1: "Hinweis", 2: "Warnung", 3: "Ernst", 4: "Extrem"}
 _MAC_RE = re.compile(r"(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}")
+_NEIGHBOR_WRITE_INTERVAL = max(30, int(os.getenv("HOMEPI_NEIGHBOR_WRITE_SECONDS", "60")))
 
 
 def _now() -> float:
@@ -128,10 +131,13 @@ def _meta_get(key: str, default: str = "") -> str:
 
 
 def _meta_set(key: str, value: Any) -> None:
+    text = str(value)
     with _db() as con:
         con.execute(
-            "INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            (key, str(value)),
+            """INSERT INTO meta(key,value) VALUES(?,?)
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value
+            WHERE meta.value<>excluded.value""",
+            (key, text),
         )
 
 
@@ -384,52 +390,28 @@ def _fetch_warnings() -> dict[str, Any]:
 
 
 def calculate_score(metrics: dict[str, Any], services: dict[str, str], blackbox: dict[str, Any]) -> dict[str, Any]:
-    cpu = float(metrics.get("cpu_percent") or 0.0)
-    ram = float(metrics.get("ram_percent") or 0.0)
-    disk = float(metrics.get("disk_percent") or 0.0)
-    temp = metrics.get("temperature")
-    temp_value = float(temp) if temp is not None else None
-
-    system = 100.0
-    system -= max(0.0, cpu - 75.0) * 0.6
-    system -= max(0.0, ram - 75.0) * 0.8
-    system -= max(0.0, disk - 80.0) * 1.5
-    if temp_value is not None:
-        system -= max(0.0, temp_value - 60.0) * 2.0
-    system = max(0.0, min(100.0, system))
-
-    online = bool(metrics.get("internet_online"))
-    network = 100.0 if online else 15.0
-    latency = metrics.get("latency_ms")
-    if online and latency is not None:
-        network -= max(0.0, float(latency) - 80.0) * 0.25
-    if online and not bool(metrics.get("dns_ok", True)):
-        network -= 35.0
-    network = max(0.0, min(100.0, network))
-
     installed = [state for state in services.values() if state != "not-found"]
     active = sum(state == "active" for state in installed)
-    service_score = 100.0 if not installed else 100.0 * active / len(installed)
-
-    stability = 100.0
-    stability -= int(blackbox.get("internet_outages") or 0) * 15.0
-    stability -= int(blackbox.get("service_crashes") or 0) * 12.0
-    stability -= int(blackbox.get("bot_errors") or 0) * 8.0
-    stability -= int(blackbox.get("reboots") or 0) * 5.0
-    stability = max(0.0, min(100.0, stability))
-
-    overall = round(system * 0.25 + network * 0.25 + service_score * 0.30 + stability * 0.20)
-    status = "GREEN" if overall >= 90 else "YELLOW" if overall >= 75 else "ORANGE" if overall >= 55 else "RED"
-    return {
-        "overall": int(overall),
-        "status": status,
-        "system": round(system),
-        "network": round(network),
-        "services": round(service_score),
-        "stability": round(stability),
-        "services_active": active,
-        "services_total": len(installed),
-    }
+    ratio = 1.0 if not installed else active / len(installed)
+    data = ScoreInput(
+        cpu_percent=float(metrics.get("cpu_percent") or 0.0),
+        ram_percent=float(metrics.get("ram_percent") or 0.0),
+        temperature_c=float(metrics["temperature"]) if metrics.get("temperature") is not None else None,
+        disk_percent=float(metrics.get("disk_percent") or 0.0),
+        services_online_ratio=ratio,
+        network_ok=bool(metrics.get("internet_online")),
+        latency_ms=float(metrics["latency_ms"]) if metrics.get("latency_ms") is not None else None,
+        dns_ok=bool(metrics.get("dns_ok", True)),
+        internet_outages_24h=int(blackbox.get("internet_outages") or 0),
+        service_crashes_24h=int(blackbox.get("service_crashes") or 0),
+        bot_errors_24h=int(blackbox.get("bot_errors") or 0),
+        reboots_24h=int(blackbox.get("reboots") or 0),
+        uptime_seconds=max(0, int(_now() - psutil.boot_time())),
+    )
+    score = compatibility_breakdown(data)
+    score["services_active"] = active
+    score["services_total"] = len(installed)
+    return score
 
 
 def read_state() -> dict[str, Any]:
@@ -503,9 +485,12 @@ def _record_neighbors(items: list[dict[str, str]]) -> None:
             baseline = existing_count == 0 and not _meta_get("neighbors_initialized")
             for item in items:
                 mac = item["mac"]
-                row = con.execute("SELECT mac FROM known_devices WHERE mac=?", (mac,)).fetchone()
+                row = con.execute("SELECT last_seen,ip,iface FROM known_devices WHERE mac=?", (mac,)).fetchone()
                 if row:
-                    con.execute("UPDATE known_devices SET last_seen=?,ip=?,iface=? WHERE mac=?", (now, item["ip"], item["iface"], mac))
+                    stale = now - float(row["last_seen"] or 0) >= _NEIGHBOR_WRITE_INTERVAL
+                    changed = str(row["ip"] or "") != item["ip"] or str(row["iface"] or "") != item["iface"]
+                    if stale or changed:
+                        con.execute("UPDATE known_devices SET last_seen=?,ip=?,iface=? WHERE mac=?", (now, item["ip"], item["iface"], mac))
                 else:
                     con.execute(
                         "INSERT INTO known_devices(mac,first_seen,last_seen,ip,iface) VALUES(?,?,?,?,?)",
@@ -600,6 +585,7 @@ def _cleanup() -> None:
     try:
         with _db() as con:
             con.execute("DELETE FROM samples WHERE created_at<?", (cutoff,))
+            con.execute("DELETE FROM events WHERE created_at<?", (cutoff,))
     except sqlite3.Error:
         pass
 
