@@ -20,6 +20,7 @@ jobs:
       - run: pip install -r requirements.txt
       - run: pip install -r requirements-display.txt
       - run: pip install -r requirements-meshtastic.txt
+      - run: pip check
       - run: python -m compileall -q .
       - run: python scripts/import_smoke.py
       - run: python scripts/command_hub_smoke.py
@@ -44,3 +45,14 @@ jobs:
       - run: bash -n scripts/install_meshtastic_service.sh
       - run: bash -n scripts/install_voice_control.sh
       - run: bash -n scripts/install_homepi_intelligence.sh
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install --upgrade pip pip-audit
+      - run: pip-audit -r requirements.txt
