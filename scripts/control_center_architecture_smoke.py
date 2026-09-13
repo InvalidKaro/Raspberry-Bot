@@ -14,9 +14,11 @@ from services.server_score import ScoreInput, calculate_server_score  # noqa: E4
 def test_action_contexts() -> None:
     admin = action_ids_for_command("admin healthcheck")
     media = action_ids_for_command("media radio")
+    mesh = action_ids_for_command("mesh status")
     generic = action_ids_for_command("userinfo")
 
-    assert admin[:3] == ("system_status", "quick_check", "diagnostics")
+    assert admin[:4] == ("system_status", "quick_check", "services", "diagnostics")
+    assert "services" in mesh
     assert "related" in media
     assert generic == ("related", "control_center")
     assert len(action_specs_for_command("admin diagnose")) <= 5
@@ -24,6 +26,7 @@ def test_action_contexts() -> None:
 
 def test_health_model() -> None:
     assert HEALTH_SERVICES["radar"] == "homepi-flight-radar"
+    assert HEALTH_SERVICES["mesh"] == "raspberry-meshtastic"
     results = [
         HealthResult("bot", "online", 3.0, 10.0, "ok"),
         HealthResult("radar", "degraded", 5.0, 11.0, "starting"),
