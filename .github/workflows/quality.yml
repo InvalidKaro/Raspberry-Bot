@@ -23,6 +23,7 @@ jobs:
       - run: python -m compileall -q .
       - run: python scripts/import_smoke.py
       - run: python scripts/command_hub_smoke.py
+      - run: python scripts/control_center_architecture_smoke.py
       - run: python scripts/dashboard_smoke.py
       - run: python scripts/mdplan_smoke.py
       - run: python scripts/feature_flags_smoke.py
