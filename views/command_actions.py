@@ -123,6 +123,12 @@ class CommandActionsView(discord.ui.View):
                 )
                 return
 
+            if spec.handler == "services":
+                from views.service_control import open_service_control
+
+                await open_service_control(interaction)
+                return
+
             from views.control_center import (
                 ControlCenterView,
                 control_center_embed,
