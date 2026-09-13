@@ -9,6 +9,7 @@ import discord
 from discord.ext import commands
 
 from helpers.embeds import EmbedFactory
+from services.system_diagnostics import compact_diagnosis, diagnose_system
 from services.system_metrics import collect_system_metrics, throttling_labels
 
 
@@ -192,6 +193,7 @@ async def show_system_status(interaction: discord.Interaction, bot: commands.Bot
 
     try:
         metrics = await collect_system_metrics(bot)
+        diagnosis = diagnose_system(metrics)
         temp = f"{metrics.temperature:.1f} °C" if metrics.temperature is not None else "n/a"
         embed = EmbedFactory.system(
             title="Systemstatus",
@@ -207,7 +209,19 @@ async def show_system_status(interaction: discord.Interaction, bot: commands.Bot
         )
         throttle = throttling_labels(metrics.throttled_flags)
         if throttle:
-            embed.add_field(name="Throttling", value="\n".join(f"• {item}" for item in throttle), inline=False)
+            embed.add_field(name="Throttling Flags", value="\n".join(f"• {item}" for item in throttle), inline=False)
+        if diagnosis.primary is not None:
+            primary = diagnosis.primary
+            evidence = "\n".join(f"• {item}" for item in primary.evidence[:3])
+            embed.add_field(
+                name="🧠 Wahrscheinlichste Ursache",
+                value=(
+                    f"**{primary.title}**\n"
+                    f"Ursache: **{primary.cause}** · Sicherheit **{primary.confidence * 100:.0f}%**\n"
+                    f"{evidence}"
+                )[:1024],
+                inline=False,
+            )
     except Exception as exc:
         embed = EmbedFactory.error(title="Systemstatus fehlgeschlagen", description=f"`{type(exc).__name__}`")
 
@@ -243,17 +257,11 @@ async def run_quick_check(interaction: discord.Interaction, bot: commands.Bot, u
 
     async def check_metrics() -> CheckResult:
         metrics = await collect_system_metrics(bot)
-        warnings: list[str] = []
-        if metrics.cpu_percent >= 90:
-            warnings.append(f"CPU {metrics.cpu_percent:.0f}%")
-        if metrics.ram_percent >= 90:
-            warnings.append(f"RAM {metrics.ram_percent:.0f}%")
-        if metrics.disk_percent >= 90:
-            warnings.append(f"Disk {metrics.disk_percent:.0f}%")
-        if metrics.temperature is not None and metrics.temperature >= 75:
-            warnings.append(f"{metrics.temperature:.1f}°C")
-        detail = ", ".join(warnings) if warnings else f"CPU {metrics.cpu_percent:.0f}% · RAM {metrics.ram_percent:.0f}%"
-        return CheckResult("Systemmetriken", not warnings, detail)
+        diagnosis = diagnose_system(metrics)
+        if diagnosis.primary is not None:
+            return CheckResult("Systemmetriken", False, diagnosis.primary.title)
+        detail = f"CPU {metrics.cpu_percent:.0f}% · RAM {metrics.ram_percent:.0f}%"
+        return CheckResult("Systemmetriken", True, detail)
 
     async def check_db() -> CheckResult:
         try:
@@ -330,18 +338,19 @@ async def run_diagnostics(interaction: discord.Interaction, bot: commands.Bot, u
 
     await interaction.edit_original_response(embed=render(0), view=None)
     findings: list[str] = []
+    diagnosis = None
 
     try:
         metrics = await collect_system_metrics(bot)
-        if metrics.disk_percent >= 90:
-            findings.append(f"Datenträger fast voll: **{metrics.disk_percent:.1f}%**")
-        if metrics.ram_percent >= 90:
-            findings.append(f"RAM-Auslastung hoch: **{metrics.ram_percent:.1f}%**")
-        if metrics.temperature is not None and metrics.temperature >= 75:
-            findings.append(f"Temperatur hoch: **{metrics.temperature:.1f} °C**")
-        if metrics.throttled_flags:
-            findings.append("Raspberry-Pi Throttling-Flags gesetzt: " + ", ".join(throttling_labels(metrics.throttled_flags)))
-        states[0] = "done"
+        diagnosis = diagnose_system(metrics)
+        if diagnosis.findings:
+            findings.extend(
+                f"**{item.title}** — {item.cause} ({item.confidence * 100:.0f}% Sicherheit)"
+                for item in diagnosis.findings[:5]
+            )
+            states[0] = "warn"
+        else:
+            states[0] = "done"
     except Exception as exc:
         states[0] = "warn"
         findings.append(f"Systemmetriken konnten nicht gelesen werden (`{type(exc).__name__}`).")
@@ -390,11 +399,28 @@ async def run_diagnostics(interaction: discord.Interaction, bot: commands.Bot, u
     if findings:
         embed = EmbedFactory.warning(
             title="Diagnose abgeschlossen",
-            description="\n".join(f"• {item}" for item in findings),
+            description="\n".join(f"• {item}" for item in findings[:8]),
         )
+        if diagnosis is not None and diagnosis.primary is not None:
+            primary = diagnosis.primary
+            embed.add_field(
+                name="Warum passiert das?",
+                value=(
+                    f"**Wahrscheinlichste Ursache:** {primary.cause}\n"
+                    + "\n".join(f"• {item}" for item in primary.evidence[:4])
+                )[:1024],
+                inline=False,
+            )
+            embed.add_field(
+                name="Was jetzt?",
+                value="\n".join(f"{index}. {item}" for index, item in enumerate(primary.recommendations[:4], 1))[:1024],
+                inline=False,
+            )
+        if diagnosis is not None:
+            embed.add_field(name="Systemanalyse", value=compact_diagnosis(diagnosis)[:1024], inline=False)
         embed.add_field(
             name="Action Suggestions",
-            value="Starte einen **Schnellcheck** zum Gegenprüfen oder öffne den **Systemstatus** für Live-Metriken.",
+            value="Smart Actions priorisiert jetzt passende Folge-Commands anhand dieses Live-Zustands.",
             inline=False,
         )
     else:

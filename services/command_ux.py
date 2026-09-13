@@ -76,10 +76,7 @@ def _failed_progress_embed(command_name: str, duration_ms: float | None) -> disc
 
 
 def _message_has_progress_marker(message: discord.InteractionMessage) -> bool:
-    return any(
-        embed.footer and embed.footer.text == _PROGRESS_MARKER
-        for embed in message.embeds
-    )
+    return any(embed.footer and embed.footer.text == _PROGRESS_MARKER for embed in message.embeds)
 
 
 def _message_has_visible_payload(message: discord.InteractionMessage) -> bool:
@@ -89,15 +86,16 @@ def _message_has_visible_payload(message: discord.InteractionMessage) -> bool:
 class CommandUXService:
     """Cross-cutting UI behavior for every application command.
 
-    - Adds contextual action buttons to ordinary command responses.
-    - Shows a lightweight progress card when a command explicitly defers and
-      keeps running long enough to benefit from feedback.
-    - Preserves a command's own View and emits suggestions as an ephemeral
-      follow-up when components already occupy the original response.
+    Deferred commands get their progress placeholder as soon as Discord accepts
+    the defer. This guarantees that follow-up result messages cannot visually
+    overtake the loading card.
     """
 
     def __init__(self, bot: commands.Bot, *, progress_delay: float = 1.0) -> None:
         self.bot = bot
+        # Kept for compatibility/configuration. It now acts as the maximum time
+        # we wait for a command to decide whether it will defer, not as a delay
+        # before showing an already-deferred command.
         self.progress_delay = max(0.5, float(progress_delay))
         self._watchers: dict[int, asyncio.Task[None]] = {}
         self._started: dict[int, float] = {}
@@ -130,13 +128,17 @@ class CommandUXService:
 
     async def _watch_deferred(self, interaction: discord.Interaction, command_name: str) -> None:
         try:
-            await asyncio.sleep(self.progress_delay)
+            # Previously we slept for progress_delay *after* the command had
+            # deferred. A command could send its result via followup during that
+            # sleep, so Discord displayed RESULT -> LOADING. Poll briefly for
+            # the initial response decision and render immediately on defer.
+            deadline = time.monotonic() + self.progress_delay
+            while not interaction.response.is_done() and time.monotonic() < deadline:
+                await asyncio.sleep(0.02)
 
             if not interaction.response.is_done():
                 return
-
-            response_type = interaction.response.type
-            if response_type != discord.InteractionResponseType.deferred_channel_message:
+            if interaction.response.type != discord.InteractionResponseType.deferred_channel_message:
                 return
 
             try:
@@ -144,16 +146,12 @@ class CommandUXService:
             except _RESPONSE_EXCEPTIONS:
                 return
 
-            # A command that already rendered content or a custom View owns its
-            # UX. Do not overwrite it with the generic progress fallback.
             if _message_has_visible_payload(message):
                 return
 
             started = self._started.get(interaction.id)
             elapsed = time.perf_counter() - started if started is not None else 0.0
-            await interaction.edit_original_response(
-                embed=_progress_embed(command_name, elapsed),
-            )
+            await interaction.edit_original_response(embed=_progress_embed(command_name, elapsed))
             self._auto_progress.add(interaction.id)
         except asyncio.CancelledError:
             raise
@@ -163,21 +161,13 @@ class CommandUXService:
             logger.exception("Automatic command progress failed for %s", command_name)
 
     async def _send_action_followup(self, interaction: discord.Interaction, command_name: str) -> None:
-        """Keep a command-owned component view intact while still exposing actions."""
-
         await interaction.followup.send(
             content="**Weitere Aktionen**",
             view=CommandActionsView(self.bot, interaction.user.id, command_name),
             ephemeral=True,
         )
 
-    async def complete(
-        self,
-        interaction: discord.Interaction,
-        command_name: str,
-        *,
-        duration_ms: float | None = None,
-    ) -> None:
+    async def complete(self, interaction: discord.Interaction, command_name: str, *, duration_ms: float | None = None) -> None:
         task = self._watchers.pop(interaction.id, None)
         if task is not None and not task.done():
             task.cancel()
@@ -196,42 +186,24 @@ class CommandUXService:
                     view=CommandActionsView(self.bot, interaction.user.id, command_name),
                 )
                 return
-
-            # Existing buttons/selects belong to the command. Do not overwrite
-            # them; expose the cross-command actions in a private follow-up.
             if message.components:
                 await self._send_action_followup(interaction, command_name)
                 return
-
-            # A quick deferred command can finish before the automatic progress
-            # card appears and may put its result in a follow-up. Never create a
-            # blank original response just to host buttons.
             if not _message_has_visible_payload(message):
                 return
-
-            await interaction.edit_original_response(
-                view=CommandActionsView(self.bot, interaction.user.id, command_name),
-            )
+            await interaction.edit_original_response(view=CommandActionsView(self.bot, interaction.user.id, command_name))
         except _RESPONSE_EXCEPTIONS:
             logger.debug("Could not attach action suggestions for %s", command_name)
         finally:
             self._auto_progress.discard(interaction.id)
 
-    async def fail(
-        self,
-        interaction: discord.Interaction,
-        command_name: str,
-        *,
-        duration_ms: float | None = None,
-    ) -> None:
+    async def fail(self, interaction: discord.Interaction, command_name: str, *, duration_ms: float | None = None) -> None:
         task = self._watchers.pop(interaction.id, None)
         if task is not None and not task.done():
             task.cancel()
         self._started.pop(interaction.id, None)
-
         if interaction.id not in self._auto_progress:
             return
-
         try:
             message = await interaction.original_response()
             if _message_has_progress_marker(message):
@@ -259,20 +231,9 @@ class ProgressStep:
 
 
 class CommandProgress:
-    """Reusable detailed progress UI for multi-stage commands.
+    """Reusable detailed progress UI for multi-stage commands."""
 
-    Commands with real stages should use this instead of the automatic generic
-    fallback. It edits one response message, keeping Discord channels clean.
-    """
-
-    def __init__(
-        self,
-        interaction: discord.Interaction,
-        title: str,
-        steps: list[str],
-        *,
-        ephemeral: bool = True,
-    ) -> None:
+    def __init__(self, interaction: discord.Interaction, title: str, steps: list[str], *, ephemeral: bool = True) -> None:
         if not steps:
             raise ValueError("CommandProgress requires at least one step")
         self.interaction = interaction
@@ -285,16 +246,9 @@ class CommandProgress:
         completed = sum(step.state in {"done", "warn", "failed"} for step in self.steps)
         lines: list[str] = []
         for step in self.steps:
-            icon = {
-                "pending": "▫️",
-                "running": "🔄",
-                "done": "✅",
-                "warn": "⚠️",
-                "failed": "❌",
-            }.get(step.state, "▫️")
+            icon = {"pending": "▫️", "running": "🔄", "done": "✅", "warn": "⚠️", "failed": "❌"}.get(step.state, "▫️")
             detail = f" — {step.detail}" if step.detail else ""
             lines.append(f"{icon} **{step.label}**{detail}")
-
         description = f"`{_bar(completed, len(self.steps))}` **{completed}/{len(self.steps)}**\n\n" + "\n".join(lines)
         if failed:
             embed = EmbedFactory.error(title=f"{self.title} fehlgeschlagen", description=description)
@@ -311,10 +265,7 @@ class CommandProgress:
         if self.interaction.response.is_done():
             await self.interaction.edit_original_response(embed=embed, view=None)
         else:
-            await self.interaction.response.send_message(
-                embed=embed,
-                ephemeral=self.ephemeral,
-            )
+            await self.interaction.response.send_message(embed=embed, ephemeral=self.ephemeral)
 
     async def running(self, index: int, detail: str | None = None) -> None:
         self._check_index(index)
