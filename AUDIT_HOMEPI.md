@@ -68,7 +68,7 @@ The collector runs frequently, so writing unchanged state on every poll is expen
 
 Implemented:
 
-- metadata UPSET only writes when the value changes
+- metadata UPSERT only writes when the value changes
 - known-device `last_seen` is throttled instead of updated every collector cycle
 - samples remain on their configured lower-frequency cadence
 - Radar and Intelligence are now included in the default watched-service set
@@ -115,6 +115,19 @@ Added:
 - lower SQLite write frequency
 - shared health checks rather than duplicate polling implementations
 - dependency audit gate
+
+## Network-client review
+
+Most outbound aiohttp paths already use explicit limits:
+
+- Spotify runtime: explicit 15 s total / 5 s connect / 10 s read timeout
+- Discord dashboard API: explicit 12 s total timeout
+- weather/astronomy: explicit 12 s total timeout
+- webhook automation: explicit 10 s total timeout
+- Spotify playlist fallback: explicit connect/read/total limits
+- radio metadata requests: explicit 8 s total / 3 s connect / 5 s read timeout
+
+`media_interactive.py` owns a long-lived `ClientSession()` without a session-level timeout, but the actual radio metadata request supplies the explicit `REQUEST_TIMEOUT` above on every request. The session is also closed in `cog_unload()`. This is therefore a consistency cleanup, not an identified hanging-request or session-leak path.
 
 ## Security review
 
@@ -180,7 +193,7 @@ The Flight Radar systemd unit already has useful hardening. Dashboard hardening 
 
 These are known but intentionally not hidden behind a “complete” label:
 
-1. **HTTP session timeout normalization** — a small number of long-lived media/Spotify `aiohttp.ClientSession()` constructors still rely on aiohttp defaults. Sessions are lifecycle-closed, so no leak was found, but explicit connect/read/total limits should be standardized.
+1. **HTTP session consistency** — `media_interactive.py` can still be given the same session-level timeout as other long-lived clients. The actual radio request is already bounded per request, so this is low priority.
 2. **Dashboard inline injection architecture** — `dashboard/__init__.py` still patches several pages with large inline navigation/debug fragments. This creates CSP exceptions and should be migrated to normal templates/static assets in a dedicated refactor.
 3. **Login limiter key retention** — per-IP failure deques are individually bounded, but the IP-key map itself should receive periodic stale-key pruning for hostile/high-cardinality traffic.
 4. **gTTS / Click advisory** — remove the documented audit exception as soon as upstream dependency constraints permit.
