@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0b1020">
+  <title>{{ title }} · HomePi</title>
+  <link rel="stylesheet" href="{{ prefix }}/static/app.css">
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar" id="sidebar">
+    <a class="brand" href="{{ prefix }}/"><span class="brand-mark">H</span><span><b>HomePi</b><small>Knowledge Base</small></span></a>
+    <div class="searchbox">
+      <input id="search" type="search" placeholder="Wiki durchsuchen…" autocomplete="off" aria-label="Wiki durchsuchen">
+      <div id="search-results" class="search-results" hidden></div>
+    </div>
+    <nav>
+      <a class="nav-link{% if active == 'home' %} active{% endif %}" href="{{ prefix }}/">Übersicht</a>
+      <a class="nav-link" href="#offline-library">Offline Library</a>
+      <a class="nav-link external" href="{{ kiwix_url }}">Wikipedia öffnen</a>
+    </nav>
+    <div class="side-status"><span class="dot"></span><span id="server-status">HomePi Wiki online</span></div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <button class="menu" id="menu" aria-label="Navigation öffnen">☰</button>
+      <div><span class="eyebrow">HOMEPI / WIKI</span><h1>{{ title }}</h1></div>
+      <a class="pill" href="{{ kiwix_url }}">Offline Wissen</a>
+    </header>
+
+    {% if page %}
+    <article class="article card">
+      <div class="article-meta"><span>{{ page.category }}</span>{% if page.description %}<span>{{ page.description }}</span>{% endif %}</div>
+      <div class="prose">{{ page_html|safe }}</div>
+    </article>
+    {% else %}
+    <section class="hero card">
+      <div><span class="eyebrow">PRIVATE KNOWLEDGE HUB</span><h2>Alles über deinen Home Server an einem Ort.</h2><p>Dokumentation, Befehle, Netzwerk, Projekte und Offline-Wissen — lokal auf deinem Raspberry Pi.</p></div>
+      <div class="hero-stat"><strong id="page-count">{{ categories.values()|map('length')|sum }}</strong><span>Wiki-Seiten</span></div>
+    </section>
+
+    <section class="grid docs-grid">
+      {% for category, items in categories.items() %}
+      <div class="card category-card">
+        <div class="section-head"><h3>{{ category }}</h3><span>{{ items|length }}</span></div>
+        {% for item in items %}
+        <a class="doc-row" href="{{ prefix }}/page/{{ item.slug }}">
+          <span><b>{{ item.title }}</b><small>{{ item.description or 'Dokumentation öffnen' }}</small></span><span>›</span>
+        </a>
+        {% endfor %}
+      </div>
+      {% endfor %}
+    </section>
+
+    <section id="offline-library" class="library">
+      <div class="section-title"><div><span class="eyebrow">USB / KIWIX</span><h2>Offline Library</h2></div><div class="storage" id="storage">Speicher wird geprüft…</div></div>
+      <div class="grid library-grid">
+        {% if library %}
+          {% for item in library %}
+          <div class="card library-card">
+            <div class="book-icon">ZIM</div>
+            <div><span class="tag">OFFLINE</span><h3>{{ item.name }}</h3><p>{{ item.size_gb }} GB · lokal auf USB</p></div>
+            <a class="button" href="{{ item.url }}">Lesen</a>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="card empty-card"><div><span class="tag muted">NOCH LEER</span><h3>Noch keine ZIM-Dateien erkannt</h3><p>Nach der Pi-Einrichtung erscheinen Wikipedia, Medizin oder WikiHow hier automatisch.</p></div></div>
+        {% endif %}
+      </div>
+    </section>
+    {% endif %}
+  </main>
+</div>
+<script>window.HOMEPI_WIKI_PREFIX={{ prefix|tojson }};</script>
+<script src="{{ prefix }}/static/app.js"></script>
+</body>
+</html>
