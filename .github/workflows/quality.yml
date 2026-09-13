@@ -55,4 +55,9 @@ jobs:
           python-version: "3.13"
           cache: pip
       - run: python -m pip install --upgrade pip pip-audit
-      - run: pip-audit -r requirements.txt
+      - name: Audit production dependencies
+        # PYSEC-2026-2132 is click 8.1.8 pulled by gTTS 2.5.x, which currently
+        # constrains click<8.2. HomePi imports gTTS as a library and does not
+        # execute the vulnerable Click CLI surface. Keep this single explicit
+        # exception visible until gTTS releases a compatible dependency range.
+        run: pip-audit -r requirements.txt --ignore-vuln PYSEC-2026-2132
