@@ -42,7 +42,7 @@ ACTION_REGISTRY: dict[str, ActionSpec] = {
         emoji="🏠",
         style=discord.ButtonStyle.primary,
         handler="control_center",
-        next_actions=("quick_check", "system_status", "diagnostics"),
+        next_actions=("quick_check", "system_status", "services", "diagnostics"),
     ),
     "quick_check": ActionSpec(
         id="quick_check",
@@ -51,7 +51,7 @@ ACTION_REGISTRY: dict[str, ActionSpec] = {
         emoji="🩺",
         style=discord.ButtonStyle.success,
         handler="quick_check",
-        next_actions=("system_status", "diagnostics"),
+        next_actions=("system_status", "services", "diagnostics"),
     ),
     "system_status": ActionSpec(
         id="system_status",
@@ -60,7 +60,16 @@ ACTION_REGISTRY: dict[str, ActionSpec] = {
         emoji="🖥️",
         style=discord.ButtonStyle.primary,
         handler="system_status",
-        next_actions=("quick_check", "diagnostics"),
+        next_actions=("services", "quick_check", "diagnostics"),
+    ),
+    "services": ActionSpec(
+        id="services",
+        label="Services",
+        description="Öffnet den geführten Service-Status und optionalen Restart-Flow.",
+        emoji="🧩",
+        style=discord.ButtonStyle.secondary,
+        handler="services",
+        next_actions=("system_status", "quick_check", "diagnostics"),
     ),
     "diagnostics": ActionSpec(
         id="diagnostics",
@@ -70,20 +79,20 @@ ACTION_REGISTRY: dict[str, ActionSpec] = {
         style=discord.ButtonStyle.secondary,
         handler="diagnostics",
         required_permission="manage_guild",
-        next_actions=("system_status", "quick_check"),
+        next_actions=("system_status", "services", "quick_check"),
     ),
 }
 
 
 _CONTEXT_ACTIONS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
     (("admin", "config", "system", "health", "diagnose", "pi", "bot"),
-     ("system_status", "quick_check", "diagnostics", "related", "control_center")),
+     ("system_status", "quick_check", "services", "diagnostics", "control_center")),
     (("overview", "pulse", "handover", "timeline"),
-     ("system_status", "quick_check", "related", "control_center")),
+     ("system_status", "services", "quick_check", "related", "control_center")),
     (("media", "radio", "spotify", "youtube", "nowplaying"),
      ("related", "control_center", "system_status")),
     (("mesh", "meshtastic"),
-     ("related", "system_status", "quick_check", "control_center")),
+     ("related", "system_status", "services", "quick_check", "control_center")),
 )
 
 _DEFAULT_ACTIONS = ("related", "control_center")
