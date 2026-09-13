@@ -28,6 +28,24 @@ UNIT_ACTIONS = {
 }
 SYSTEM_ACTIONS = {"reboot", "poweroff", "daemon-reload", "list"}
 
+# This helper is intentionally callable through a narrow NOPASSWD sudo rule.
+# Therefore validation must be an authorization boundary, not merely syntax
+# validation. Keep this list explicit and review additions like root privileges.
+ALLOWED_UNITS = frozenset(
+    {
+        "homepi-flight-radar.service",
+        "pihole-FTL.service",
+        "raspberry-bot.service",
+        "raspberry-dashboard.service",
+        "raspberry-display.service",
+        "raspberry-display2.service",
+        "raspberry-intelligence.service",
+        "raspberry-meshtastic.service",
+        "ssh.service",
+        "tailscaled.service",
+    }
+)
+
 
 def _write_event(action: str, unit: str | None, status: str, detail: str = "") -> None:
     payload = {
@@ -63,6 +81,8 @@ def clean_unit(raw: str) -> str:
         raise ValueError("Ungültiger systemd-Unit-Name.")
     if "." not in unit:
         unit += ".service"
+    if unit not in ALLOWED_UNITS:
+        raise ValueError("Diese systemd-Unit ist für HomePi Remote Control nicht freigegeben.")
     return unit
 
 
