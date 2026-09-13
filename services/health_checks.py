@@ -5,9 +5,9 @@ import sqlite3
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Awaitable, Callable
+from typing import Awaitable
 
-from dashboard.services.commands import run_command
+from services.process_runner import run_process
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,7 +54,7 @@ def _status(active: str, sub: str) -> str:
 
 async def check_systemd_service(name: str, unit: str) -> HealthResult:
     started = time.perf_counter()
-    result = await run_command(
+    result = await run_process(
         [
             "systemctl",
             "show",
