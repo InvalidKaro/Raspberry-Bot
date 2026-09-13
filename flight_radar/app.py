@@ -252,6 +252,17 @@ async def _aircraft_snapshot(lat: float, lon: float, radius: float) -> dict[str,
 
 async def index(_: web.Request) -> web.Response:
     html = TEMPLATE.read_text(encoding="utf-8")
+    # CARTO began requiring an API key for its raster basemaps in 2026.
+    # Use standard OpenStreetMap tiles instead; the existing CSS gives them
+    # the dark/radar appearance and keeps the radar itself keyless.
+    html = html.replace(
+        "L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png',{subdomains:'abcd',maxZoom:19,attribution:'© OpenStreetMap © CARTO'}).addTo(map);",
+        "L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap contributors'}).addTo(map);",
+    )
+    html = html.replace(
+        "L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png',{subdomains:'abcd',maxZoom:19,pane:'overlayPane',opacity:.68}).addTo(map);",
+        "",
+    )
     html = html.replace("</body>", MOBILE_PATCH + "\n</body>")
     return web.Response(
         text=html,
