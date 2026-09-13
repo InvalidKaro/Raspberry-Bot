@@ -28,7 +28,7 @@ def test_action_contexts() -> None:
     mesh = action_ids_for_command("mesh status")
     generic = action_ids_for_command("userinfo")
 
-    assert admin[:4] == ("system_status", "quick_check", "services", "diagnostics")
+    assert admin[:5] == ("related", "system_status", "quick_check", "services", "diagnostics")
     assert "services" in mesh
     assert "related" in media
     assert generic == ("related", "control_center")
