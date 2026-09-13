@@ -1,0 +1,17 @@
+[Unit]
+Description=HomePi Blackbox retention cleanup
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=stefano
+Group=stefano
+WorkingDirectory=/home/stefano/services/Raspberry-Bot
+EnvironmentFile=-/home/stefano/services/Raspberry-Bot/.env.homepi
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/home/stefano/services/Raspberry-Bot/.venv/bin/python /home/stefano/services/Raspberry-Bot/scripts/prune_homepi_blackbox.py
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=false
+ReadWritePaths=/home/stefano/services/Raspberry-Bot/data

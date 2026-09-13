@@ -16,13 +16,29 @@ def main() -> None:
     root = Path(tempfile.mkdtemp(prefix="homepi-intel-smoke-"))
     intel.BLACKBOX_DB_PATH = root / "blackbox.sqlite3"
     intel.STATE_PATH = root / "state.json"
+    intel.RETENTION_DAYS = 30
     intel.init_db()
+
+    assert "homepi-flight-radar.service" in intel.WATCH_SERVICES
+    assert "raspberry-intelligence.service" in intel.WATCH_SERVICES
 
     intel.log_event("internet_down", "Internet ausgefallen", "test", "warning")
     intel.log_event("service_down", "Bot down", "test", "warning")
     summary = intel.blackbox_summary(24)
     assert summary["internet_outages"] == 1, summary
     assert summary["service_crashes"] == 1, summary
+
+    old = time.time() - 60 * 86400
+    intel.log_event("old_test", "old", timestamp=old)
+    with intel._db() as con:
+        con.execute(
+            "INSERT INTO samples(created_at,temperature,cpu_percent,ram_percent,disk_percent,internet_online,score) VALUES(?,?,?,?,?,?,?)",
+            (old, 40.0, 10.0, 20.0, 30.0, 1, 100),
+        )
+    intel._cleanup()
+    with intel._db() as con:
+        assert con.execute("SELECT COUNT(*) FROM events WHERE kind='old_test'").fetchone()[0] == 0
+        assert con.execute("SELECT COUNT(*) FROM samples WHERE created_at=?", (old,)).fetchone()[0] == 0
 
     score = intel.calculate_score(
         {
@@ -39,6 +55,8 @@ def main() -> None:
     )
     assert score["overall"] >= 95, score
     assert score["status"] == "GREEN", score
+    assert score["services_active"] == 2, score
+    assert score["services_total"] == 2, score
 
     warnings = intel.parse_nina_payload(
         [
