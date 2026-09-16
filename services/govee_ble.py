@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+_MODEL_RE = re.compile(r"(H[0-9A-Z]{4})", re.IGNORECASE)
 
 
 @dataclass(slots=True)
@@ -30,6 +33,10 @@ class GoveeBleDevice:
     def battery_percent(self) -> float | None:
         return self._numeric_reading("battery")
 
+    @property
+    def display_name(self) -> str:
+        return f"{self.model or 'Govee'} · {self.name}"
+
     def _numeric_reading(self, needle: str) -> float | None:
         for key, value in self.readings.items():
             if needle in key.lower() and isinstance(value, (int, float)):
@@ -50,6 +57,11 @@ class GoveeBleScanner:
             or lowered.startswith("gv")
             or lowered.startswith("ihoment")
         )
+
+    @staticmethod
+    def infer_model(name: str) -> str | None:
+        match = _MODEL_RE.search(name.upper())
+        return match.group(1).upper() if match else None
 
     async def scan(self, timeout: float = 5.0) -> list[GoveeBleDevice]:
         try:
@@ -74,17 +86,20 @@ class GoveeBleScanner:
             if not address or not self._looks_like_govee(name):
                 return
 
+            inferred_model = self.infer_model(name)
             result = self.devices.get(address)
             if result is None:
                 result = GoveeBleDevice(
                     address=address,
                     name=name or "Govee BLE",
                     rssi=getattr(advertisement_data, "rssi", None),
+                    model=inferred_model,
                 )
                 self.devices[address] = result
             else:
                 result.name = name or result.name
                 result.rssi = getattr(advertisement_data, "rssi", result.rssi)
+                result.model = inferred_model or result.model
                 result.last_seen = time.monotonic()
 
             parser = parsers.setdefault(address, GoveeBluetoothDeviceData())
@@ -125,10 +140,7 @@ class GoveeBleScanner:
         finally:
             await scanner.stop()
 
-        return sorted(
-            self.devices.values(),
-            key=lambda item: (item.model or "", item.name, item.address),
-        )
+        return self.cached_devices()
 
     @staticmethod
     def _merge_readings(device: GoveeBleDevice, update: Any) -> None:
@@ -167,3 +179,29 @@ class GoveeBleScanner:
             self.devices.values(),
             key=lambda item: (item.model or "", item.name, item.address),
         )
+
+    def resolve(self, selector: str) -> GoveeBleDevice:
+        value = selector.strip().lower()
+        if not value:
+            raise LookupError("Kein Bluetooth-Gerät angegeben.")
+
+        exact: list[GoveeBleDevice] = []
+        partial: list[GoveeBleDevice] = []
+        for device in self.devices.values():
+            fields = (
+                device.address,
+                device.name,
+                device.model or "",
+            )
+            lowered = tuple(field.lower() for field in fields)
+            if value in lowered:
+                exact.append(device)
+            elif any(value in field for field in lowered):
+                partial.append(device)
+
+        matches = exact or partial
+        if not matches:
+            raise LookupError("Bluetooth-Gerät nicht gefunden. Führe zuerst `/home scan` aus.")
+        if len(matches) > 1:
+            raise LookupError("Mehrere Bluetooth-Geräte passen. Nutze die Autovervollständigung.")
+        return matches[0]
