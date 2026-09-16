@@ -33,6 +33,7 @@ jobs:
       - run: python scripts/meshtastic_smoke.py
       - run: python scripts/homepi_intelligence_smoke.py
       - run: python scripts/voice_control_smoke.py
+      - run: python scripts/smart_home_smoke.py
       - name: Privileged helper rejects unknown units
         run: |
           if python scripts/homepi_systemctl.py status definitely-not-a-real-service; then

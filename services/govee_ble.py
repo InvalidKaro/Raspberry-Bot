@@ -12,6 +12,14 @@ logger = logging.getLogger(__name__)
 _MODEL_RE = re.compile(r"(H[0-9A-Z]{4})", re.IGNORECASE)
 
 
+class GoveeBleUnavailableError(RuntimeError):
+    """Raised when Linux/BlueZ cannot provide a powered BLE adapter."""
+
+
+class GoveeBleScanError(RuntimeError):
+    """Raised when BLE discovery fails for another reason."""
+
+
 @dataclass(slots=True)
 class GoveeBleDevice:
     address: str
@@ -37,6 +45,13 @@ class GoveeBleDevice:
     def display_name(self) -> str:
         return f"{self.model or 'Govee'} · {self.name}"
 
+    @property
+    def masked_address(self) -> str:
+        parts = self.address.split(":")
+        if len(parts) >= 2:
+            return f"…:{parts[-2]}:{parts[-1]}"
+        return "hidden"
+
     def _numeric_reading(self, needle: str) -> float | None:
         for key, value in self.readings.items():
             if needle in key.lower() and isinstance(value, (int, float)):
@@ -45,8 +60,9 @@ class GoveeBleDevice:
 
 
 class GoveeBleScanner:
-    def __init__(self) -> None:
+    def __init__(self, radio_lock: asyncio.Lock | None = None) -> None:
         self.devices: dict[str, GoveeBleDevice] = {}
+        self._radio_lock = radio_lock or asyncio.Lock()
 
     @staticmethod
     def _looks_like_govee(name: str) -> bool:
@@ -63,18 +79,18 @@ class GoveeBleScanner:
         match = _MODEL_RE.search(name.upper())
         return match.group(1).upper() if match else None
 
-    async def scan(self, timeout: float = 5.0) -> list[GoveeBleDevice]:
+    async def scan(self, timeout: float = 6.0) -> list[GoveeBleDevice]:
         try:
             from bleak import BleakScanner
             from bluetooth_sensor_state_data import BluetoothServiceInfo
             from govee_ble import GoveeBluetoothDeviceData
         except ImportError as exc:
-            raise RuntimeError(
-                "BLE-Unterstützung fehlt. Installiere `bleak` und `govee-ble` "
-                "aus requirements.txt."
+            raise GoveeBleUnavailableError(
+                "BLE-Abhängigkeiten fehlen. Installiere `bleak` und `govee-ble`."
             ) from exc
 
         parsers: dict[str, Any] = {}
+        seen: set[str] = set()
 
         def detection_callback(device: Any, advertisement_data: Any) -> None:
             name = str(
@@ -86,19 +102,21 @@ class GoveeBleScanner:
             if not address or not self._looks_like_govee(name):
                 return
 
+            seen.add(address)
             inferred_model = self.infer_model(name)
+            rssi = getattr(advertisement_data, "rssi", None)
             result = self.devices.get(address)
             if result is None:
                 result = GoveeBleDevice(
                     address=address,
                     name=name or "Govee BLE",
-                    rssi=getattr(advertisement_data, "rssi", None),
+                    rssi=rssi,
                     model=inferred_model,
                 )
                 self.devices[address] = result
             else:
                 result.name = name or result.name
-                result.rssi = getattr(advertisement_data, "rssi", result.rssi)
+                result.rssi = rssi if rssi is not None else result.rssi
                 result.model = inferred_model or result.model
                 result.last_seen = time.monotonic()
 
@@ -107,7 +125,7 @@ class GoveeBleScanner:
                 service_info = BluetoothServiceInfo(
                     name=name or result.name,
                     address=address,
-                    rssi=int(getattr(advertisement_data, "rssi", -127)),
+                    rssi=int(rssi if rssi is not None else -127),
                     manufacturer_data=dict(
                         getattr(advertisement_data, "manufacturer_data", {}) or {}
                     ),
@@ -124,9 +142,9 @@ class GoveeBleScanner:
                 self._merge_readings(result, update)
             except Exception:
                 logger.debug(
-                    "Govee BLE advertisement was not a sensor packet: %s (%s)",
-                    name,
-                    address,
+                    "Ignored non-sensor Govee advertisement for %s (%s)",
+                    result.model or result.name,
+                    result.masked_address,
                     exc_info=True,
                 )
 
@@ -134,13 +152,33 @@ class GoveeBleScanner:
             detection_callback=detection_callback,
             scanning_mode="active",
         )
+        started = False
         try:
-            await scanner.start()
-            await asyncio.sleep(max(1.0, min(timeout, 15.0)))
+            async with self._radio_lock:
+                await scanner.start()
+                started = True
+                await asyncio.sleep(max(1.0, min(float(timeout), 15.0)))
+                await scanner.stop()
+                started = False
+        except Exception as exc:
+            message = str(exc)
+            if "No powered Bluetooth adapters" in message or "POWERED_OFF" in message:
+                raise GoveeBleUnavailableError(
+                    "Bluetooth ist am HomePi ausgeschaltet. "
+                    "Prüfe `bluetoothctl show` und `sudo rfkill unblock bluetooth`."
+                ) from exc
+            raise GoveeBleScanError(f"Bluetooth-Scan fehlgeschlagen: {message}") from exc
         finally:
-            await scanner.stop()
+            if started:
+                try:
+                    await scanner.stop()
+                except Exception:
+                    logger.debug("BLE scanner cleanup failed", exc_info=True)
 
-        return self.cached_devices()
+        return sorted(
+            (self.devices[address] for address in seen if address in self.devices),
+            key=lambda item: (item.model or "", item.name, item.address),
+        )
 
     @staticmethod
     def _merge_readings(device: GoveeBleDevice, update: Any) -> None:
@@ -156,8 +194,7 @@ class GoveeBleScanner:
                 continue
 
             native_value = getattr(value, "native_value", None)
-            key_obj = getattr(device_key, "key", "")
-            key = str(key_obj or "").strip()
+            key = str(getattr(device_key, "key", "") or "").strip()
             device_class = getattr(description, "device_class", None)
             if hasattr(device_class, "value"):
                 device_class = device_class.value
@@ -170,13 +207,17 @@ class GoveeBleScanner:
                 )
                 if part
             ).strip()
-            if not label:
-                label = key or "value"
-            device.readings[label] = native_value
+            device.readings[label or key or "value"] = native_value
 
-    def cached_devices(self) -> list[GoveeBleDevice]:
+    def cached_devices(self, max_age: float | None = 300.0) -> list[GoveeBleDevice]:
+        now = time.monotonic()
+        devices = [
+            device
+            for device in self.devices.values()
+            if max_age is None or now - device.last_seen <= max_age
+        ]
         return sorted(
-            self.devices.values(),
+            devices,
             key=lambda item: (item.model or "", item.name, item.address),
         )
 
@@ -187,12 +228,8 @@ class GoveeBleScanner:
 
         exact: list[GoveeBleDevice] = []
         partial: list[GoveeBleDevice] = []
-        for device in self.devices.values():
-            fields = (
-                device.address,
-                device.name,
-                device.model or "",
-            )
+        for device in self.cached_devices(max_age=None):
+            fields = (device.address, device.name, device.model or "")
             lowered = tuple(field.lower() for field in fields)
             if value in lowered:
                 exact.append(device)
@@ -203,5 +240,7 @@ class GoveeBleScanner:
         if not matches:
             raise LookupError("Bluetooth-Gerät nicht gefunden. Führe zuerst `/home scan` aus.")
         if len(matches) > 1:
-            raise LookupError("Mehrere Bluetooth-Geräte passen. Nutze die Autovervollständigung.")
+            raise LookupError(
+                "Mehrere Bluetooth-Geräte passen. Nutze die Autovervollständigung."
+            )
         return matches[0]

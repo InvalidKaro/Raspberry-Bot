@@ -1,9 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
+from typing import Any
 
 from services.govee_ble import GoveeBleDevice
+
+logger = logging.getLogger(__name__)
+
+
+class GoveeBleControlError(RuntimeError):
+    """Raised when an explicitly supported BLE light cannot be controlled."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,8 +24,9 @@ class GoveeBleLightCapabilities:
 class GoveeBleLightController:
     """Direct BLE controller for explicitly supported Govee light models.
 
-    Connections are short-lived and opened only for a requested command so the
-    Raspberry Pi does not keep BLE sessions alive while idle.
+    BLE sessions are short-lived and serialized through one shared radio lock.
+    This keeps the Raspberry Pi 3 B+ idle footprint low and avoids scan/connect
+    collisions on BlueZ.
     """
 
     WRITE_UUIDS = (
@@ -32,12 +41,19 @@ class GoveeBleLightController:
         ),
     }
 
-    def __init__(self) -> None:
-        self._lock = asyncio.Lock()
+    def __init__(self, radio_lock: asyncio.Lock | None = None) -> None:
+        self._radio_lock = radio_lock or asyncio.Lock()
+
+    @classmethod
+    def capabilities_for(
+        cls,
+        device: GoveeBleDevice,
+    ) -> GoveeBleLightCapabilities | None:
+        return cls.SUPPORTED_MODELS.get((device.model or "").upper())
 
     @classmethod
     def supports(cls, device: GoveeBleDevice) -> bool:
-        return (device.model or "").upper() in cls.SUPPORTED_MODELS
+        return cls.capabilities_for(device) is not None
 
     @staticmethod
     def _build_packet(command: int, payload: list[int]) -> bytes:
@@ -45,11 +61,16 @@ class GoveeBleLightController:
         if len(data) > 19:
             raise ValueError("Govee BLE packet payload is too large")
         data.extend([0x00] * (19 - len(data)))
+
         checksum = 0
         for byte in data:
             checksum ^= byte
         data.append(checksum)
-        return bytes(data)
+
+        packet = bytes(data)
+        if len(packet) != 20:
+            raise AssertionError("Govee BLE packets must be exactly 20 bytes")
+        return packet
 
     @classmethod
     def _power_packet(cls, on: bool) -> bytes:
@@ -89,37 +110,99 @@ class GoveeBleLightController:
         model = (device.model or "").upper()
         capabilities = self.SUPPORTED_MODELS.get(model)
         if capabilities is None:
-            raise RuntimeError(
-                f"Direkte Bluetooth-Steuerung ist für {model or device.name} noch nicht freigeschaltet."
+            raise GoveeBleControlError(
+                f"Direkte Bluetooth-Steuerung ist für {model or device.name} "
+                "noch nicht freigeschaltet."
             )
         if not bool(getattr(capabilities, capability, False)):
-            raise RuntimeError(f"{model} unterstützt diese BLE-Funktion im Bot nicht.")
+            raise GoveeBleControlError(
+                f"{model} unterstützt diese BLE-Funktion im Bot nicht."
+            )
 
     async def _write(self, device: GoveeBleDevice, packet: bytes) -> None:
         try:
-            from bleak import BleakClient
+            from bleak import BleakClient, BleakScanner
         except ImportError as exc:
-            raise RuntimeError("`bleak` ist nicht installiert.") from exc
+            raise GoveeBleControlError("`bleak` ist nicht installiert.") from exc
 
-        async with self._lock:
-            client = BleakClient(device.address, timeout=15.0)
-            try:
-                await client.connect()
-                if not client.is_connected:
-                    raise ConnectionError(f"Keine BLE-Verbindung zu {device.display_name}")
-
-                characteristic = self._find_write_characteristic(client)
-                if characteristic is None:
-                    raise RuntimeError(
-                        f"Keine bekannte Govee-Schreib-Characteristic bei {device.display_name} gefunden."
+        last_error: Exception | None = None
+        async with self._radio_lock:
+            for attempt in range(1, 3):
+                client: Any | None = None
+                try:
+                    ble_device = await BleakScanner.find_device_by_address(
+                        device.address,
+                        timeout=5.0,
                     )
+                    if ble_device is None:
+                        raise GoveeBleControlError(
+                            f"{device.model or 'Govee'} ist aktuell nicht in Bluetooth-Reichweite."
+                        )
 
-                await client.write_gatt_char(characteristic, packet, response=False)
-            finally:
-                if client.is_connected:
-                    await client.disconnect()
+                    client = BleakClient(ble_device, timeout=12.0)
+                    await client.connect()
+                    if not client.is_connected:
+                        raise GoveeBleControlError(
+                            f"Keine Bluetooth-Verbindung zu {device.model or device.name}."
+                        )
 
-    def _find_write_characteristic(self, client: object) -> str | None:
+                    characteristic = self._find_write_characteristic(client)
+                    if characteristic is None:
+                        raise GoveeBleControlError(
+                            f"Keine bekannte Govee-Schreib-Characteristic bei "
+                            f"{device.model or device.name} gefunden."
+                        )
+
+                    properties = set(getattr(characteristic, "properties", []) or [])
+                    response = (
+                        "write" in properties
+                        and "write-without-response" not in properties
+                    )
+                    await client.write_gatt_char(
+                        characteristic,
+                        packet,
+                        response=response,
+                    )
+                    logger.info(
+                        "Govee BLE command sent model=%s address=%s attempt=%s",
+                        device.model or "unknown",
+                        device.masked_address,
+                        attempt,
+                    )
+                    return
+                except Exception as exc:
+                    last_error = exc
+                    logger.warning(
+                        "Govee BLE command attempt failed model=%s address=%s attempt=%s error=%s",
+                        device.model or "unknown",
+                        device.masked_address,
+                        attempt,
+                        type(exc).__name__,
+                    )
+                    if attempt < 2:
+                        await asyncio.sleep(0.6)
+                finally:
+                    if client is not None and client.is_connected:
+                        try:
+                            await client.disconnect()
+                        except Exception:
+                            logger.debug(
+                                "Govee BLE disconnect failed model=%s address=%s",
+                                device.model or "unknown",
+                                device.masked_address,
+                                exc_info=True,
+                            )
+
+        if isinstance(last_error, GoveeBleControlError):
+            raise last_error
+        if last_error is not None:
+            raise GoveeBleControlError(
+                f"Bluetooth-Steuerung von {device.model or device.name} ist nach "
+                f"2 Versuchen fehlgeschlagen ({type(last_error).__name__})."
+            ) from last_error
+        raise GoveeBleControlError("Bluetooth-Steuerung ist fehlgeschlagen.")
+
+    def _find_write_characteristic(self, client: object) -> Any | None:
         services = getattr(client, "services", None)
         if services is None:
             return None
@@ -127,10 +210,11 @@ class GoveeBleLightController:
         wanted = {uuid.lower() for uuid in self.WRITE_UUIDS}
         for service in services:
             for characteristic in service.characteristics:
-                uuid = str(characteristic.uuid).lower()
-                properties = set(characteristic.properties or [])
-                if uuid in wanted and (
-                    "write" in properties or "write-without-response" in properties
-                ):
-                    return str(characteristic.uuid)
+                properties = set(getattr(characteristic, "properties", []) or [])
+                writable = (
+                    "write" in properties
+                    or "write-without-response" in properties
+                )
+                if writable and str(characteristic.uuid).lower() in wanted:
+                    return characteristic
         return None
