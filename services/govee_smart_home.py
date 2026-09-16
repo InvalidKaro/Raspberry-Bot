@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass
 
 from services.govee_ble import GoveeBleDevice, GoveeBleScanner
+from services.govee_ble_light import GoveeBleLightController
 from services.govee_lan import GoveeLanClient, GoveeLanDevice
 
 
@@ -23,6 +24,7 @@ class GoveeSmartHomeService:
     def __init__(self) -> None:
         self.lan = GoveeLanClient()
         self.ble = GoveeBleScanner()
+        self.ble_lights = GoveeBleLightController()
         self._discover_lock = asyncio.Lock()
 
     async def discover_all(
@@ -50,6 +52,34 @@ class GoveeSmartHomeService:
         if cached:
             return cached
         return await self.lan.discover()
+
+    async def ensure_ble_devices(self) -> list[GoveeBleDevice]:
+        cached = self.ble.cached_devices()
+        if cached:
+            return cached
+        return await self.ble.scan(6.0)
+
+    async def supported_ble_lights(self) -> list[GoveeBleDevice]:
+        devices = await self.ensure_ble_devices()
+        return [device for device in devices if self.ble_lights.supports(device)]
+
+    async def ble_power(self, selector: str, on: bool) -> GoveeBleDevice:
+        await self.ensure_ble_devices()
+        target = self.ble.resolve(selector)
+        await self.ble_lights.power(target, on)
+        return target
+
+    async def ble_brightness(self, selector: str, value: int) -> GoveeBleDevice:
+        await self.ensure_ble_devices()
+        target = self.ble.resolve(selector)
+        await self.ble_lights.brightness(target, value)
+        return target
+
+    async def ble_color(self, selector: str, r: int, g: int, b: int) -> GoveeBleDevice:
+        await self.ensure_ble_devices()
+        target = self.ble.resolve(selector)
+        await self.ble_lights.color(target, r, g, b)
+        return target
 
     async def all_power(self, on: bool) -> int:
         devices = await self.ensure_lan_devices()
