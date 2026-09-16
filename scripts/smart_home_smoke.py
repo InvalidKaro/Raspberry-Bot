@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import pathlib
 import sys
+from datetime import UTC, datetime, timedelta
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from services.govee_ble import GoveeBleDevice, GoveeBleScanner
 from services.govee_ble_light import GoveeBleLightController
+from services.govee_climate_history import ClimateSample, GoveeClimateHistory
 from services.govee_smart_home import GoveeSmartHomeService
 
 
@@ -58,6 +60,35 @@ def main() -> None:
 
     service.ble.resolve(h617e.address)
     service.ble.resolve("H617E")
+
+    now = datetime.now(UTC)
+    samples = [
+        ClimateSample(
+            recorded_at=now - timedelta(minutes=10),
+            temperature_c=21.0,
+            humidity_percent=45.0,
+            battery_percent=90.0,
+        ),
+        ClimateSample(
+            recorded_at=now - timedelta(minutes=5),
+            temperature_c=22.0,
+            humidity_percent=47.0,
+            battery_percent=90.0,
+        ),
+        ClimateSample(
+            recorded_at=now,
+            temperature_c=23.0,
+            humidity_percent=49.0,
+            battery_percent=89.0,
+        ),
+    ]
+    stats = GoveeClimateHistory.summarize(samples)
+    assert stats["temperature"].minimum == 21.0
+    assert stats["temperature"].average == 22.0
+    assert stats["temperature"].maximum == 23.0
+    assert stats["humidity"].minimum == 45.0
+    assert stats["humidity"].average == 47.0
+    assert stats["humidity"].maximum == 49.0
 
     print("Smart-home smoke tests passed.")
 

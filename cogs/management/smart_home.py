@@ -4,11 +4,13 @@ import logging
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 from helpers.embeds import EmbedFactory
 from services.govee_ble import GoveeBleUnavailableError
 from services.govee_ble_light import GoveeBleControlError
+from services.govee_climate_chart import render_climate_history
+from services.govee_climate_history import GoveeClimateHistory
 from services.govee_smart_home import (
     GoveeDeviceSummary,
     GoveeSmartHomeService,
@@ -18,6 +20,13 @@ logger = logging.getLogger(__name__)
 
 SMART_HOME_GUILD_ID = 1162733312226361454
 SMART_HOME_GUILD = discord.Object(id=SMART_HOME_GUILD_ID)
+
+CLIMATE_PERIOD_CHOICES = [
+    app_commands.Choice(name="6 Stunden", value=6),
+    app_commands.Choice(name="24 Stunden", value=24),
+    app_commands.Choice(name="7 Tage", value=168),
+    app_commands.Choice(name="30 Tage", value=720),
+]
 
 
 class SmartHomeDeviceSelect(discord.ui.Select):
@@ -183,13 +192,16 @@ class SmartHome(
 ):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
-        self._service: GoveeSmartHomeService | None = None
+        self.service = GoveeSmartHomeService()
+        self.climate_history = GoveeClimateHistory(bot.database)
 
-    @property
-    def service(self) -> GoveeSmartHomeService:
-        if self._service is None:
-            self._service = GoveeSmartHomeService()
-        return self._service
+    async def cog_load(self) -> None:
+        await self.climate_history.ensure_schema()
+        if not self.climate_collector.is_running():
+            self.climate_collector.start()
+
+    async def cog_unload(self) -> None:
+        self.climate_collector.cancel()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.guild_id != SMART_HOME_GUILD_ID:
@@ -200,6 +212,164 @@ class SmartHome(
                 )
             return False
         return True
+
+    @tasks.loop(minutes=5)
+    async def climate_collector(self) -> None:
+        try:
+            sensors = await self._scan_and_store_climate(timeout=6.0)
+            if sensors:
+                logger.debug(
+                    "Stored %s Govee climate sample(s)",
+                    len(sensors),
+                )
+        except GoveeBleUnavailableError:
+            logger.debug("Skipped climate collection because Bluetooth is unavailable")
+        except Exception:
+            logger.warning("Govee climate background collection failed", exc_info=True)
+
+    @climate_collector.before_loop
+    async def before_climate_collector(self) -> None:
+        await self.bot.wait_until_ready()
+
+    async def _scan_and_store_climate(self, *, timeout: float = 7.0) -> list[object]:
+        await self.service.ble.scan(timeout)
+        sensors = self.service.sensor_devices()
+        if sensors:
+            await self.climate_history.record_devices(sensors)
+        return list(sensors)
+
+    async def send_climate_report(
+        self,
+        interaction: discord.Interaction,
+        *,
+        period_hours: int = 24,
+    ) -> None:
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True, thinking=True)
+
+        try:
+            sensors = await self._scan_and_store_climate(timeout=7.0)
+        except Exception as exc:
+            await self.send_control_error(
+                interaction,
+                exc,
+                title="Bluetooth-Klimascan fehlgeschlagen",
+            )
+            return
+
+        if not sensors:
+            await interaction.followup.send(
+                embed=EmbedFactory.warning(
+                    title="Kein Hygrometer dekodiert",
+                    description=(
+                        "Bluetooth funktioniert, aber beim aktuellen Scan wurde kein "
+                        "unterstütztes Govee-Klimagerät mit Messwerten empfangen."
+                    ),
+                ),
+                ephemeral=True,
+            )
+            return
+
+        sensor = next(
+            (item for item in sensors if getattr(item, "model", None) == "H5075"),
+            sensors[0],
+        )
+        device_key = str(getattr(sensor, "address"))
+        samples = await self.climate_history.fetch_samples(
+            device_key,
+            hours=period_hours,
+        )
+
+        if not samples:
+            await interaction.followup.send(
+                embed=EmbedFactory.warning(
+                    title="Noch keine Klimahistorie",
+                    description=(
+                        "Der aktuelle Wert wurde gespeichert. Beim nächsten Aufruf "
+                        "stehen bereits Verlaufsdaten zur Verfügung."
+                    ),
+                ),
+                ephemeral=True,
+            )
+            return
+
+        model = str(getattr(sensor, "model", None) or "Govee")
+        graph = await render_climate_history(
+            samples,
+            model=model,
+            period_hours=period_hours,
+        )
+        filename = f"{model.lower()}-climate-{period_hours}h.png"
+        file = discord.File(graph, filename=filename)
+
+        temperature = getattr(sensor, "temperature_c", None)
+        humidity = getattr(sensor, "humidity_percent", None)
+        battery = getattr(sensor, "battery_percent", None)
+        stats = self.climate_history.summarize(samples)
+
+        embed = EmbedFactory.system(
+            title=f"{model} · Raumklima",
+            description=(
+                f"Live über **Bluetooth** · Verlauf **{self._period_label(period_hours)}** · "
+                f"**{len(samples)}** Messpunkt(e)"
+            ),
+        )
+        if temperature is not None:
+            embed.add_field(
+                name="Temperatur",
+                value=f"**{float(temperature):.1f} °C**",
+                inline=True,
+            )
+        if humidity is not None:
+            embed.add_field(
+                name="Luftfeuchte",
+                value=f"**{float(humidity):.1f} %**",
+                inline=True,
+            )
+        if battery is not None:
+            embed.add_field(
+                name="Batterie",
+                value=f"**{float(battery):.0f} %**",
+                inline=True,
+            )
+
+        temp_stats = stats.get("temperature")
+        if temp_stats is not None:
+            embed.add_field(
+                name="Temperatur im Zeitraum",
+                value=(
+                    f"Min **{temp_stats.minimum:.1f} °C** · "
+                    f"Ø **{temp_stats.average:.1f} °C** · "
+                    f"Max **{temp_stats.maximum:.1f} °C**"
+                ),
+                inline=False,
+            )
+        humidity_stats = stats.get("humidity")
+        if humidity_stats is not None:
+            embed.add_field(
+                name="Luftfeuchte im Zeitraum",
+                value=(
+                    f"Min **{humidity_stats.minimum:.1f} %** · "
+                    f"Ø **{humidity_stats.average:.1f} %** · "
+                    f"Max **{humidity_stats.maximum:.1f} %**"
+                ),
+                inline=False,
+            )
+
+        if len(samples) < 3:
+            embed.set_footer(
+                text=(
+                    "Die lokale Historie startet gerade. "
+                    "Der Pi ergänzt automatisch alle 5 Minuten einen Messpunkt."
+                )
+            )
+
+        embed.set_image(url=f"attachment://{filename}")
+        await interaction.followup.send(
+            embed=embed,
+            file=file,
+            ephemeral=True,
+        )
 
     @app_commands.command(
         name="scan",
@@ -385,46 +555,19 @@ class SmartHome(
 
     @app_commands.command(
         name="climate",
-        description="Liest Govee Temperatur-/Feuchtesensoren per Bluetooth.",
+        description="Live-Raumklima mit lokalem Govee-Verlaufsgraph.",
     )
-    async def climate(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        try:
-            await self.service.ble.scan(7.0)
-            sensors = self.service.sensor_devices()
-        except Exception as exc:
-            await self.send_control_error(interaction, exc, title="Bluetooth-Klimascan fehlgeschlagen")
-            return
-
-        if not sensors:
-            await interaction.followup.send(
-                embed=EmbedFactory.warning(
-                    title="Kein Hygrometer dekodiert",
-                    description=(
-                        "Bluetooth funktioniert, aber beim aktuellen Scan wurde kein "
-                        "unterstütztes Govee-Klimagerät mit Messwerten empfangen."
-                    ),
-                ),
-                ephemeral=True,
-            )
-            return
-
-        embed = EmbedFactory.system(title="Raumklima")
-        for device in sensors[:10]:
-            values: list[str] = []
-            if device.temperature_c is not None:
-                values.append(f"Temperatur: **{device.temperature_c:.1f} °C**")
-            if device.humidity_percent is not None:
-                values.append(f"Luftfeuchte: **{device.humidity_percent:.1f} %**")
-            if device.battery_percent is not None:
-                values.append(f"Batterie: **{device.battery_percent:.0f} %**")
-            embed.add_field(
-                name=f"{device.model or 'Govee'} · {device.name}",
-                value="\n".join(values),
-                inline=False,
-            )
-
-        await interaction.followup.send(embed=embed, ephemeral=True)
+    @app_commands.describe(period="Zeitraum für den Graphen")
+    @app_commands.choices(period=CLIMATE_PERIOD_CHOICES)
+    async def climate(
+        self,
+        interaction: discord.Interaction,
+        period: app_commands.Choice[int] | None = None,
+    ) -> None:
+        await self.send_climate_report(
+            interaction,
+            period_hours=period.value if period is not None else 24,
+        )
 
     @app_commands.command(
         name="power",
@@ -583,6 +726,18 @@ class SmartHome(
             values.append(f"{humidity:.1f} %")
         return f"`{model}` · {' · '.join(values) if values else 'Messwerte erkannt'}"
 
+    @staticmethod
+    def _period_label(hours: int) -> str:
+        if hours == 6:
+            return "6 Stunden"
+        if hours == 24:
+            return "24 Stunden"
+        if hours == 168:
+            return "7 Tage"
+        if hours == 720:
+            return "30 Tage"
+        return f"{hours} Stunden"
+
     async def send_control_error(
         self,
         interaction: discord.Interaction,
@@ -611,5 +766,32 @@ class SmartHome(
         )
 
 
+@app_commands.guilds(SMART_HOME_GUILD)
+class ClimateShortcut(commands.Cog):
+    def __init__(self, smart_home: SmartHome) -> None:
+        self.smart_home = smart_home
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.guild_id == SMART_HOME_GUILD_ID
+
+    @app_commands.command(
+        name="climate",
+        description="Govee-Raumklima mit Temperatur- und Luftfeuchtegraph.",
+    )
+    @app_commands.describe(period="Zeitraum für den Graphen")
+    @app_commands.choices(period=CLIMATE_PERIOD_CHOICES)
+    async def climate(
+        self,
+        interaction: discord.Interaction,
+        period: app_commands.Choice[int] | None = None,
+    ) -> None:
+        await self.smart_home.send_climate_report(
+            interaction,
+            period_hours=period.value if period is not None else 24,
+        )
+
+
 async def setup(bot: commands.Bot) -> None:
-    await bot.add_cog(SmartHome(bot))
+    smart_home = SmartHome(bot)
+    await bot.add_cog(smart_home)
+    await bot.add_cog(ClimateShortcut(smart_home))
