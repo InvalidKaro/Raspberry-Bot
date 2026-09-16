@@ -14,12 +14,14 @@ class GoveeDiscovery:
     ble: list[GoveeBleDevice]
 
 
-class GoveeSmartHomeService:
-    """Low-overhead Govee controller.
+@dataclass(frozen=True, slots=True)
+class GoveeControlResult:
+    transport: str
+    display_name: str
 
-    No background polling is started. LAN discovery and BLE scans only run
-    when a command explicitly requests them, keeping idle CPU/RAM usage low.
-    """
+
+class GoveeSmartHomeService:
+    """Low-overhead local Govee controller for LAN and explicitly supported BLE models."""
 
     def __init__(self) -> None:
         self.lan = GoveeLanClient()
@@ -63,23 +65,72 @@ class GoveeSmartHomeService:
         devices = await self.ensure_ble_devices()
         return [device for device in devices if self.ble_lights.supports(device)]
 
-    async def ble_power(self, selector: str, on: bool) -> GoveeBleDevice:
-        await self.ensure_ble_devices()
-        target = self.ble.resolve(selector)
-        await self.ble_lights.power(target, on)
-        return target
+    async def power_device(self, selector: str, on: bool) -> GoveeControlResult:
+        transport, target = await self._resolve_control_target(selector)
+        if transport == "ble":
+            assert isinstance(target, GoveeBleDevice)
+            await self.ble_lights.power(target, on)
+            return GoveeControlResult("Bluetooth", target.display_name)
 
-    async def ble_brightness(self, selector: str, value: int) -> GoveeBleDevice:
-        await self.ensure_ble_devices()
-        target = self.ble.resolve(selector)
-        await self.ble_lights.brightness(target, value)
-        return target
+        assert isinstance(target, GoveeLanDevice)
+        await self.lan.power(target, on)
+        return GoveeControlResult("WLAN/LAN", target.display_name)
 
-    async def ble_color(self, selector: str, r: int, g: int, b: int) -> GoveeBleDevice:
-        await self.ensure_ble_devices()
-        target = self.ble.resolve(selector)
-        await self.ble_lights.color(target, r, g, b)
-        return target
+    async def brightness_device(self, selector: str, value: int) -> GoveeControlResult:
+        transport, target = await self._resolve_control_target(selector)
+        if transport == "ble":
+            assert isinstance(target, GoveeBleDevice)
+            await self.ble_lights.brightness(target, value)
+            return GoveeControlResult("Bluetooth", target.display_name)
+
+        assert isinstance(target, GoveeLanDevice)
+        await self.lan.brightness(target, value)
+        return GoveeControlResult("WLAN/LAN", target.display_name)
+
+    async def color_device(self, selector: str, r: int, g: int, b: int) -> GoveeControlResult:
+        transport, target = await self._resolve_control_target(selector)
+        if transport == "ble":
+            assert isinstance(target, GoveeBleDevice)
+            await self.ble_lights.color(target, r, g, b)
+            return GoveeControlResult("Bluetooth", target.display_name)
+
+        assert isinstance(target, GoveeLanDevice)
+        await self.lan.color(target, r, g, b)
+        return GoveeControlResult("WLAN/LAN", target.display_name)
+
+    async def _resolve_control_target(
+        self,
+        selector: str,
+    ) -> tuple[str, GoveeLanDevice | GoveeBleDevice]:
+        raw = selector.strip()
+        lowered = raw.lower()
+
+        if lowered.startswith("lan:"):
+            await self.ensure_lan_devices()
+            return "lan", self.lan.resolve(raw[4:])
+
+        if lowered.startswith("ble:"):
+            await self.ensure_ble_devices()
+            target = self.ble.resolve(raw[4:])
+            if not self.ble_lights.supports(target):
+                raise RuntimeError(
+                    f"{target.model or target.name} wird erkannt, aber direkte BLE-Lichtsteuerung "
+                    "ist für dieses Modell noch nicht freigeschaltet."
+                )
+            return "ble", target
+
+        try:
+            await self.ensure_lan_devices()
+            return "lan", self.lan.resolve(raw)
+        except LookupError:
+            await self.ensure_ble_devices()
+            target = self.ble.resolve(raw)
+            if not self.ble_lights.supports(target):
+                raise RuntimeError(
+                    f"{target.model or target.name} wird erkannt, aber direkte BLE-Lichtsteuerung "
+                    "ist für dieses Modell noch nicht freigeschaltet."
+                )
+            return "ble", target
 
     async def all_power(self, on: bool) -> int:
         devices = await self.ensure_lan_devices()
