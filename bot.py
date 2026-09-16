@@ -70,6 +70,7 @@ EXTENSIONS: tuple[str, ...] = (
     "cogs.management.automation_suite",
     "cogs.management.admin_intelligence_plus",
     "cogs.management.pi_hardware",
+    "cogs.management.smart_home",
     "cogs.management.dashboard_telemetry",
     "tasks.cache_cleanup",
     "tasks.system_monitor",
@@ -86,6 +87,8 @@ CORE_EXTENSIONS = {
     "cogs.community.community_plus",
     "cogs.management.automation_suite",
 }
+
+SMART_HOME_GUILD_ID = 1162733312226361454
 
 
 class RaspberryBot(commands.Bot):
@@ -247,6 +250,14 @@ class RaspberryBot(commands.Bot):
         else:
             synced = await self.tree.sync()
             logger.info("Globally synced %s application commands", len(synced))
+
+        smart_home_guild = discord.Object(id=SMART_HOME_GUILD_ID)
+        smart_home_synced = await self.tree.sync(guild=smart_home_guild)
+        logger.info(
+            "Synced %s guild command(s) to smart-home guild %s",
+            len(smart_home_synced),
+            SMART_HOME_GUILD_ID,
+        )
 
     async def on_ready(self) -> None:
         if self.user is None:
