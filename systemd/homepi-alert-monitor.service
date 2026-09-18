@@ -16,7 +16,7 @@ RestartSec=10
 TimeoutStopSec=20
 UMask=0007
 
-NoNewPrivileges=true
+NoNewPrivileges=false
 PrivateTmp=true
 PrivateDevices=true
 ProtectSystem=strict
