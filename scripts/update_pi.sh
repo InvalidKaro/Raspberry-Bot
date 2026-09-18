@@ -60,6 +60,12 @@ if [[ -x /usr/local/sbin/homepi-systemctl && -f scripts/homepi_systemctl.py ]]; 
   fi
 fi
 
+# Keep the Asterisk AGI assistant in sync after the one-time phone assistant
+# installer has created it.
+if [[ -f /usr/local/lib/homepi-alert-agi.py && -f scripts/homepi_alert_agi.py ]]; then
+  sudo install -o root -g asterisk -m 0755 scripts/homepi_alert_agi.py /usr/local/lib/homepi-alert-agi.py
+fi
+
 if [[ "$unit_changed" -eq 1 ]]; then
   sudo systemctl daemon-reload
 fi

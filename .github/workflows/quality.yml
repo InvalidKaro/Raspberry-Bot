@@ -36,6 +36,8 @@ jobs:
       - run: python scripts/smart_home_smoke.py
       - run: python scripts/universal_devices_smoke.py
       - run: python scripts/phone_alerts_smoke.py
+      - run: python scripts/phone_assistant_smoke.py
+      - run: python scripts/homepi_alertctl.py --help
       - name: Privileged helper rejects unknown units
         run: |
           if python scripts/homepi_systemctl.py status definitely-not-a-real-service; then
