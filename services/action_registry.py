@@ -29,10 +29,10 @@ class ActionSpec:
 ACTION_REGISTRY: dict[str, ActionSpec] = {
     "related": ActionSpec(
         id="related",
-        label="Ähnliche Aktionen",
-        description="Zeigt weitere Commands aus demselben Funktionsbereich.",
-        emoji="💡",
-        style=discord.ButtonStyle.secondary,
+        label="Smart Actions",
+        description="Empfiehlt passende Folge-Commands und kann sie direkt oder geführt ausführen.",
+        emoji="⚡",
+        style=discord.ButtonStyle.primary,
         handler="related",
     ),
     "control_center": ActionSpec(
@@ -86,9 +86,9 @@ ACTION_REGISTRY: dict[str, ActionSpec] = {
 
 _CONTEXT_ACTIONS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
     (("admin", "config", "system", "health", "diagnose", "pi", "bot"),
-     ("system_status", "quick_check", "services", "diagnostics", "control_center")),
+     ("related", "system_status", "quick_check", "services", "diagnostics")),
     (("overview", "pulse", "handover", "timeline"),
-     ("system_status", "services", "quick_check", "related", "control_center")),
+     ("related", "system_status", "services", "quick_check", "control_center")),
     (("media", "radio", "spotify", "youtube", "nowplaying"),
      ("related", "control_center", "system_status")),
     (("mesh", "meshtastic"),

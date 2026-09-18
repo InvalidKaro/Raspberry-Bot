@@ -89,10 +89,11 @@ def _message_has_visible_payload(message: discord.InteractionMessage) -> bool:
 class CommandUXService:
     """Cross-cutting UI behavior for every application command.
 
-    - Adds contextual action buttons to plain command responses.
+    - Adds contextual action buttons to ordinary command responses.
     - Shows a lightweight progress card when a command explicitly defers and
       keeps running long enough to benefit from feedback.
-    - Never replaces a View a command already supplied.
+    - Preserves a command's own View and emits suggestions as an ephemeral
+      follow-up when components already occupy the original response.
     """
 
     def __init__(self, bot: commands.Bot, *, progress_delay: float = 1.0) -> None:
@@ -161,6 +162,15 @@ class CommandUXService:
         except Exception:
             logger.exception("Automatic command progress failed for %s", command_name)
 
+    async def _send_action_followup(self, interaction: discord.Interaction, command_name: str) -> None:
+        """Keep a command-owned component view intact while still exposing actions."""
+
+        await interaction.followup.send(
+            content="**Weitere Aktionen**",
+            view=CommandActionsView(self.bot, interaction.user.id, command_name),
+            ephemeral=True,
+        )
+
     async def complete(
         self,
         interaction: discord.Interaction,
@@ -187,8 +197,10 @@ class CommandUXService:
                 )
                 return
 
-            # Existing buttons/selects belong to the command. Keep them intact.
+            # Existing buttons/selects belong to the command. Do not overwrite
+            # them; expose the cross-command actions in a private follow-up.
             if message.components:
+                await self._send_action_followup(interaction, command_name)
                 return
 
             # A quick deferred command can finish before the automatic progress
