@@ -134,6 +134,7 @@ class Incident:
     last_queued_at: float
     acknowledged: bool
     closed: bool
+    restart_attempted: bool = False
     test: bool = False
 
     def as_dict(self, config: InteractiveAlertConfig) -> dict[str, object]:
@@ -221,6 +222,7 @@ class IncidentStore:
             last_queued_at=0.0,
             acknowledged=False,
             closed=False,
+            restart_attempted=False,
             test=test,
         )
         self.save(incident)
@@ -256,6 +258,7 @@ class IncidentStore:
                 last_queued_at=float(raw.get("last_queued_at", 0.0)),
                 acknowledged=bool(raw.get("acknowledged", False)),
                 closed=bool(raw.get("closed", False)),
+                restart_attempted=bool(raw.get("restart_attempted", False)),
                 test=bool(raw.get("test", False)),
             )
         except (KeyError, TypeError, ValueError):
@@ -433,21 +436,37 @@ async def process_action_requests(
 ) -> int:
     config.actions_dir.mkdir(parents=True, exist_ok=True)
     processed = 0
+
     for request_path in sorted(config.actions_dir.glob("*.request.json")):
         raw = _load_action(request_path)
         request_id = request_path.name.removesuffix(".request.json")
         result_path = config.actions_dir / f"{request_id}.result.json"
 
         ok = False
+        status = "rejected"
         detail = "Invalid request"
         unit = ""
+        incident_id = ""
+
         if raw is not None:
             action = str(raw.get("action", ""))
             unit = str(raw.get("unit", ""))
             incident_id = str(raw.get("incident_id", ""))
+
+            try:
+                request_age = max(
+                    time.time() - float(raw.get("created_at", 0.0)),
+                    0.0,
+                )
+            except (TypeError, ValueError):
+                request_age = 999999.0
+
             incident = (
                 store.load(incident_id)
-                if store is not None and _INCIDENT_ID_RE.fullmatch(incident_id)
+                if (
+                    store is not None
+                    and _INCIDENT_ID_RE.fullmatch(incident_id)
+                )
                 else None
             )
             bound_to_incident = (
@@ -455,30 +474,79 @@ async def process_action_requests(
                 and not incident.closed
                 and not incident.acknowledged
                 and incident.restart_unit == unit
+                and not incident.restart_attempted
             )
-            if (
+
+            if request_age > 120:
+                detail = "Action request expired"
+                status = "expired"
+            elif (
                 action == "restart"
                 and unit in config.restartable_services
                 and _UNIT_RE.fullmatch(unit)
                 and bound_to_incident
             ):
-                result: ProcessResult = await run_process(
-                    ["sudo", "-n", HELPER, "restart", unit],
-                    timeout=float(config.action_timeout_seconds),
+                assert incident is not None
+
+                before = await run_process(
+                    ["systemctl", "is-active", unit],
+                    timeout=5,
                 )
-                ok = result.ok
-                detail = (
-                    result.stdout
-                    or result.stderr
-                    or ("Restart successful" if ok else "Restart failed")
-                )[-700:]
+                if before.ok and before.stdout.strip() == "active":
+                    ok = True
+                    status = "already-online"
+                    detail = f"{unit} is already active; restart was skipped"
+                    incident.restart_attempted = True
+                    store.save(incident)
+                else:
+                    # Persist before privilege use so duplicate keypad requests
+                    # cannot race a second restart for the same incident.
+                    incident.restart_attempted = True
+                    store.save(incident)
+
+                    result: ProcessResult = await run_process(
+                        ["sudo", "-n", HELPER, "restart", unit],
+                        timeout=float(config.action_timeout_seconds),
+                    )
+                    if result.ok:
+                        await asyncio.sleep(2.0)
+                        after = await run_process(
+                            ["systemctl", "is-active", unit],
+                            timeout=5,
+                        )
+                        ok = (
+                            after.ok
+                            and after.stdout.strip() == "active"
+                        )
+                        status = "recovered" if ok else "restart-unverified"
+                        detail = (
+                            f"{unit} is active after restart"
+                            if ok
+                            else (
+                                after.stdout
+                                or after.stderr
+                                or "Restart returned successfully but active state was not confirmed"
+                            )[-700:]
+                        )
+                    else:
+                        status = "restart-failed"
+                        detail = (
+                            result.stdout
+                            or result.stderr
+                            or "Restart failed"
+                        )[-700:]
             else:
-                detail = "Action is not allowlisted or not bound to an active incident"
+                detail = (
+                    "Action is not allowlisted, no longer applicable, "
+                    "or a restart was already attempted for this incident"
+                )
 
         payload = {
-            "version": 1,
+            "version": 2,
             "request_id": request_id,
+            "incident_id": incident_id,
             "ok": ok,
+            "status": status,
             "unit": unit,
             "detail": detail,
             "completed_at": time.time(),
@@ -505,8 +573,12 @@ async def process_action_requests(
         try:
             request_path.unlink()
         except OSError:
-            logger.warning("Could not delete processed action request %s", request_path)
+            logger.warning(
+                "Could not delete processed action request %s",
+                request_path,
+            )
         processed += 1
+
     return processed
 
 
