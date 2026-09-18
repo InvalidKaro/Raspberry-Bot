@@ -110,9 +110,10 @@ echo
 echo "Automatic calls remain disabled until HOMEPI_ALERTS_ENABLED=true is set in:"
 echo "  ${ENV_FILE}"
 echo
-echo "Next checks:"
-echo "  sudo asterisk -rx 'pjsip show registrations'"
-echo "  cd ${APP_DIR} && .venv/bin/python scripts/homepi_alertctl.py doctor"
+echo "Next setup:"
+echo "  cd ${APP_DIR}"
+echo "  sudo bash scripts/configure_homepi_alerts.sh"
+echo "  .venv/bin/python scripts/homepi_alertctl.py doctor"
 echo "  sudo systemctl status homepi-alert-monitor --no-pager"
 echo
 echo "After SIP is configured, queue an explicit test call with:"
