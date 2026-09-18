@@ -59,10 +59,14 @@ def interactive_config(root: Path) -> InteractiveAlertConfig:
             "raspberry-dashboard.service",
             "pihole-FTL.service",
         ),
+        action_pin="123456",
     )
 
 
-async def invalid_action_is_rejected(config: InteractiveAlertConfig) -> None:
+async def invalid_action_is_rejected(
+    config: InteractiveAlertConfig,
+    store: IncidentStore,
+) -> None:
     config.actions_dir.mkdir(parents=True, exist_ok=True)
     request = config.actions_dir / "bad.request.json"
     request.write_text(
@@ -76,7 +80,7 @@ async def invalid_action_is_rejected(config: InteractiveAlertConfig) -> None:
         ),
         encoding="utf-8",
     )
-    processed = await process_action_requests(config)
+    processed = await process_action_requests(config, store)
     assert processed == 1
     result = json.loads(
         config.actions_dir.joinpath("bad.result.json").read_text(
@@ -146,7 +150,15 @@ def main() -> None:
         assert loaded.acknowledged is True
         assert loaded.closed is True
 
-        asyncio.run(invalid_action_is_rejected(interactive))
+        raw_incident = json.loads(
+            interactive.incidents_dir.joinpath(
+                f"{incident.id}.json"
+            ).read_text(encoding="utf-8")
+        )
+        assert raw_incident["action_pin_hash"]
+        assert raw_incident["action_pin_hash"] != "123456"
+
+        asyncio.run(invalid_action_is_rejected(interactive, store))
 
     print("phone assistant smoke: ok")
 
