@@ -1,0 +1,35 @@
+[Unit]
+Description=HomePi Automatic Phone Alert Monitor
+After=network-online.target asterisk.service
+Wants=network-online.target asterisk.service
+
+[Service]
+Type=simple
+User=stefano
+Group=stefano
+SupplementaryGroups=asterisk
+WorkingDirectory=/home/stefano/services/Raspberry-Bot
+EnvironmentFile=-/home/stefano/services/Raspberry-Bot/.env.alerts
+ExecStart=/home/stefano/services/Raspberry-Bot/.venv/bin/python scripts/homepi_alert_monitor.py
+Restart=always
+RestartSec=10
+TimeoutStopSec=20
+
+NoNewPrivileges=true
+PrivateTmp=false
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+StateDirectory=homepi-alerts
+ReadWritePaths=/var/tmp/homepi-alerts
+ReadWritePaths=/var/spool/asterisk/.homepi-staging
+ReadWritePaths=/var/spool/asterisk/outgoing
+
+[Install]
+WantedBy=multi-user.target
