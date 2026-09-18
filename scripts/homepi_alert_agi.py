@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -51,11 +53,22 @@ class AGI:
         path = str(audio_file.resolve().with_suffix(""))
         self.command(f'STREAM FILE "{path}" ""')
 
-    def get_digit(self, audio_file: Path, timeout_ms: int = 9000) -> str:
+    def get_digits(
+        self,
+        audio_file: Path,
+        timeout_ms: int = 9000,
+        max_digits: int = 1,
+    ) -> str:
         path = str(audio_file.resolve().with_suffix(""))
-        response = self.command(f'GET DATA "{path}" {int(timeout_ms)} 1')
+        digits = max(1, min(16, int(max_digits)))
+        response = self.command(
+            f'GET DATA "{path}" {int(timeout_ms)} {digits}'
+        )
         result = self._result(response)
         return result if result.isdigit() else ""
+
+    def get_digit(self, audio_file: Path, timeout_ms: int = 9000) -> str:
+        return self.get_digits(audio_file, timeout_ms, 1)
 
     def hangup(self) -> None:
         self.command("HANGUP")
@@ -353,6 +366,21 @@ def main(argv: list[str]) -> int:
         audio_dir,
         "agi-timeout",
     )
+    pin_prompt = _render_speech(
+        "Bitte geben Sie jetzt die Sicherheits PIN ein.",
+        audio_dir,
+        "agi-pin",
+    )
+    pin_rejected = _render_speech(
+        "Die Sicherheits PIN ist nicht korrekt. Die Aktion wurde nicht ausgeführt.",
+        audio_dir,
+        "agi-pin-rejected",
+    )
+    pin_missing = _render_speech(
+        "Für Systemaktionen ist keine Sicherheits PIN eingerichtet. Der Neustart bleibt gesperrt.",
+        audio_dir,
+        "agi-pin-missing",
+    )
 
     agi.stream(intro)
     agi.stream(alert_audio)
@@ -373,6 +401,25 @@ def main(argv: list[str]) -> int:
             agi.stream(status_audio)
             continue
         if digit == "3":
+            expected_hash = str(incident.get("action_pin_hash") or "")
+            if not expected_hash:
+                agi.stream(pin_missing)
+                continue
+            entered_pin = agi.get_digits(
+                pin_prompt,
+                timeout_ms=12000,
+                max_digits=8,
+            )
+            entered_hash = hashlib.sha256(
+                entered_pin.encode("utf-8")
+            ).hexdigest()
+            if not entered_pin or not hmac.compare_digest(
+                entered_hash,
+                expected_hash,
+            ):
+                agi.stream(pin_rejected)
+                continue
+
             _, message = _request_restart(incident, action_dir)
             result_audio = _render_speech(
                 message,
