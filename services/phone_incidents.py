@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -49,6 +50,7 @@ class InteractiveAlertConfig:
     max_escalations: int
     action_timeout_seconds: int
     restartable_services: tuple[str, ...]
+    action_pin: str
 
     @classmethod
     def from_env(cls) -> "InteractiveAlertConfig":
@@ -72,6 +74,10 @@ class InteractiveAlertConfig:
                 raise ValueError(
                     f"HOMEPI_ALERT_RESTARTABLE_SERVICES contains invalid unit: {unit}"
                 )
+        action_pin = os.getenv("HOMEPI_ALERT_ACTION_PIN", "").strip()
+        if action_pin and (not action_pin.isdigit() or not 4 <= len(action_pin) <= 8):
+            raise ValueError("HOMEPI_ALERT_ACTION_PIN must contain 4 to 8 digits")
+
         return cls(
             enabled=_env_bool("HOMEPI_ALERT_INTERACTIVE", True),
             root_dir=root,
@@ -91,6 +97,7 @@ class InteractiveAlertConfig:
                 "HOMEPI_ALERT_ACTION_TIMEOUT_SECONDS", 30, 5, 120
             ),
             restartable_services=services,
+            action_pin=action_pin,
         )
 
     @property
@@ -138,6 +145,11 @@ class Incident:
                 "ack_dir": str(config.acknowledgements_dir),
                 "audio_dir": str(config.audio_dir),
                 "action_timeout_seconds": config.action_timeout_seconds,
+                "action_pin_hash": (
+                    hashlib.sha256(config.action_pin.encode("utf-8")).hexdigest()
+                    if config.action_pin
+                    else ""
+                ),
             }
         )
         return payload
@@ -294,6 +306,9 @@ class IncidentStore:
 
         for incident in self.active():
             if incident.test:
+                if current - incident.created_at >= 3600:
+                    incident.closed = True
+                    self.save(incident)
                 continue
             if incident.acknowledged:
                 incident.closed = True
@@ -414,6 +429,7 @@ def _load_action(path: Path) -> dict[str, object] | None:
 
 async def process_action_requests(
     config: InteractiveAlertConfig,
+    store: IncidentStore | None = None,
 ) -> int:
     config.actions_dir.mkdir(parents=True, exist_ok=True)
     processed = 0
@@ -428,10 +444,23 @@ async def process_action_requests(
         if raw is not None:
             action = str(raw.get("action", ""))
             unit = str(raw.get("unit", ""))
+            incident_id = str(raw.get("incident_id", ""))
+            incident = (
+                store.load(incident_id)
+                if store is not None and _INCIDENT_ID_RE.fullmatch(incident_id)
+                else None
+            )
+            bound_to_incident = (
+                incident is not None
+                and not incident.closed
+                and not incident.acknowledged
+                and incident.restart_unit == unit
+            )
             if (
                 action == "restart"
                 and unit in config.restartable_services
                 and _UNIT_RE.fullmatch(unit)
+                and bound_to_incident
             ):
                 result: ProcessResult = await run_process(
                     ["sudo", "-n", HELPER, "restart", unit],
@@ -444,7 +473,7 @@ async def process_action_requests(
                     or ("Restart successful" if ok else "Restart failed")
                 )[-700:]
             else:
-                detail = "Action or service is not allowlisted"
+                detail = "Action is not allowlisted or not bound to an active incident"
 
         payload = {
             "version": 1,
