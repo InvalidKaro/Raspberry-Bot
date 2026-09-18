@@ -73,10 +73,21 @@ else
   grep -q '^HOMEPI_ALERT_ESCALATION_SECONDS=' "${ENV_FILE}" || echo 'HOMEPI_ALERT_ESCALATION_SECONDS=300' >> "${ENV_FILE}"
   grep -q '^HOMEPI_ALERT_MAX_ESCALATIONS=' "${ENV_FILE}" || echo 'HOMEPI_ALERT_MAX_ESCALATIONS=2' >> "${ENV_FILE}"
   grep -q '^HOMEPI_ALERT_ACTION_TIMEOUT_SECONDS=' "${ENV_FILE}" || echo 'HOMEPI_ALERT_ACTION_TIMEOUT_SECONDS=30' >> "${ENV_FILE}"
+  grep -q '^HOMEPI_ALERT_ACTION_PIN=' "${ENV_FILE}" || echo 'HOMEPI_ALERT_ACTION_PIN=' >> "${ENV_FILE}"
   grep -q '^HOMEPI_ALERT_RESTARTABLE_SERVICES=' "${ENV_FILE}" || echo 'HOMEPI_ALERT_RESTARTABLE_SERVICES=raspberry-bot.service,raspberry-dashboard.service,pihole-FTL.service' >> "${ENV_FILE}"
   grep -q '^HOMEPI_ALERT_SHARED_DIR=' "${ENV_FILE}" || echo 'HOMEPI_ALERT_SHARED_DIR=/var/spool/asterisk/homepi-alerts' >> "${ENV_FILE}"
   grep -q '^HOMEPI_ALERT_AGI_SCRIPT=' "${ENV_FILE}" || echo 'HOMEPI_ALERT_AGI_SCRIPT=/usr/local/lib/homepi-alert-agi.py' >> "${ENV_FILE}"
 fi
+
+ACTION_PIN="$(grep '^HOMEPI_ALERT_ACTION_PIN=' "${ENV_FILE}" | tail -n1 | cut -d= -f2- | tr -d '[:space:]')"
+if [[ ! "${ACTION_PIN}" =~ ^[0-9]{4,8}$ ]]; then
+  ACTION_PIN="$(python3 -c 'import secrets; print(secrets.randbelow(900000) + 100000)')"
+  sed -i "s/^HOMEPI_ALERT_ACTION_PIN=.*/HOMEPI_ALERT_ACTION_PIN=${ACTION_PIN}/" "${ENV_FILE}"
+  echo "Generated phone action PIN: ${ACTION_PIN}"
+  echo "Store this PIN; it is required for restart option 3."
+fi
+chown "${APP_USER}:${APP_USER}" "${ENV_FILE}"
+chmod 0600 "${ENV_FILE}"
 
 if [[ "${APP_USER}" != "stefano" || "${APP_DIR}" != "/home/stefano/services/Raspberry-Bot" ]]; then
   sed \
