@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import sys
 import tempfile
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from services.health_checks import HealthResult
 from services.phone_alerts import (
