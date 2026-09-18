@@ -21,6 +21,20 @@ logger = logging.getLogger(__name__)
 
 _DIAL_TARGET_RE = re.compile(r"^[+0-9*#]{3,32}$")
 _TRUNK_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+_CONTEXT_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+
+SAFE_RECOVERY_UNITS = frozenset(
+    {
+        "homepi-flight-radar",
+        "pihole-FTL",
+        "raspberry-bot",
+        "raspberry-dashboard",
+        "raspberry-display",
+        "raspberry-display2",
+        "raspberry-intelligence",
+        "raspberry-meshtastic",
+    }
+)
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -52,14 +66,22 @@ def _env_float(name: str, default: float, minimum: float, maximum: float) -> flo
     return max(minimum, min(maximum, value))
 
 
+def _single_line(value: str, name: str) -> str:
+    if "\n" in value or "\r" in value:
+        raise ValueError(f"{name} must be a single line")
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class PhoneAlertConfig:
     enabled: bool
     target: str
     pjsip_trunk: str
     check_interval_seconds: int
+    request_poll_seconds: int
     confirm_seconds: int
     min_alert_interval_seconds: int
+    recovery_cooldown_seconds: int
     temperature_critical: float
     ram_critical: float
     disk_critical: float
@@ -67,6 +89,9 @@ class PhoneAlertConfig:
     call_max_retries: int
     call_retry_seconds: int
     call_wait_seconds: int
+    interactive: bool
+    allow_recovery: bool
+    dialplan_context: str
     voice: str
     voice_speed: int
     voice_pitch: int
@@ -75,6 +100,9 @@ class PhoneAlertConfig:
     staging_dir: Path
     outgoing_dir: Path
     state_dir: Path
+    request_dir: Path
+    result_dir: Path
+    status_path: Path
 
     @classmethod
     def from_env(cls) -> "PhoneAlertConfig":
@@ -87,8 +115,10 @@ class PhoneAlertConfig:
             for value in raw_services.split(",")
             if value.strip()
         )
-        state_default = os.getenv("STATE_DIRECTORY") or str(
-            Path.home() / ".local" / "state" / "homepi-alerts"
+        state_dir = Path(
+            os.getenv("STATE_DIRECTORY")
+            or os.getenv("HOMEPI_ALERT_STATE_DIR")
+            or str(Path.home() / ".local" / "state" / "homepi-alerts")
         )
         return cls(
             enabled=_env_bool("HOMEPI_ALERTS_ENABLED", False),
@@ -97,9 +127,15 @@ class PhoneAlertConfig:
             check_interval_seconds=_env_int(
                 "HOMEPI_ALERT_CHECK_INTERVAL_SECONDS", 30, 10, 600
             ),
+            request_poll_seconds=_env_int(
+                "HOMEPI_ALERT_REQUEST_POLL_SECONDS", 2, 1, 30
+            ),
             confirm_seconds=_env_int("HOMEPI_ALERT_CONFIRM_SECONDS", 90, 0, 3600),
             min_alert_interval_seconds=_env_int(
                 "HOMEPI_ALERT_MIN_INTERVAL_SECONDS", 3600, 60, 86400
+            ),
+            recovery_cooldown_seconds=_env_int(
+                "HOMEPI_ALERT_RECOVERY_COOLDOWN_SECONDS", 300, 60, 86400
             ),
             temperature_critical=_env_float(
                 "HOMEPI_ALERT_TEMP_CRITICAL", 80.0, 50.0, 120.0
@@ -115,11 +151,20 @@ class PhoneAlertConfig:
             call_retry_seconds=_env_int(
                 "HOMEPI_ALERT_CALL_RETRY_SECONDS", 60, 15, 1800
             ),
-            call_wait_seconds=_env_int("HOMEPI_ALERT_CALL_WAIT_SECONDS", 35, 10, 120),
+            call_wait_seconds=_env_int(
+                "HOMEPI_ALERT_CALL_WAIT_SECONDS", 35, 10, 120
+            ),
+            interactive=_env_bool("HOMEPI_ALERT_INTERACTIVE", True),
+            allow_recovery=_env_bool("HOMEPI_ALERT_ALLOW_RECOVERY", False),
+            dialplan_context=os.getenv(
+                "HOMEPI_ALERT_DIALPLAN_CONTEXT", "homepi-alert"
+            ).strip(),
             voice=os.getenv("HOMEPI_ALERT_VOICE", "de").strip() or "de",
             voice_speed=_env_int("HOMEPI_ALERT_VOICE_SPEED", 145, 80, 250),
             voice_pitch=_env_int("HOMEPI_ALERT_VOICE_PITCH", 38, 0, 99),
-            voice_amplitude=_env_int("HOMEPI_ALERT_VOICE_AMPLITUDE", 135, 0, 200),
+            voice_amplitude=_env_int(
+                "HOMEPI_ALERT_VOICE_AMPLITUDE", 135, 0, 200
+            ),
             audio_dir=Path(
                 os.getenv("HOMEPI_ALERT_AUDIO_DIR", "/var/tmp/homepi-alerts")
             ),
@@ -135,7 +180,25 @@ class PhoneAlertConfig:
                     "/var/spool/asterisk/outgoing",
                 )
             ),
-            state_dir=Path(state_default),
+            state_dir=state_dir,
+            request_dir=Path(
+                os.getenv(
+                    "HOMEPI_ALERT_REQUEST_DIR",
+                    str(state_dir / "requests"),
+                )
+            ),
+            result_dir=Path(
+                os.getenv(
+                    "HOMEPI_ALERT_RESULT_DIR",
+                    str(state_dir / "results"),
+                )
+            ),
+            status_path=Path(
+                os.getenv(
+                    "HOMEPI_ALERT_STATUS_PATH",
+                    str(state_dir / "status.json"),
+                )
+            ),
         )
 
     def validate_for_calling(self) -> None:
@@ -147,6 +210,17 @@ class PhoneAlertConfig:
             )
         if not _TRUNK_RE.fullmatch(self.pjsip_trunk):
             raise ValueError("HOMEPI_ALERT_PJSIP_TRUNK contains invalid characters")
+        if not _CONTEXT_RE.fullmatch(self.dialplan_context):
+            raise ValueError(
+                "HOMEPI_ALERT_DIALPLAN_CONTEXT contains invalid characters"
+            )
+        for name, value in (
+            ("HOMEPI_ALERT_AUDIO_DIR", str(self.audio_dir)),
+            ("HOMEPI_ALERT_REQUEST_DIR", str(self.request_dir)),
+            ("HOMEPI_ALERT_RESULT_DIR", str(self.result_dir)),
+            ("HOMEPI_ALERT_STATUS_PATH", str(self.status_path)),
+        ):
+            _single_line(value, name)
 
 
 @dataclass(frozen=True, slots=True)
@@ -243,6 +317,7 @@ class AlertStateStore:
         self.directory = directory
         self.path = directory / "state.json"
         self.last_alerted: dict[str, float] = {}
+        self.last_recovery: dict[str, float] = {}
         self._load()
 
     def _load(self) -> None:
@@ -253,19 +328,27 @@ class AlertStateStore:
         except (OSError, ValueError, TypeError):
             logger.warning("Ignoring invalid HomePi alert state file", exc_info=True)
             return
-        values = raw.get("last_alerted", {}) if isinstance(raw, dict) else {}
-        if isinstance(values, dict):
+        if not isinstance(raw, dict):
+            return
+        for field_name, target in (
+            ("last_alerted", self.last_alerted),
+            ("last_recovery", self.last_recovery),
+        ):
+            values = raw.get(field_name, {})
+            if not isinstance(values, dict):
+                continue
             for key, value in values.items():
                 try:
-                    self.last_alerted[str(key)] = float(value)
+                    target[str(key)] = float(value)
                 except (TypeError, ValueError):
                     continue
 
     def save(self) -> None:
         self.directory.mkdir(parents=True, exist_ok=True)
         payload = {
-            "version": 1,
+            "version": 2,
             "last_alerted": self.last_alerted,
+            "last_recovery": self.last_recovery,
         }
         fd, temp_name = tempfile.mkstemp(
             prefix=".state-",
@@ -319,7 +402,10 @@ class AlertGate:
             if current - first < self.confirm_seconds:
                 continue
             last = self.state.last_alerted.get(signal.key)
-            if last is not None and current - last < self.min_alert_interval_seconds:
+            if (
+                last is not None
+                and current - last < self.min_alert_interval_seconds
+            ):
                 continue
             due.append(signal)
         return due
@@ -368,6 +454,15 @@ def compose_voice_message(
     )
 
 
+def compose_test_message(*, at: datetime | None = None) -> str:
+    current = at or datetime.now().astimezone()
+    return (
+        f"{_greeting(current)}. "
+        "Dies ist ein Testanruf des HomePi Assistenzsystems. "
+        "Telefonie, Sprachausgabe und die Alarmkette arbeiten bis zu diesem Punkt korrekt."
+    )
+
+
 class LocalSpeechRenderer:
     def __init__(self, config: PhoneAlertConfig) -> None:
         self.config = config
@@ -380,14 +475,15 @@ class LocalSpeechRenderer:
             )
         return path
 
-    def render(self, text: str) -> Path:
+    def render(self, text: str, *, prefix: str = "alert") -> Path:
         espeak = self._require_binary("espeak-ng")
         sox = self._require_binary("sox")
         self.config.audio_dir.mkdir(parents=True, exist_ok=True)
 
+        safe_prefix = re.sub(r"[^A-Za-z0-9_.-]", "-", prefix)[:32] or "audio"
         token = f"{int(time.time())}-{time.monotonic_ns()}"
-        source = self.config.audio_dir / f"alert-{token}.source.wav"
-        output = self.config.audio_dir / f"alert-{token}.wav"
+        source = self.config.audio_dir / f"{safe_prefix}-{token}.source.wav"
+        output = self.config.audio_dir / f"{safe_prefix}-{token}.wav"
 
         try:
             subprocess.run(
@@ -429,7 +525,14 @@ class LocalSpeechRenderer:
                 text=True,
                 timeout=30,
             )
-            os.chmod(output, 0o644)
+            os.chmod(output, 0o640)
+            try:
+                asterisk_gid = grp.getgrnam("asterisk").gr_gid
+                os.chown(output, -1, asterisk_gid)
+            except (KeyError, PermissionError):
+                logger.debug(
+                    "Could not set Asterisk group on rendered audio; relying on directory permissions"
+                )
             self._prune_old_audio()
             return output
         except subprocess.CalledProcessError as exc:
@@ -446,7 +549,7 @@ class LocalSpeechRenderer:
     def _prune_old_audio(self, *, max_age_seconds: int = 86400) -> None:
         cutoff = time.time() - max_age_seconds
         try:
-            files = list(self.config.audio_dir.glob("alert-*.wav"))
+            files = list(self.config.audio_dir.glob("*.wav"))
         except OSError:
             return
         for path in files:
@@ -457,6 +560,81 @@ class LocalSpeechRenderer:
                 continue
 
 
+def build_status_snapshot(
+    metrics: SystemMetrics,
+    service_results: Sequence[HealthResult],
+    signals: Sequence[AlertSignal],
+    config: PhoneAlertConfig,
+) -> dict[str, object]:
+    services = [
+        {
+            "name": result.name,
+            "status": result.status,
+            "message": result.message,
+        }
+        for result in service_results
+    ]
+    recoverable = [
+        result.name
+        for result in service_results
+        if (
+            result.status == "offline"
+            and result.name in SAFE_RECOVERY_UNITS
+        )
+    ]
+    return {
+        "version": 1,
+        "generated_at": time.time(),
+        "metrics": {
+            "temperature": metrics.temperature,
+            "ram_percent": metrics.ram_percent,
+            "disk_percent": metrics.disk_percent,
+            "cpu_percent": metrics.cpu_average_30s,
+            "throttled_flags": int(metrics.throttled_flags),
+        },
+        "services": services,
+        "active_alerts": [
+            {
+                "key": signal.key,
+                "summary": signal.summary,
+                "severity": signal.severity,
+            }
+            for signal in signals
+        ],
+        "recovery": {
+            "enabled": config.allow_recovery,
+            "recoverable_units": recoverable,
+        },
+    }
+
+
+def write_json_atomic(
+    path: Path,
+    payload: dict[str, object],
+    *,
+    mode: int = 0o640,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
+        text=True,
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temp_name, mode)
+        os.replace(temp_name, path)
+    finally:
+        try:
+            os.unlink(temp_name)
+        except FileNotFoundError:
+            pass
+
+
 def build_call_file_text(config: PhoneAlertConfig, audio_file: Path) -> str:
     config.validate_for_calling()
     resolved = audio_file.resolve()
@@ -465,17 +643,39 @@ def build_call_file_text(config: PhoneAlertConfig, audio_file: Path) -> str:
 
     playback_path = str(resolved.with_suffix(""))
     channel = f"PJSIP/{config.target}@{config.pjsip_trunk}"
-    return "\n".join(
-        [
-            f"Channel: {channel}",
-            f"MaxRetries: {config.call_max_retries}",
-            f"RetryTime: {config.call_retry_seconds}",
-            f"WaitTime: {config.call_wait_seconds}",
-            "Application: Playback",
-            f"Data: {playback_path}",
-            "",
-        ]
-    )
+    common = [
+        f"Channel: {channel}",
+        f"MaxRetries: {config.call_max_retries}",
+        f"RetryTime: {config.call_retry_seconds}",
+        f"WaitTime: {config.call_wait_seconds}",
+    ]
+
+    if config.interactive:
+        common.extend(
+            [
+                f"Context: {config.dialplan_context}",
+                "Extension: s",
+                "Priority: 1",
+                f"Setvar: HOMEPI_ALERT_AUDIO={playback_path}",
+                f"Setvar: HOMEPI_ALERT_STATUS_PATH={config.status_path}",
+                f"Setvar: HOMEPI_ALERT_REQUEST_DIR={config.request_dir}",
+                f"Setvar: HOMEPI_ALERT_RESULT_DIR={config.result_dir}",
+                (
+                    "Setvar: HOMEPI_ALERT_ALLOW_RECOVERY="
+                    f"{'1' if config.allow_recovery else '0'}"
+                ),
+            ]
+        )
+    else:
+        common.extend(
+            [
+                "Application: Playback",
+                f"Data: {playback_path}",
+            ]
+        )
+
+    common.append("")
+    return "\n".join(common)
 
 
 class AsteriskCallFileDialer:
