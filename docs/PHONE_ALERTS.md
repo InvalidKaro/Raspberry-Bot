@@ -53,6 +53,11 @@ The one-time installer creates exact sudo rules only for:
 - `raspberry-dashboard.service`
 - `pihole-FTL.service`
 
+A restart is never issued blindly: HomePi first checks whether the service has
+already recovered. If it is still offline, only one restart attempt is allowed
+for that incident. Two seconds later the service is checked again and the call
+reports whether the active state was actually confirmed.
+
 Restart option 3 additionally requires a 4-8 digit phone action PIN. The installer generates a random six-digit PIN when none exists. Only its SHA-256 hash is copied into incident metadata used by the Asterisk call session.
 
 The helper has its own fixed service allowlist as a second authorization layer.
@@ -122,6 +127,22 @@ That single installer:
 
 HomePi is provider-neutral. Use the PJSIP credentials supplied by the selected
 VoIP provider.
+
+For the normal setup, run the included wizard after the installer:
+
+```bash
+cd /home/stefano/services/Raspberry-Bot
+sudo bash scripts/configure_homepi_alerts.sh
+```
+
+It asks for the registrar/server, SIP username, SIP password, From-User and the
+destination mobile number. It backs up the current Asterisk configuration,
+writes an outbound-only `homepi-provider` PJSIP configuration, reloads
+Asterisk and prints the registration state. If the Asterisk reload itself
+fails, the previous configuration is restored automatically.
+
+Automatic alert calls remain disabled after the wizard so the first real call
+is always an explicit test.
 
 A generic outbound template is included at:
 
@@ -206,7 +227,15 @@ Once the SIP registration works:
 
 ```bash
 cd /home/stefano/services/Raspberry-Bot
+.venv/bin/python scripts/homepi_alertctl.py doctor
 .venv/bin/python scripts/homepi_alertctl.py test-call
+```
+
+Only after the test call succeeds, enable automatic alerts:
+
+```bash
+sudo sed -i 's/^HOMEPI_ALERTS_ENABLED=.*/HOMEPI_ALERTS_ENABLED=true/' .env.alerts
+sudo systemctl restart homepi-alert-monitor
 ```
 
 The test call explicitly says that no real system fault exists. In interactive
@@ -266,6 +295,7 @@ Repository smoke tests:
 python scripts/phone_alerts_smoke.py
 python scripts/phone_assistant_smoke.py
 bash -n scripts/install_homepi_alerts.sh
+bash -n scripts/configure_homepi_alerts.sh
 ```
 
 CI runs the phone tests on Python 3.11 and Python 3.13.

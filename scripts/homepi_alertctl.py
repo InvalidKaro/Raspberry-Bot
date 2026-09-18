@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import asyncio
 import shutil
 import subprocess
@@ -32,10 +33,10 @@ def _load() -> tuple[PhoneAlertConfig, InteractiveAlertConfig]:
     return PhoneAlertConfig.from_env(), InteractiveAlertConfig.from_env()
 
 
-def _registration_summary() -> str:
+def _registration_summary() -> tuple[str, bool]:
     binary = shutil.which("asterisk")
     if binary is None:
-        return "Asterisk: not installed"
+        return "Asterisk: not installed", False
     try:
         result = subprocess.run(
             [binary, "-rx", "pjsip show registrations"],
@@ -45,17 +46,22 @@ def _registration_summary() -> str:
             check=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:
-        return f"Asterisk: unavailable ({type(exc).__name__})"
-    text = (result.stdout or result.stderr or "").strip()
+        return f"Asterisk: unavailable ({type(exc).__name__})", False
+    output = (result.stdout or result.stderr or "").strip()
     if result.returncode != 0:
-        return f"Asterisk: command failed\n{text[-1000:]}"
+        return f"Asterisk: command failed\n{output[-1000:]}", False
     lines = [
         line
-        for line in text.splitlines()
+        for line in output.splitlines()
         if line.strip()
         and not line.strip().startswith("<Registration/ServerURI")
     ]
-    return "Asterisk registration:\n" + "\n".join(lines[-12:])
+    registered = any(
+        "registered" in line.lower()
+        and "unregistered" not in line.lower()
+        for line in lines
+    )
+    return "Asterisk registration:\n" + "\n".join(lines[-12:]), registered
 
 
 def doctor() -> int:
@@ -65,6 +71,7 @@ def doctor() -> int:
     print(f"alerts enabled:      {phone.enabled}")
     print(f"interactive mode:    {interactive.enabled}")
     print(f"target configured:   {bool(phone.target)}")
+    print(f"action PIN set:      {bool(interactive.action_pin)}")
     print(f"PJSIP trunk:         {phone.pjsip_trunk}")
     print(f"AGI script:          {interactive.agi_script}")
     print(f"shared directory:    {interactive.root_dir}")
@@ -93,17 +100,25 @@ def doctor() -> int:
         )
         if not interactive.agi_script.is_file():
             problems.append(f"AGI script missing: {interactive.agi_script}")
+        if not interactive.action_pin:
+            problems.append("Interactive action PIN is not configured")
 
     for path in required_dirs:
         if not path.is_dir():
             problems.append(f"Directory missing: {path}")
+            continue
+        if path in {phone.outgoing_dir, interactive.actions_dir, interactive.audio_dir, interactive.call_staging_dir} and not os.access(path, os.W_OK):
+            problems.append(f"Directory not writable by current user: {path}")
 
     for binary in ("asterisk", "espeak-ng", "sox"):
         if shutil.which(binary) is None:
             problems.append(f"Binary missing: {binary}")
 
     print()
-    print(_registration_summary())
+    registration_text, registered = _registration_summary()
+    print(registration_text)
+    if not registered:
+        problems.append("No PJSIP registration currently reports Registered")
     print()
     if problems:
         print("Problems:")

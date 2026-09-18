@@ -295,9 +295,27 @@ def _request_restart(
         except OSError:
             pass
         ok = bool(raw.get("ok"))
+        status = str(raw.get("status") or "")
         spoken = unit.removesuffix(".service").replace("-", " ")
-        if ok:
-            return True, f"Verstanden. Der Dienst {spoken} wurde neu gestartet."
+        if status == "already-online":
+            return True, (
+                f"Der Dienst {spoken} ist bereits wieder erreichbar. "
+                "Ein Neustart war nicht mehr erforderlich."
+            )
+        if status == "recovered" and ok:
+            return True, (
+                f"Verstanden. Der Dienst {spoken} wurde neu gestartet "
+                "und ist wieder aktiv."
+            )
+        if status == "expired":
+            return False, (
+                "Die Sicherheitsanfrage war nicht mehr aktuell und wurde verworfen."
+            )
+        if status == "restart-unverified":
+            return False, (
+                f"Der Neustart von {spoken} wurde ausgeführt, "
+                "aber der aktive Zustand konnte nicht bestätigt werden."
+            )
         return False, f"Der Neustart von {spoken} war nicht erfolgreich."
 
     return False, "Der Neustart wurde angefordert, aber noch nicht bestätigt."
