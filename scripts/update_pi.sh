@@ -34,6 +34,7 @@ SERVICES=(
   raspberry-meshtastic.service
   raspberry-display2.service
   raspberry-intelligence.service
+  homepi-alert-monitor.service
 )
 
 # Keep already-installed systemd units in sync with the repository. A unit that
