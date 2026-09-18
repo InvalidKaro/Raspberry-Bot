@@ -4,6 +4,7 @@ import asyncio
 import json
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -76,6 +77,7 @@ async def invalid_action_is_rejected(
                 "request_id": "bad",
                 "action": "restart",
                 "unit": "ssh.service",
+                "created_at": time.time(),
             }
         ),
         encoding="utf-8",
@@ -149,6 +151,7 @@ def main() -> None:
         assert loaded is not None
         assert loaded.acknowledged is True
         assert loaded.closed is True
+        assert loaded.restart_attempted is False
 
         raw_incident = json.loads(
             interactive.incidents_dir.joinpath(
