@@ -60,7 +60,7 @@ async def _interactive_action_worker(
                     "Processed %d phone acknowledgement(s)",
                     acknowledgements,
                 )
-            processed = await process_action_requests(config)
+            processed = await process_action_requests(config, store)
             if processed:
                 logger.info(
                     "Processed %d interactive phone action(s)",
