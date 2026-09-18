@@ -77,13 +77,12 @@ def _require_binary(name: str) -> str:
     return binary
 
 
-def _safe_audio_dir(raw: object) -> Path:
-    path = Path(str(raw)).resolve()
-    expected = Path("/var/spool/asterisk/homepi-alerts").resolve()
+def _shared_child(root: Path, name: str) -> Path:
+    path = (root / name).resolve()
     try:
-        path.relative_to(expected)
+        path.relative_to(root.resolve())
     except ValueError as exc:
-        raise ValueError("Audio directory is outside HomePi alert spool") from exc
+        raise ValueError("Invalid HomePi shared spool path") from exc
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -237,22 +236,21 @@ def _atomic_json(path: Path, payload: dict[str, object]) -> None:
             pass
 
 
-def _acknowledge(incident: dict[str, object]) -> None:
+def _acknowledge(incident: dict[str, object], ack_dir: Path) -> None:
     incident_id = str(incident["id"])
-    ack_dir = Path(str(incident["ack_dir"]))
-    ack_dir.mkdir(parents=True, exist_ok=True)
     path = ack_dir / f"{incident_id}.ack"
     fd = os.open(path, os.O_WRONLY | os.O_CREAT, 0o660)
     os.close(fd)
 
 
-def _request_restart(incident: dict[str, object]) -> tuple[bool, str]:
+def _request_restart(
+    incident: dict[str, object],
+    action_dir: Path,
+) -> tuple[bool, str]:
     unit = str(incident.get("restart_unit") or "")
     if not unit or not _UNIT_RE.fullmatch(unit):
         return False, "Für diesen Vorfall ist kein sicherer Neustart verfügbar."
 
-    action_dir = Path(str(incident["action_dir"]))
-    action_dir.mkdir(parents=True, exist_ok=True)
     request_id = uuid.uuid4().hex
     request_path = action_dir / f"{request_id}.request.json"
     result_path = action_dir / f"{request_id}.result.json"
@@ -309,8 +307,15 @@ def main(argv: list[str]) -> int:
     incident_path = Path(argv[1]).resolve()
     try:
         incident = _load_incident(incident_path)
-        audio_dir = _safe_audio_dir(incident["audio_dir"])
+        shared_root = incident_path.parent.parent.resolve()
+        audio_dir = _shared_child(shared_root, "audio")
+        action_dir = _shared_child(shared_root, "actions")
+        ack_dir = _shared_child(shared_root, "ack")
         alert_audio = Path(str(incident["audio_file"])).resolve()
+        try:
+            alert_audio.relative_to(audio_dir)
+        except ValueError as exc:
+            raise ValueError("Incident audio is outside HomePi audio spool") from exc
         if not alert_audio.is_file():
             raise FileNotFoundError(alert_audio)
     except Exception:
@@ -355,7 +360,7 @@ def main(argv: list[str]) -> int:
     for _ in range(5):
         digit = agi.get_digit(menu)
         if digit == "1":
-            _acknowledge(incident)
+            _acknowledge(incident, ack_dir)
             agi.stream(confirmed)
             agi.hangup()
             return 0
@@ -368,7 +373,7 @@ def main(argv: list[str]) -> int:
             agi.stream(status_audio)
             continue
         if digit == "3":
-            _, message = _request_restart(incident)
+            _, message = _request_restart(incident, action_dir)
             result_audio = _render_speech(
                 message,
                 audio_dir,
