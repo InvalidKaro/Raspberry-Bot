@@ -35,6 +35,7 @@ jobs:
       - run: python scripts/voice_control_smoke.py
       - run: python scripts/smart_home_smoke.py
       - run: python scripts/universal_devices_smoke.py
+      - run: python scripts/phone_alerts_smoke.py
       - name: Privileged helper rejects unknown units
         run: |
           if python scripts/homepi_systemctl.py status definitely-not-a-real-service; then
@@ -47,6 +48,7 @@ jobs:
       - run: bash -n scripts/install_meshtastic_service.sh
       - run: bash -n scripts/install_voice_control.sh
       - run: bash -n scripts/install_homepi_intelligence.sh
+      - run: bash -n scripts/install_homepi_alerts.sh
 
   dependency-audit:
     runs-on: ubuntu-latest
