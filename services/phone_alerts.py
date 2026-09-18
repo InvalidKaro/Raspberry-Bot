@@ -664,6 +664,10 @@ def build_call_file_text(config: PhoneAlertConfig, audio_file: Path) -> str:
                     "Setvar: HOMEPI_ALERT_ALLOW_RECOVERY="
                     f"{'1' if config.allow_recovery else '0'}"
                 ),
+                f"Setvar: HOMEPI_ALERT_VOICE={config.voice}",
+                f"Setvar: HOMEPI_ALERT_VOICE_SPEED={config.voice_speed}",
+                f"Setvar: HOMEPI_ALERT_VOICE_PITCH={config.voice_pitch}",
+                f"Setvar: HOMEPI_ALERT_VOICE_AMPLITUDE={config.voice_amplitude}",
             ]
         )
     else:
