@@ -23,7 +23,10 @@
     for (const profile of data.profiles || []) {
       const option = document.createElement("option");
       option.value = profile;
-      option.textContent = profile + (profile === data.active_profile ? " · aktiv" : "");
+      const place = (data.locations || []).find(entry => entry.profile === profile) || {};
+      const placeLabel = [place.country, place.city].filter(Boolean).join(" · ");
+      option.textContent = (placeLabel ? placeLabel + " — " : "") + profile +
+        (profile === data.active_profile ? " · aktiv" : "");
       $("profile").append(option);
     }
     if ([...$("profile").options].some(option => option.value === currentSelection)) $("profile").value = currentSelection;
