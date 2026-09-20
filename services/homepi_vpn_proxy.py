@@ -38,6 +38,32 @@ def list_profiles() -> list[str]:
     return sorted(names)[:100]
 
 
+def locations() -> list[dict[str, str | bool]]:
+    """User-supplied labels, never claims of verified endpoint geography."""
+    metadata: dict = {}
+    file = profile_dir().parent / "locations.json"
+    try:
+        if not file.is_symlink() and file.is_file() and file.stat().st_size <= 8192:
+            data = json.loads(file.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                metadata = data
+    except (OSError, UnicodeError, ValueError):
+        pass
+    result = []
+    for name in list_profiles():
+        details = metadata.get(name, {})
+        if not isinstance(details, dict):
+            details = {}
+        country = details.get("country", "")
+        city = details.get("city", "")
+        if not isinstance(country, str) or not re.fullmatch(r"[A-Z]{2}", country):
+            country = ""
+        if not isinstance(city, str) or len(city) > 40 or not re.fullmatch(r"[\\w .-]*", city):
+            city = ""
+        result.append({"profile": name, "country": country, "city": city, "verified": False})
+    return result
+
+
 def _read_profile(name: str) -> str:
     if not isinstance(name, str) or not NAME.fullmatch(name):
         raise VPNError("Invalid profile name.")
@@ -155,6 +181,7 @@ class ProxyController:
             "ok": True,
             "mode": "application-proxy",
             "profiles": list_profiles(),
+            "locations": locations(),
             "active_profile": self.active if running else None,
             "proxy": f"socks5h://{PROXY_HOST}:{PROXY_PORT}" if running else None,
             "proxy_ready": running and await _port_ready(),
@@ -169,12 +196,15 @@ class ProxyController:
         proc = self.proc
         self.proc = None
         self.active = None
-        if proc and proc.returncode is None:
-            proc.terminate()
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=4)
-            except asyncio.TimeoutError:
-                proc.kill()
+        if proc:
+            if proc.returncode is None:
+                proc.terminate()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=4)
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    await proc.wait()
+            else:
                 await proc.wait()
         if self.config_path is not None:
             self.config_path.unlink(missing_ok=True)
