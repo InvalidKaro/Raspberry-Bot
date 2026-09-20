@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#080b11"><title>HomePi • VPN Manager</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/control_center.css">
+<link rel="stylesheet" href="/static/vpn.css">
+</head>
+<body><main class="vpn-shell">
+<header class="topbar"><div><p class="eyebrow">HOMEPI • NETWORK</p><h1>VPN Manager</h1>
+<p class="muted">WireGuard-Ausgang für ausgewählte Anwendungen – ohne Änderung deiner Pi-Standardroute.</p></div>
+<div class="button-row"><a class="button" href="/control">Control Center</a><a class="button" href="/">Dashboard</a></div></header>
+<div class="vpn-grid">
+<section class="vpn-panel"><p class="card-label">VERBINDUNG</p><h2 id="active">Status wird geladen …</h2>
+<p><span class="vpn-pill" id="ready">—</span></p><p id="proxy"></p>
+<button id="disconnect" type="button" disabled>Verbindung trennen</button></section>
+<section class="vpn-panel"><p class="card-label">STANDORTE / PROFILE</p><h2>Profil auswählen</h2>
+<p class="muted">Standortnamen entsprechen lokalen Profilnamen und sind keine geprüfte Geolokation.</p>
+<div class="vpn-row"><select id="profile" aria-label="VPN-Profil"></select>
+<button id="connect" class="primary" type="button" disabled>Verbinden</button></div>
+<p class="muted">Nur Profile aus dem privat geschützten Profilverzeichnis werden angeboten.</p></section>
+</div>
+<section class="vpn-panel vpn-warning"><h2>Wichtig: App-Proxy, kein Router-VPN</h2>
+<p id="mode">Nur Anwendungen, die den lokalen SOCKS5-Proxy ausdrücklich konfigurieren, verwenden den ausgewählten WireGuard-Ausgang. SSH, Tailscale, Pi-hole, DNS und Standardroute des Raspberry Pi bleiben unverändert.</p>
+<p>Für Apps auf dem Pi: <code>socks5h://127.0.0.1:25344</code>. Der Proxy ist absichtlich nicht aus dem LAN erreichbar. Proxy-Bereitschaft bestätigt nicht die externe IP oder das Zielland.</p></section>
+<div class="vpn-row"><button id="refresh" type="button">Aktualisieren</button><span id="result" class="vpn-result" role="status" aria-live="polite">Bereit.</span></div>
+</main><script src="/static/vpn.js"></script></body></html>
