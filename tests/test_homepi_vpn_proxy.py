@@ -128,7 +128,7 @@ def test_connect_switch_disconnect_only_manages_wireproxy(
         await controller.disconnect()
         assert controller.proc is None
         assert controller.config_path is None
-        assert not (tmp_path / "runtime" / "candidate.conf").exists()
+        assert not list((tmp_path / "runtime").glob("proxy-*.conf"))
 
     asyncio.run(scenario())
     assert all(command[0] == "/usr/local/bin/wireproxy" for command in commands)
