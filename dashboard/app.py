@@ -11,6 +11,7 @@ from aiohttp import web
 from . import app_legacy
 from .config import DashboardConfig
 from .meshtastic_routes import register_meshtastic_routes
+from .homepi_vpn_routes import register_vpn_routes
 from .services.database_admin_service import DatabaseAdminService
 from .services.system_service import bot_action
 
