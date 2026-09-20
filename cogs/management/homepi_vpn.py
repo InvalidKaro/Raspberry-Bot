@@ -15,7 +15,7 @@ class HomePiVpn(commands.GroupCog, group_name="vpn", group_description="HomePi V
         self.bot = bot
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        owner_ids = {int(value) for value in self.bot.settings.owner_ids}
+        owner_ids = self.bot.settings.owner_ids
         if interaction.guild_id != HOMEPI_GUILD.id or interaction.user.id not in owner_ids:
             await interaction.response.send_message("Nicht autorisiert.", ephemeral=True)
             return False
