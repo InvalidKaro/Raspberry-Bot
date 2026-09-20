@@ -73,6 +73,7 @@ EXTENSIONS: tuple[str, ...] = (
     "cogs.management.smart_home",
     "cogs.management.universal_devices",
     "cogs.management.dashboard_telemetry",
+    "cogs.management.homepi_vpn",
     "tasks.cache_cleanup",
     "tasks.system_monitor",
     "tasks.dashboard_commands",
