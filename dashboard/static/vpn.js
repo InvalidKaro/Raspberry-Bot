@@ -1,32 +1,59 @@
 "use strict";
-async function refreshVpn() {
-  const active = document.getElementById("active");
-  const mode = document.getElementById("mode");
-  const list = document.getElementById("profiles");
-  try {
-    const response = await fetch("/api/vpn/status", {credentials: "same-origin", cache: "no-store"});
-    if (!response.ok) throw new Error("Status konnte nicht geladen werden.");
+(() => {
+  const $ = id => document.getElementById(id);
+  let csrf = "";
+  let busy = false;
+  async function api(path, options = {}) {
+    const response = await fetch(path, {
+      credentials:"same-origin", cache:"no-store", ...options,
+      headers:{"Content-Type":"application/json", ...(options.method === "POST" ? {"X-CSRF-Token":csrf} : {})}
+    });
+    if (response.status === 401) { window.location.assign("/login"); throw new Error("Login erforderlich."); }
     const data = await response.json();
-    active.textContent = data.active_interfaces.length
-      ? "Aktive WireGuard-Interfaces: " + data.active_interfaces.join(", ")
-      : "Kein aktives WireGuard-Interface erkannt.";
-    mode.textContent = data.message;
-    list.replaceChildren();
-    if (!data.profiles.length) {
-      const li = document.createElement("li");
-      li.textContent = "Keine lesbaren Profile gefunden.";
-      list.append(li);
-    }
-    for (const profile of data.profiles) {
-      const li = document.createElement("li");
-      li.textContent = profile + (data.active_profiles.includes(profile) ? " (aktiv)" : "");
-      list.append(li);
-    }
-  } catch (error) {
-    active.textContent = error.message;
-    mode.textContent = "";
-    list.replaceChildren();
+    if (!response.ok || data.ok === false) throw new Error(data.message || "Aktion fehlgeschlagen.");
+    return data;
   }
-}
-document.getElementById("refresh").addEventListener("click", refreshVpn);
-refreshVpn();
+  function render(data) {
+    const currentSelection = $("profile").value;
+    $("active").textContent = data.active_profile ? "Aktives Profil: " + data.active_profile : "Keine VPN-Proxy-Verbindung";
+    $("ready").textContent = data.proxy_ready ? "Lokaler Proxy bereit" : "Proxy inaktiv";
+    $("proxy").textContent = data.proxy || "Keine Anwendung wird über den VPN-Proxy geleitet.";
+    $("mode").textContent = data.message;
+    $("profile").replaceChildren();
+    for (const profile of data.profiles || []) {
+      const option = document.createElement("option");
+      option.value = profile;
+      option.textContent = profile + (profile === data.active_profile ? " · aktiv" : "");
+      $("profile").append(option);
+    }
+    if ([...$("profile").options].some(option => option.value === currentSelection)) $("profile").value = currentSelection;
+    $("connect").disabled = busy || !data.profiles.length;
+    $("disconnect").disabled = busy || !data.active_profile;
+  }
+  async function refresh() {
+    try { render(await api("/api/vpn/status")); }
+    catch (error) { $("result").textContent = error.message; }
+  }
+  async function action(kind) {
+    if (busy) return;
+    const profile = $("profile").value;
+    if (kind === "connect" && !profile) return;
+    busy = true;
+    $("connect").disabled = $("disconnect").disabled = true;
+    $("result").textContent = kind === "connect" ? "Starte lokalen Proxy …" : "Trenne lokalen Proxy …";
+    try {
+      const data = await api("/api/vpn/" + kind, {method:"POST",body:JSON.stringify(kind === "connect" ? {profile} : {})});
+      $("result").textContent = kind === "connect" ? "Lokaler Proxy gestartet. Externe IP bitte separat prüfen." : "Proxy getrennt.";
+      render(data);
+    } catch (error) {
+      $("result").textContent = error.message;
+    } finally { busy = false; await refresh(); }
+  }
+  $("connect").addEventListener("click", () => action("connect"));
+  $("disconnect").addEventListener("click", () => action("disconnect"));
+  $("refresh").addEventListener("click", refresh);
+  (async () => {
+    try { csrf = (await api("/api/bootstrap")).csrf || ""; await refresh(); }
+    catch (error) { $("result").textContent = error.message; }
+  })();
+})();
