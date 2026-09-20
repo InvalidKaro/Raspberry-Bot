@@ -386,6 +386,7 @@ async def api_database_admin_delete(request: web.Request) -> web.Response:
 def create_app(config: DashboardConfig | None = None) -> web.Application:
     app = app_legacy.create_app(config)
     register_meshtastic_routes(app)
+    register_vpn_routes(app)
     app["database_admin"] = DatabaseAdminService(app["config"].database_path)
     app.router.add_get("/control", control_page)
     app.router.add_get("/database-admin", database_admin_page)
