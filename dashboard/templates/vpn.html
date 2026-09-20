@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>HomePi VPN Manager</title>
+<link rel="stylesheet" href="/static/style.css">
+<style>
+main{max-width:860px;margin:3rem auto;padding:1rem}
+.panel{padding:1.5rem;border:1px solid #334155;border-radius:16px;margin:1rem 0}
+code{overflow-wrap:anywhere}button{cursor:pointer}
+</style>
+</head>
+<body><main>
+<a href="/control">← Control Center</a>
+<h1>HomePi VPN Manager</h1>
+<p>WireGuard-Status und lokal vorhandene Profile. Standortwechsel bleiben bis zur sicheren Gateway-Konfiguration deaktiviert.</p>
+<section class="panel"><h2>Verbindung</h2><p id="active">Lade Status …</p><p id="mode"></p></section>
+<section class="panel"><h2>Verfügbare Profile</h2><ul id="profiles"><li>Lade …</li></ul></section>
+<button id="refresh" type="button">Aktualisieren</button>
+<script src="/static/vpn.js"></script>
+</main></body></html>
