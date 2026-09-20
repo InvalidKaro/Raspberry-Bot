@@ -7,6 +7,7 @@ import ipaddress
 import json
 import os
 import re
+import secrets
 import shutil
 import socket
 import stat
@@ -58,7 +59,7 @@ def locations() -> list[dict[str, str | bool]]:
         city = details.get("city", "")
         if not isinstance(country, str) or not re.fullmatch(r"[A-Z]{2}", country):
             country = ""
-        if not isinstance(city, str) or len(city) > 40 or not re.fullmatch(r"[\\w .-]*", city):
+        if not isinstance(city, str) or len(city) > 40 or not re.fullmatch(r"[\w .-]*", city):
             city = ""
         result.append({"profile": name, "country": country, "city": city, "verified": False})
     return result
@@ -224,9 +225,9 @@ class ProxyController:
             if not binary:
                 raise VPNError("wireproxy is not installed; see docs/HOMEPI_VPN.md.")
             runtime = _runtime_dir(self.root)
-            candidate = runtime / "candidate.conf"
+            candidate = runtime / ("proxy-" + secrets.token_hex(8) + ".conf")
             if candidate.exists() or candidate.is_symlink():
-                raise VPNError("Stale candidate configuration; remove manually after inspecting it.")
+                raise VPNError("A proxy candidate path already exists.")
             fd = os.open(candidate, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
             try:
                 with os.fdopen(fd, "w", encoding="utf-8") as output:
