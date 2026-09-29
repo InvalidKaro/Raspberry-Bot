@@ -36,7 +36,7 @@
     <main class="content" id="main-content" tabindex="-1">
       <header class="topbar">
         <div><p class="eyebrow">HOMEPI • OPERATIONS</p><h1 id="page-title">System overview</h1></div>
-        <div class="top-actions"><a class="top-link" href="/ops">Operations</a><span class="status-pill" id="bot-pill"><span class="dot"></span><span>Loading</span></span><button type="button" id="refresh-button">Refresh</button></div>
+        <div class="top-actions"><span class="sync-age" id="sync-age" aria-live="polite">Syncing…</span><button class="command-trigger" id="command-open" type="button" aria-haspopup="dialog" aria-controls="command-palette">Search <kbd>⌘K</kbd></button><a class="top-link" href="/ops">Operations</a><span class="status-pill" id="bot-pill"><span class="dot"></span><span>Loading</span></span><button type="button" id="refresh-button">Refresh</button></div>
       </header>
 
       <section id="overview" class="section active">
@@ -64,7 +64,7 @@
             <div class="health-empty"><span></span><div><strong>Loading system status</strong><small>Waiting for the first status response.</small></div></div>
           </div>
         </section>
-        <div class="metric-grid"><article class="metric"><span>CPU</span><strong id="cpu">—</strong><small id="cpu-detail">Waiting for sampler…</small><div class="bar"><i id="cpu-bar"></i></div></article><article class="metric"><span>Temperature</span><strong id="temp">—</strong><div class="bar"><i id="temp-bar"></i></div></article><article class="metric"><span>RAM</span><strong id="ram">—</strong><small id="ram-detail">—</small><div class="bar"><i id="ram-bar"></i></div></article><article class="metric"><span>Storage</span><strong id="disk">—</strong><small id="disk-detail">—</small><div class="bar"><i id="disk-bar"></i></div></article></div>
+        <div class="metric-grid telemetry-grid"><article class="metric" data-metric="cpu"><span>CPU</span><strong id="cpu">—</strong><small id="cpu-detail">Waiting for sampler…</small><div class="metric-trend"><svg viewBox="0 0 100 30" role="img" aria-label="CPU trend"><polyline id="cpu-sparkline"></polyline></svg><span id="cpu-trend">Collecting trend</span></div><div class="bar"><i id="cpu-bar"></i></div></article><article class="metric" data-metric="temp"><span>Temperature</span><strong id="temp">—</strong><small>CPU thermal</small><div class="metric-trend"><svg viewBox="0 0 100 30" role="img" aria-label="Temperature trend"><polyline id="temp-sparkline"></polyline></svg><span id="temp-trend">Collecting trend</span></div><div class="bar"><i id="temp-bar"></i></div></article><article class="metric" data-metric="ram"><span>RAM</span><strong id="ram">—</strong><small id="ram-detail">—</small><div class="metric-trend"><svg viewBox="0 0 100 30" role="img" aria-label="RAM trend"><polyline id="ram-sparkline"></polyline></svg><span id="ram-trend">Collecting trend</span></div><div class="bar"><i id="ram-bar"></i></div></article><article class="metric" data-metric="disk"><span>Storage</span><strong id="disk">—</strong><small id="disk-detail">—</small><div class="metric-trend"><svg viewBox="0 0 100 30" role="img" aria-label="Storage trend"><polyline id="disk-sparkline"></polyline></svg><span id="disk-trend">Collecting trend</span></div><div class="bar"><i id="disk-bar"></i></div></article></div>
         <div class="quick-actions"><button data-bot-action="restart" class="primary">Restart bot</button><button data-nav="logs">View errors</button><button data-nav="code">Edit code</button><button data-git-action="pull">Git pull</button><button data-nav="git">Deploy</button><button data-nav="database">Database</button><button data-nav="system">System</button></div>
         <div class="detail-grid">
           <article class="panel"><div class="panel-head"><div><p class="card-label">SYSTEM</p><h2>Runtime</h2></div></div><dl class="facts"><div><dt>Uptime</dt><dd id="uptime">—</dd></div><div><dt>Load</dt><dd id="load">—</dd></div><div><dt>Network RX</dt><dd id="net-rx">—</dd></div><div><dt>Network TX</dt><dd id="net-tx">—</dd></div></dl></article>
@@ -74,6 +74,10 @@
           <article class="panel"><div class="panel-head"><div><p class="card-label">PI-HOLE</p><h2 id="pihole-status">Checking…</h2></div></div><p class="muted" id="pihole-detail">DNS status</p></article>
           <article class="panel"><div class="panel-head"><div><p class="card-label">BOT DATABASE</p><h2>Activity</h2></div></div><dl class="facts"><div><dt>Open tickets</dt><dd id="ov-tickets">—</dd></div><div><dt>Commands / 24h</dt><dd id="ov-commands">—</dd></div><div><dt>Moderation cases</dt><dd id="ov-cases">—</dd></div></dl></article>
         </div>
+        <article class="panel overview-activity-panel">
+          <div class="panel-head"><div><p class="card-label">RECENT OPERATIONS</p><h2>What changed</h2></div><div class="button-row"><span class="branch" id="overview-audit-count">—</span><button type="button" data-nav="logs">Open audit</button></div></div>
+          <div id="overview-audit-list" class="overview-audit-list" aria-live="polite"><div class="activity-empty">Loading recent dashboard actions…</div></div>
+        </article>
         <article class="panel suite-panel">
           <div class="panel-head"><div><p class="card-label">HOMEPI SUITE</p><h2>Operational workspaces</h2></div><span class="branch">Direct access</span></div>
           <div class="suite-grid">
@@ -169,6 +173,14 @@
         <div class="detail-grid"><article class="panel"><div class="panel-head"><div><p class="card-label">JOURNALCTL</p><h2>Service logs</h2></div><div class="button-row"><select id="log-service" name="log-service" aria-label="Log service"><option value="raspberry-bot">Raspberry-Bot</option><option value="raspberry-dashboard">Dashboard</option><option value="pihole-FTL">Pi-hole FTL</option><option value="tailscaled">Tailscale</option></select><button id="logs-refresh" type="button">Reload</button></div></div><pre id="log-output">Open this page to load logs.</pre></article><article class="panel"><div class="panel-head"><div><p class="card-label">AUDIT</p><h2>Dashboard actions</h2></div><button id="audit-refresh" type="button">Reload</button></div><div id="audit-list" class="audit-list"></div></article></div>
       </section>
 
+      <div class="command-backdrop" id="command-palette" data-open="false" role="dialog" aria-modal="true" aria-labelledby="command-title">
+        <section class="command-dialog">
+          <div class="command-head"><span id="command-title">HomePi Command Center</span><kbd>Esc</kbd></div>
+          <input id="command-search" type="search" autocomplete="off" spellcheck="false" aria-label="HomePi durchsuchen" placeholder="Search pages and actions…">
+          <div id="command-results" class="command-results" role="listbox"></div>
+          <div class="command-foot"><span>↑ ↓ navigate</span><span>Enter open</span><span>⌘/Ctrl + K toggle</span></div>
+        </section>
+      </div>
       <div id="toast" role="status" aria-live="polite"></div>
     </main>
   </div>
