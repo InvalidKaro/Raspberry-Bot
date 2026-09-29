@@ -22,19 +22,33 @@
         <button class="nav-item" type="button" data-section="backups">Backups</button>
         <button class="nav-item" type="button" data-section="logs">Logs & audit</button>
       </nav>
+      <div class="sidebar-suite" aria-label="HomePi subsites">
+        <p class="sidebar-suite-label">SUBSITES</p>
+        <a href="/ops"><span>Operations</span><small>Analytics · Discord · Reliability</small></a>
+        <a href="/control"><span>Control Center</span><small>Health · Maintenance · Cogs</small></a>
+        <a href="/workspace"><span>Workspace</span><small>Composer · Config · Plugins</small></a>
+        <a href="/media"><span>Media</span><small>Voice · Radio · Ambient</small></a>
+        <a href="/meshtastic"><span>Meshtastic</span><small>LoRa · RF · Nodes</small></a>
+      </div>
       <button id="logout-button" class="nav-item danger-soft" type="button">Log out</button>
     </aside>
 
     <main class="content" id="main-content" tabindex="-1">
       <header class="topbar">
         <div><p class="eyebrow">HOMEPI • OPERATIONS</p><h1 id="page-title">System overview</h1></div>
-        <div class="top-actions"><span class="status-pill" id="bot-pill"><span class="dot"></span><span>Loading</span></span><button type="button" id="refresh-button">Refresh</button></div>
+        <div class="top-actions"><a class="top-link" href="/ops">Operations</a><span class="status-pill" id="bot-pill"><span class="dot"></span><span>Loading</span></span><button type="button" id="refresh-button">Refresh</button></div>
       </header>
 
       <section id="overview" class="section active">
         <div class="hero-grid">
           <article class="hero-card accent-card"><div><p class="card-label">RASPBERRY-BOT</p><strong id="bot-status">Checking…</strong><p class="muted" id="bot-service-name">—</p></div><div class="button-row"><button class="primary" data-bot-action="restart">Restart</button><button data-bot-action="start">Start</button><button data-bot-action="stop">Stop</button></div></article>
           <article class="hero-card"><div><p class="card-label">REMOTE ACCESS</p><strong id="tailscale-status">Checking…</strong><p class="muted" id="tailscale-detail">Tailscale</p></div></article>
+        </div>
+        <div class="platform-status-grid" aria-label="HomePi platform health">
+          <a class="platform-status" id="platform-bot" data-state="checking" href="/control"><span class="platform-status-dot"></span><span><small>BOT SERVICE</small><strong id="platform-bot-state">Checking…</strong></span><b>Control →</b></a>
+          <a class="platform-status" id="platform-pihole" data-state="checking" href="#system"><span class="platform-status-dot"></span><span><small>DNS / PI-HOLE</small><strong id="platform-pihole-state">Checking…</strong></span><b>System →</b></a>
+          <a class="platform-status" id="platform-tail" data-state="checking" href="#system"><span class="platform-status-dot"></span><span><small>REMOTE ACCESS</small><strong id="platform-tail-state">Checking…</strong></span><b>Tailscale →</b></a>
+          <a class="platform-status" id="platform-git" data-state="checking" href="#git"><span class="platform-status-dot"></span><span><small>REPOSITORY</small><strong id="platform-git-state">Checking…</strong></span><b>Git →</b></a>
         </div>
         <div class="metric-grid"><article class="metric"><span>CPU</span><strong id="cpu">—</strong><small id="cpu-detail">Waiting for sampler…</small><div class="bar"><i id="cpu-bar"></i></div></article><article class="metric"><span>Temperature</span><strong id="temp">—</strong><div class="bar"><i id="temp-bar"></i></div></article><article class="metric"><span>RAM</span><strong id="ram">—</strong><small id="ram-detail">—</small><div class="bar"><i id="ram-bar"></i></div></article><article class="metric"><span>Storage</span><strong id="disk">—</strong><small id="disk-detail">—</small><div class="bar"><i id="disk-bar"></i></div></article></div>
         <div class="quick-actions"><button data-bot-action="restart" class="primary">Restart bot</button><button data-nav="logs">View errors</button><button data-nav="code">Edit code</button><button data-git-action="pull">Git pull</button><button data-nav="git">Deploy</button><button data-nav="database">Database</button><button data-nav="system">System</button></div>
@@ -46,6 +60,19 @@
           <article class="panel"><div class="panel-head"><div><p class="card-label">PI-HOLE</p><h2 id="pihole-status">Checking…</h2></div></div><p class="muted" id="pihole-detail">DNS status</p></article>
           <article class="panel"><div class="panel-head"><div><p class="card-label">BOT DATABASE</p><h2>Activity</h2></div></div><dl class="facts"><div><dt>Open tickets</dt><dd id="ov-tickets">—</dd></div><div><dt>Commands / 24h</dt><dd id="ov-commands">—</dd></div><div><dt>Moderation cases</dt><dd id="ov-cases">—</dd></div></dl></article>
         </div>
+        <article class="panel suite-panel">
+          <div class="panel-head"><div><p class="card-label">HOMEPI SUITE</p><h2>Operational workspaces</h2></div><span class="branch">Direct access</span></div>
+          <div class="suite-grid">
+            <a href="/ops"><strong>Operations</strong><span>Analytics, Discord map, incidents, hardware and reliability.</span><small>OPEN /OPS →</small></a>
+            <a href="/control"><strong>Control Center</strong><span>System health, history, maintenance and live cog control.</span><small>OPEN /CONTROL →</small></a>
+            <a href="/database-admin"><strong>Database Admin</strong><span>Safe SQLite editing with backups and primary-key protection.</span><small>OPEN DATABASE →</small></a>
+            <a href="/workspace"><strong>Workspace</strong><span>Message composer, custom commands, config and plugins.</span><small>OPEN WORKSPACE →</small></a>
+            <a href="/workspace/studio"><strong>Workspace Studio</strong><span>Smart search, embed builder and workspace catalog.</span><small>OPEN STUDIO →</small></a>
+            <a href="/media"><strong>Media Hub</strong><span>Voice control, ambient scenes, radio and media library.</span><small>OPEN MEDIA →</small></a>
+            <a href="/meshtastic"><strong>Meshtastic</strong><span>USB-LoRa connection, RF telemetry, nodes and messages.</span><small>OPEN MESH →</small></a>
+            <a href="/status"><strong>Status</strong><span>Reduced service view for fast health checks.</span><small>OPEN STATUS →</small></a>
+          </div>
+        </article>
       </section>
 
       <section id="botconfig" class="section">
