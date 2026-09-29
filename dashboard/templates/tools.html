@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#07090d">
+  <title>Tools · HomePi</title>
+  <link rel="stylesheet" href="/static/homepi_shell.css">
+  <link rel="stylesheet" href="/static/tools.css">
+  <script src="/static/homepi_shell.js" defer></script>
+  <script src="/static/tools.js" defer></script>
+</head>
+<body data-homepi-page="tools">
+  <main class="tools-shell" id="hp-main">
+    <header class="tools-hero">
+      <div>
+        <p class="tools-kicker">HOMEPI • TOOLBOX</p>
+        <h1>Maintenance & diagnostics</h1>
+        <p>Network tests, database checks, service controls, automatic backups and a sanitized support bundle.</p>
+      </div>
+      <div class="tools-hero-actions">
+        <button class="tools-primary" id="run-diagnostics" type="button">Run full diagnostic</button>
+        <a class="tools-button" href="/api/tools/support-bundle" download>Download support bundle</a>
+      </div>
+    </header>
+
+    <section class="tools-summary" aria-label="Toolbox summary">
+      <article><span>DIAGNOSTICS</span><strong id="summary-diagnostics">Not run</strong><small id="summary-diagnostics-detail">Run a full check</small></article>
+      <article><span>AUTO BACKUP</span><strong id="summary-backup">Loading…</strong><small id="summary-backup-detail">Schedule</small></article>
+      <article><span>APT UPDATES</span><strong id="summary-updates">Not checked</strong><small>Uses cached package index</small></article>
+      <article><span>DATABASE</span><strong id="summary-database">Unknown</strong><small id="summary-database-detail">SQLite quick_check</small></article>
+    </section>
+
+    <div class="tools-grid">
+      <section class="tools-panel diagnostics-panel">
+        <div class="tools-panel-head">
+          <div><p class="tools-label">SYSTEM CHECK</p><h2>Diagnostics</h2></div>
+          <span class="tools-badge" id="diagnostic-badge">Idle</span>
+        </div>
+        <div id="diagnostic-list" class="diagnostic-list">
+          <div class="tools-empty">Run diagnostics to test SQLite, DNS, routing and dashboard storage.</div>
+        </div>
+      </section>
+
+      <section class="tools-panel network-panel">
+        <div class="tools-panel-head">
+          <div><p class="tools-label">NETWORK TOOLBOX</p><h2>Ping & DNS</h2></div>
+          <span class="tools-badge">Live</span>
+        </div>
+        <label class="tools-field">
+          <span>Hostname or IP</span>
+          <input id="network-target" type="text" autocomplete="off" spellcheck="false" value="homepi.local" placeholder="homepi.local / 192.168.178.1">
+        </label>
+        <div class="tools-actions">
+          <button id="network-ping" type="button">Ping target</button>
+          <button id="network-dns" type="button">Resolve DNS</button>
+        </div>
+        <pre id="network-output">No network test run yet.</pre>
+      </section>
+
+      <section class="tools-panel backup-panel">
+        <div class="tools-panel-head">
+          <div><p class="tools-label">AUTOMATION</p><h2>Database backups</h2></div>
+          <button class="tools-primary" id="backup-now" type="button">Backup now</button>
+        </div>
+
+        <label class="tools-toggle">
+          <input id="backup-enabled" type="checkbox">
+          <span><strong>Automatic backups</strong><small>Runs inside the dashboard service and survives restarts.</small></span>
+        </label>
+
+        <div class="backup-fields">
+          <label class="tools-field">
+            <span>Frequency</span>
+            <select id="backup-frequency">
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+            </select>
+          </label>
+          <label class="tools-field">
+            <span>Time</span>
+            <input id="backup-time" type="time" value="03:30">
+          </label>
+          <label class="tools-field" id="weekday-field">
+            <span>Weekday</span>
+            <select id="backup-weekday">
+              <option value="0">Monday</option>
+              <option value="1">Tuesday</option>
+              <option value="2">Wednesday</option>
+              <option value="3">Thursday</option>
+              <option value="4">Friday</option>
+              <option value="5">Saturday</option>
+              <option value="6">Sunday</option>
+            </select>
+          </label>
+          <label class="tools-field">
+            <span>Keep auto backups</span>
+            <input id="backup-retention" type="number" min="1" max="50" value="7">
+          </label>
+        </div>
+
+        <div class="backup-status">
+          <div><span>NEXT RUN</span><strong id="backup-next">—</strong></div>
+          <div><span>LAST RUN</span><strong id="backup-last">—</strong></div>
+          <div><span>AUTO BACKUPS</span><strong id="backup-count">0</strong></div>
+        </div>
+        <div class="tools-actions tools-actions-end">
+          <span id="backup-message" class="tools-muted">Schedule not loaded.</span>
+          <button id="save-backup-schedule" type="button">Save schedule</button>
+        </div>
+      </section>
+
+      <section class="tools-panel update-panel">
+        <div class="tools-panel-head">
+          <div><p class="tools-label">SYSTEM PACKAGES</p><h2>Update check</h2></div>
+          <button id="check-updates" type="button">Check cached APT index</button>
+        </div>
+        <p class="tools-muted">Read-only check. This page does not run <code>apt upgrade</code> or install anything.</p>
+        <div id="update-list" class="update-list">
+          <div class="tools-empty">No update check run yet.</div>
+        </div>
+      </section>
+
+      <section class="tools-panel services-panel">
+        <div class="tools-panel-head">
+          <div><p class="tools-label">SYSTEMD</p><h2>Service controls</h2></div>
+          <a class="tools-text-link" href="/#system">Open system view →</a>
+        </div>
+        <div class="service-control-list">
+          <div class="service-control" data-service-row="bot">
+            <div><strong>Raspberry-Bot</strong><small>Discord bot process</small></div>
+            <div><button data-service="bot" data-action="start">Start</button><button data-service="bot" data-action="restart">Restart</button><button class="tools-danger" data-service="bot" data-action="stop">Stop</button></div>
+          </div>
+          <div class="service-control" data-service-row="pihole">
+            <div><strong>Pi-hole FTL</strong><small>DNS filtering engine</small></div>
+            <div><button data-service="pihole" data-action="start">Start</button><button data-service="pihole" data-action="restart">Restart</button><button class="tools-danger" data-service="pihole" data-action="stop">Stop</button></div>
+          </div>
+          <div class="service-control" data-service-row="tailscale">
+            <div><strong>Tailscale</strong><small>Remote access daemon</small></div>
+            <div><button data-service="tailscale" data-action="start">Start</button><button data-service="tailscale" data-action="restart">Restart</button><button class="tools-danger" data-service="tailscale" data-action="stop">Stop</button></div>
+          </div>
+          <div class="service-control" data-service-row="dashboard">
+            <div><strong>HomePi Dashboard</strong><small>This web interface</small></div>
+            <div><button data-service="dashboard" data-action="restart">Restart dashboard</button></div>
+          </div>
+        </div>
+        <div id="service-message" class="tools-status-line">No service action run yet.</div>
+      </section>
+
+      <section class="tools-panel maintenance-panel">
+        <div class="tools-panel-head">
+          <div><p class="tools-label">BOT MAINTENANCE</p><h2>Maintenance jobs</h2></div>
+          <a class="tools-text-link" href="/control">Control Center →</a>
+        </div>
+        <div class="maintenance-jobs">
+          <button data-maintenance="cache-clear" type="button"><strong>Clear cache</strong><small>Queue a cache cleanup in the bot process.</small></button>
+          <button data-maintenance="gc" type="button"><strong>Run garbage collection</strong><small>Request a Python memory cleanup.</small></button>
+          <button data-maintenance="database-optimize" type="button"><strong>Optimize database</strong><small>Queue database maintenance in the bot.</small></button>
+        </div>
+        <div id="maintenance-message" class="tools-status-line">Maintenance commands are queued through the bot command channel.</div>
+      </section>
+    </div>
+
+    <section class="tools-panel support-panel">
+      <div>
+        <p class="tools-label">SUPPORT</p>
+        <h2>Portable diagnostic bundle</h2>
+        <p>Exports sanitized system state, diagnostics, Git summary, cached package update names and backup schedule as JSON. It excludes environment variables, tokens, secrets, logs and file contents.</p>
+      </div>
+      <a class="tools-primary tools-download" href="/api/tools/support-bundle" download>Download JSON bundle</a>
+    </section>
+
+    <div class="tools-toast" id="tools-toast" role="status" aria-live="polite"></div>
+  </main>
+</body>
+</html>
