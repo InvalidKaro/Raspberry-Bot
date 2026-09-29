@@ -8,7 +8,7 @@ HomePi is an operational control surface for a Raspberry Pi, Raspberry-Bot, Pi-h
 - Dense enough for operational work, but never visually noisy.
 - Strong information hierarchy before decoration.
 - Use surfaces sparingly; avoid cards nested inside cards.
-- Accent color is violet with restrained cyan/green status color usage.
+- Primary accent is HomePi Signal Blue. Semantic green, amber and red are reserved for real status.
 - Motion is subtle and optional. Never rely on animation to communicate state.
 - Every state must remain readable on a small laptop, tablet and phone.
 
@@ -23,9 +23,8 @@ HomePi is an operational control surface for a Raspberry Pi, Raspberry-Bot, Pi-h
 - Text: `#f5f7fb`
 - Text soft: `#a5afbf`
 - Text muted: `#778397`
-- Violet: `#8b5cf6`
-- Violet strong: `#7447e8`
-- Cyan: `#50c7e8`
+- Signal Blue: `#69a7ff`
+- Signal Blue strong: `#4f8ee8`
 - Success: `#49d39a`
 - Warning: `#efbd5f`
 - Danger: `#ff7480`
@@ -42,6 +41,8 @@ Use the system UI stack. No external font dependency is required on HomePi.
 - Desktop: 248 px persistent sidebar + fluid content.
 - Main content max width: 1440 px.
 - Primary page gap: 20–24 px.
+- Prefer asymmetric layouts and metric rails over repeated equal-card grids.
+- The overview answers "what needs attention?" first, then offers drill-downs.
 - Panel radius: 16–18 px.
 - Mobile: navigation becomes horizontally scrollable instead of hiding critical sections.
 - Use CSS Grid/Flexbox; do not measure layout in JavaScript.
@@ -61,6 +62,8 @@ Use the system UI stack. No external font dependency is required on HomePi.
 - Panels must support long text and code without breaking the viewport.
 
 ### Metrics
+- Raw metrics live in a shared telemetry rail instead of isolated decorative cards.
+- Surface warnings before healthy detail; healthy systems should recede visually.
 - Numbers use tabular numerals.
 - Progress bars are secondary; the numeric value remains primary.
 - Status colors should not be the only carrier of meaning.
@@ -106,3 +109,32 @@ Visual redesigns must preserve:
 - Existing backend service boundaries.
 
 This file is the visual source of truth for future HomePi dashboard work.
+
+
+## Product architecture
+HomePi is a suite, not a pile of unrelated dashboards.
+
+- `/` is the triage and navigation surface: health, resource pressure, repository state, and direct drill-down.
+- `/control` owns maintenance, trends, process health and cog controls.
+- `/ops` owns deeper analytics, Discord operations, incidents, hardware and reliability.
+- `/database-admin` owns safe write-capable SQLite administration.
+- `/workspace`, `/workspace/studio`, and `/workspace/manage` own Discord content and structured workspace data.
+- `/media` and `/now-playing` own playback.
+- `/meshtastic` owns LoRa and RF telemetry.
+- Navigation between these areas is global and consistent. Avoid duplicating the same detailed data on several pages.
+
+## Interaction architecture
+- Main dashboard sections are deep-linkable through URL hashes and respond to browser Back/Forward.
+- Subsites share a global HomePi navigation bar and searchable switcher.
+- `Ctrl/Cmd + K` opens the global switcher except on pages that already own that shortcut.
+- Existing destructive confirmations and CSRF behavior remain untouched.
+- Do not introduce continuous polling faster than the underlying data changes.
+
+## Anti-slop rules
+- No decorative purple mesh gradients.
+- No equal three/four-card feature rows as the default composition.
+- No decorative status dots; dots only represent actual live state.
+- No fake terminal/UI decoration that does not perform a real function.
+- Do not nest cards simply to create depth.
+- Prefer one clear accent, neutral surfaces, and semantic state colors.
+- Every decorative treatment must justify its operational purpose.
