@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="de">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -7,11 +7,11 @@
   <title>HomePi Operations</title>
   <link rel="stylesheet" href="/static/style.css">\n  <link rel="stylesheet" href="/static/dashboard_v5.css">
 </head>
-<body class="dashboard-page">\n  <a class="skip-link" href="#main-content">Zum Inhalt springen</a>
+<body class="dashboard-page">\n  <a class="skip-link" href="#main-content">Skip to content</a>
   <div class="app-shell">
     <aside class="sidebar">
       <div class="brand"><div class="brand-mark small">HP</div><div><p class="eyebrow">HOMEPI</p><strong>Control</strong></div></div>
-      <nav aria-label="Dashboard-Bereiche">
+      <nav aria-label="Dashboard sections">
         <button class="nav-item active" type="button" data-section="overview">Overview</button>
         <button class="nav-item" type="button" data-section="botconfig">Bot config</button>
         <button class="nav-item" type="button" data-section="botdata">Bot data</button>
@@ -53,18 +53,18 @@
         <div class="detail-grid config-top">
           <article class="panel">
             <div class="form-grid two">
-              <label>Discord server<select id="guild-select"><option value="">Loading servers…</option></select></label>
-              <label>Embed color<div class="color-row"><input id="embed-color-picker" type="color" value="#5865F2"><input id="embed-color" type="text" placeholder="Default / #5865F2" maxlength="7"><button id="embed-default" type="button">Default</button></div></label>
+              <label>Discord server<select id="guild-select" name="guild"><option value="">Loading servers…</option></select></label>
+              <label>Embed color<div class="color-row"><input id="embed-color-picker" name="embed-color-picker" type="color" value="#5865F2"><input id="embed-color" name="embed-color" type="text" autocomplete="off" placeholder="Default / #5865F2" maxlength="7"><button id="embed-default" type="button">Default</button></div></label>
             </div>
             <div class="form-grid two">
-              <label>Ticket category<select id="ticket-category"><option value="">Disabled / not set</option></select></label>
-              <label>Ticket log channel<select id="ticket-log"><option value="">Disabled / not set</option></select></label>
-              <label>Welcome channel<select id="welcome-channel"><option value="">Disabled</option></select></label>
-              <label>Auto role<select id="auto-role"><option value="">Disabled</option></select></label>
-              <label>Suggestions channel<select id="suggestion-channel"><option value="">Disabled</option></select></label>
-              <label>Audit log channel<select id="audit-channel"><option value="">Disabled</option></select></label>
-              <label class="wide">Welcome message<textarea id="welcome-message" rows="4" maxlength="1000" placeholder="Welcome {user}! You are member #{member_count}."></textarea><small>Placeholders: {user}, {username}, {display_name}, {server}, {member_count}</small></label>
-              <label class="wide">Ticket staff roles<select id="staff-roles" multiple size="8"></select><small>Saved roles that Discord cannot resolve remain visible as ⚠ missing entries.</small></label>
+              <label>Ticket category<select id="ticket-category" name="ticket-category"><option value="">Disabled / not set</option></select></label>
+              <label>Ticket log channel<select id="ticket-log" name="ticket-log"><option value="">Disabled / not set</option></select></label>
+              <label>Welcome channel<select id="welcome-channel" name="welcome-channel"><option value="">Disabled</option></select></label>
+              <label>Auto role<select id="auto-role" name="auto-role"><option value="">Disabled</option></select></label>
+              <label>Suggestions channel<select id="suggestion-channel" name="suggestion-channel"><option value="">Disabled</option></select></label>
+              <label>Audit log channel<select id="audit-channel" name="audit-channel"><option value="">Disabled</option></select></label>
+              <label class="wide">Welcome message<textarea id="welcome-message" name="welcome-message" autocomplete="off" rows="4" maxlength="1000" placeholder="Welcome {user}! You are member #{member_count}."></textarea><small>Placeholders: {user}, {username}, {display_name}, {server}, {member_count}</small></label>
+              <label class="wide">Ticket staff roles<select id="staff-roles" name="staff-roles" multiple size="8"></select><small>Saved roles that Discord cannot resolve remain visible as ⚠ missing entries.</small></label>
             </div>
             <div class="button-row end"><button id="reload-config" type="button">Reload from DB</button><span id="config-status" class="muted">Choose a server.</span><button id="save-config" class="primary" type="button" disabled>Save & apply</button></div>
           </article>
@@ -87,13 +87,13 @@
         <div class="section-intro"><div><p class="card-label">SQLITE</p><h2>Database browser</h2><p class="muted">Read-only viewer. No raw SQL and no row editing from this page.</p></div></div>
         <div class="database-layout">
           <aside class="panel db-sidebar">
-            <div class="panel-head"><div><p class="card-label">DATABASE</p><h2>Tables</h2></div><button id="db-refresh-tables" type="button" aria-label="Datenbanktabellen aktualisieren" title="Datenbanktabellen aktualisieren">↻</button></div>
+            <div class="panel-head"><div><p class="card-label">DATABASE</p><h2>Tables</h2></div><button id="db-refresh-tables" type="button" aria-label="Refresh database tables" title="Refresh database tables">↻</button></div>
             <div class="db-meta"><div><span>Path</span><code id="db-path">—</code></div><div><span>Size</span><strong id="db-size">—</strong></div><div><span>Journal</span><strong id="db-journal">—</strong></div></div>
             <div id="db-table-list" class="db-table-list"><p class="muted">Open this page to load tables.</p></div>
           </aside>
           <article class="panel db-main">
             <div class="panel-head"><div><p class="card-label">TABLE</p><h2 id="db-table-title">Choose a table</h2></div><span class="branch" id="db-row-count">—</span></div>
-            <div class="db-toolbar"><input id="db-search" type="search" placeholder="Search rows…"><button id="db-search-button" type="button">Search</button><button id="db-schema-button" type="button" disabled>Schema</button></div>
+            <div class="db-toolbar"><input id="db-search" name="db-search" type="search" autocomplete="off" aria-label="Search database rows" placeholder="Search rows…"><button id="db-search-button" type="button">Search</button><button id="db-schema-button" type="button" disabled>Schema</button></div>
             <div class="table-wrap db-table-wrap"><table><thead id="db-table-head"></thead><tbody id="db-table-body"><tr><td class="muted">Select a table on the left.</td></tr></tbody></table></div>
             <div class="db-pager"><button id="db-prev" type="button" disabled>Previous</button><span id="db-page-info" class="muted">—</span><button id="db-next" type="button" disabled>Next</button></div>
             <pre id="db-schema" class="hidden">Schema not loaded.</pre>
@@ -103,13 +103,13 @@
 
       <section id="code" class="section">
         <div class="editor-layout">
-          <aside class="file-panel"><div class="file-panel-head"><div><p class="card-label">REPOSITORY</p><h2>Files</h2></div><div class="button-row"><button id="new-file" type="button">+ File</button><button id="new-folder" type="button">+ Dir</button><button id="reload-files" type="button">↻</button></div></div><input id="file-filter" type="search" placeholder="Filter paths…"><div class="search-row"><input id="code-search" type="search" placeholder="Search inside files…"><button id="code-search-button" type="button">Search</button></div><div id="search-results" class="search-results"></div><div id="file-list" class="file-list"><p class="muted pad">Loading files…</p></div></aside>
-          <article class="editor-panel"><div id="editor-tabs" class="editor-tabs"></div><div class="editor-toolbar"><div><p class="card-label">EDITOR</p><strong id="editor-path">Select a file</strong></div><div class="button-row"><button id="rename-path" type="button" disabled>Rename</button><button id="delete-path" class="danger" type="button" disabled>Delete</button><button id="validate-code" type="button" disabled>Validate</button><button id="save-code" class="primary" type="button" disabled>Save</button></div></div><textarea id="code-editor" spellcheck="false" disabled placeholder="Select an editable repository file from the left."></textarea><div class="editor-status"><span id="editor-message">No file selected.</span><span id="editor-position">—</span></div></article>
+          <aside class="file-panel"><div class="file-panel-head"><div><p class="card-label">REPOSITORY</p><h2>Files</h2></div><div class="button-row"><button id="new-file" type="button">+ File</button><button id="new-folder" type="button">+ Dir</button><button id="reload-files" type="button">↻</button></div></div><input id="file-filter" name="file-filter" type="search" autocomplete="off" aria-label="Filter repository paths" placeholder="Filter paths…"><div class="search-row"><input id="code-search" name="code-search" type="search" autocomplete="off" aria-label="Search inside repository files" placeholder="Search inside files…"><button id="code-search-button" type="button">Search</button></div><div id="search-results" class="search-results"></div><div id="file-list" class="file-list"><p class="muted pad">Loading files…</p></div></aside>
+          <article class="editor-panel"><div id="editor-tabs" class="editor-tabs"></div><div class="editor-toolbar"><div><p class="card-label">EDITOR</p><strong id="editor-path">Select a file</strong></div><div class="button-row"><button id="rename-path" type="button" disabled>Rename</button><button id="delete-path" class="danger" type="button" disabled>Delete</button><button id="validate-code" type="button" disabled>Validate</button><button id="save-code" class="primary" type="button" disabled>Save</button></div></div><textarea id="code-editor" name="code-editor" aria-label="Code editor" spellcheck="false" autocomplete="off" disabled placeholder="Select an editable repository file from the left."></textarea><div class="editor-status"><span id="editor-message">No file selected.</span><span id="editor-position">—</span></div></article>
         </div>
       </section>
 
       <section id="git" class="section">
-        <div class="detail-grid"><article class="panel"><div class="panel-head"><div><p class="card-label">VERSION CONTROL</p><h2 id="git-branch-title">Branch —</h2></div><span id="change-count" class="branch">0 changes</span></div><p id="git-commit-detail" class="commit">—</p><div class="form-grid branch-grid"><label>Branch<select id="branch-select"></select></label><button id="switch-branch" type="button">Switch</button><button id="new-branch" type="button">New branch</button></div><div class="button-row"><button data-git-action="pull">Pull</button><button data-git-action="push">Push</button><button id="refresh-diff">Refresh diff</button></div></article><article class="panel"><p class="card-label">CHANGES</p><h2>Stage & commit</h2><div id="git-change-list" class="check-list"></div><div class="button-row"><button id="stage-selected" type="button">Stage</button><button id="unstage-selected" type="button">Unstage</button><button id="discard-selected" class="danger" type="button">Discard</button></div><input id="commit-message" type="text" maxlength="120" placeholder="Commit message"><button id="commit-button" class="primary full" type="button">Commit staged</button></article></div>
+        <div class="detail-grid"><article class="panel"><div class="panel-head"><div><p class="card-label">VERSION CONTROL</p><h2 id="git-branch-title">Branch —</h2></div><span id="change-count" class="branch">0 changes</span></div><p id="git-commit-detail" class="commit">—</p><div class="form-grid branch-grid"><label>Branch<select id="branch-select" name="branch"></select></label><button id="switch-branch" type="button">Switch</button><button id="new-branch" type="button">New branch</button></div><div class="button-row"><button data-git-action="pull">Pull</button><button data-git-action="push">Push</button><button id="refresh-diff">Refresh diff</button></div></article><article class="panel"><p class="card-label">CHANGES</p><h2>Stage & commit</h2><div id="git-change-list" class="check-list"></div><div class="button-row"><button id="stage-selected" type="button">Stage</button><button id="unstage-selected" type="button">Unstage</button><button id="discard-selected" class="danger" type="button">Discard</button></div><input id="commit-message" name="commit-message" type="text" autocomplete="off" aria-label="Commit message" maxlength="120" placeholder="Commit message"><button id="commit-button" class="primary full" type="button">Commit staged</button></article></div>
         <div class="detail-grid top-gap"><article class="panel"><div class="panel-head"><div><p class="card-label">DIFF</p><h2>Working tree</h2></div></div><pre id="git-diff">Loading diff…</pre></article><article class="panel"><div class="panel-head"><div><p class="card-label">HISTORY</p><h2>Recent commits</h2></div></div><div id="git-history" class="history-list"></div></article></div>
         <article class="panel action-output-panel"><div class="panel-head"><div><p class="card-label">DEPLOY</p><h2>Preflight → restart → health check</h2></div></div><div class="button-row"><button id="requirements-button" type="button">Install requirements</button><button id="deploy-button" class="primary" type="button">Deploy current commit</button><button id="rollback-button" class="danger" type="button">Rollback last deploy</button></div><pre id="deploy-output">No deployment action run yet.</pre></article>
       </section>
@@ -125,7 +125,7 @@
       </section>
 
       <section id="logs" class="section">
-        <div class="detail-grid"><article class="panel"><div class="panel-head"><div><p class="card-label">JOURNALCTL</p><h2>Service logs</h2></div><div class="button-row"><select id="log-service"><option value="raspberry-bot">Raspberry-Bot</option><option value="raspberry-dashboard">Dashboard</option><option value="pihole-FTL">Pi-hole FTL</option><option value="tailscaled">Tailscale</option></select><button id="logs-refresh" type="button">Reload</button></div></div><pre id="log-output">Open this page to load logs.</pre></article><article class="panel"><div class="panel-head"><div><p class="card-label">AUDIT</p><h2>Dashboard actions</h2></div><button id="audit-refresh" type="button">Reload</button></div><div id="audit-list" class="audit-list"></div></article></div>
+        <div class="detail-grid"><article class="panel"><div class="panel-head"><div><p class="card-label">JOURNALCTL</p><h2>Service logs</h2></div><div class="button-row"><select id="log-service" name="log-service" aria-label="Log service"><option value="raspberry-bot">Raspberry-Bot</option><option value="raspberry-dashboard">Dashboard</option><option value="pihole-FTL">Pi-hole FTL</option><option value="tailscaled">Tailscale</option></select><button id="logs-refresh" type="button">Reload</button></div></div><pre id="log-output">Open this page to load logs.</pre></article><article class="panel"><div class="panel-head"><div><p class="card-label">AUDIT</p><h2>Dashboard actions</h2></div><button id="audit-refresh" type="button">Reload</button></div><div id="audit-list" class="audit-list"></div></article></div>
       </section>
 
       <div id="toast" role="status" aria-live="polite"></div>
