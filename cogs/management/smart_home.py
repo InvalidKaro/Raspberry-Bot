@@ -772,6 +772,137 @@ class SmartHome(
         )
 
     @app_commands.command(
+        name="scene",
+        description="Führt eine Smart-Home-Szene auf einem Gerät oder allen Geräten aus.",
+    )
+    @app_commands.describe(device="Optionales Govee-Gerät; leer = alle Geräte")
+    @app_commands.choices(
+        preset=[
+            app_commands.Choice(name="An", value="on"),
+            app_commands.Choice(name="Aus", value="off"),
+            app_commands.Choice(name="Nacht", value="night"),
+            app_commands.Choice(name="Gaming", value="gaming"),
+        ]
+    )
+    async def scene(
+        self,
+        interaction: discord.Interaction,
+        preset: app_commands.Choice[str],
+        device: str | None = None,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            if device:
+                result = await self.service.apply_preset(device, preset.value)
+                description = (
+                    f"**{result.display_name}** → **{preset.name}** "
+                    f"über **{result.transport}**"
+                )
+            else:
+                batch = await self.service.apply_preset_all(preset.value)
+                description = f"**{batch.applied}** Gerät(e) aktualisiert."
+                if batch.failed:
+                    description += f" **{batch.failed}** fehlgeschlagen."
+        except Exception as exc:
+            await self.send_control_error(
+                interaction,
+                exc,
+                title="Smart-Home Szene fehlgeschlagen",
+            )
+            return
+
+        await interaction.followup.send(
+            embed=EmbedFactory.success(
+                title=f"Szene: {preset.name}",
+                description=description,
+            ),
+            ephemeral=True,
+        )
+
+    @scene.autocomplete("device")
+    async def scene_device_autocomplete(
+        self,
+        interaction: discord.Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        return self.device_choices(current)
+
+    @app_commands.command(
+        name="automation",
+        description="Zeigt Klima-Alerts und geplante Smart-Home-Szenen.",
+    )
+    async def automation(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True)
+        alert = await self.bot.database.fetchone(
+            """SELECT channel_id,enabled,temp_min,temp_max,humidity_min,humidity_max,
+                      cooldown_minutes
+               FROM smart_home_alert_config WHERE guild_id=?""",
+            (SMART_HOME_GUILD_ID,),
+        )
+        schedules = await self.bot.database.fetchall(
+            """SELECT name,preset,run_time,weekdays,enabled,last_result
+               FROM smart_home_schedules
+               WHERE guild_id=? ORDER BY run_time,name LIMIT 20""",
+            (SMART_HOME_GUILD_ID,),
+        )
+        embed = EmbedFactory.system(
+            title="Smart-Home Automationen",
+            description="Konfiguration über das HomePi Smart-Home Dashboard.",
+        )
+
+        if alert is None or not int(alert["enabled"] or 0):
+            embed.add_field(
+                name="Klimawarnungen",
+                value="Deaktiviert",
+                inline=False,
+            )
+        else:
+            temp_min = alert["temp_min"] if alert["temp_min"] is not None else "—"
+            temp_max = alert["temp_max"] if alert["temp_max"] is not None else "—"
+            humidity_min = (
+                alert["humidity_min"]
+                if alert["humidity_min"] is not None
+                else "—"
+            )
+            humidity_max = (
+                alert["humidity_max"]
+                if alert["humidity_max"] is not None
+                else "—"
+            )
+            embed.add_field(
+                name="Klimawarnungen",
+                value=(
+                    f"Kanal <#{int(alert['channel_id'])}> · "
+                    f"Cooldown **{int(alert['cooldown_minutes'])} min**\n"
+                    f"Temperatur: **{temp_min} bis {temp_max} °C** · "
+                    f"Feuchte: **{humidity_min} bis {humidity_max} %**"
+                ),
+                inline=False,
+            )
+
+        if schedules:
+            lines = [
+                (
+                    f"{'●' if int(row['enabled']) else '○'} "
+                    f"**{row['name']}** · {row['run_time']} · {row['preset']}"
+                )
+                for row in schedules
+            ]
+            embed.add_field(
+                name="Zeitpläne",
+                value="\n".join(lines)[:1024],
+                inline=False,
+            )
+        else:
+            embed.add_field(
+                name="Zeitpläne",
+                value="Keine Szenen geplant.",
+                inline=False,
+            )
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @app_commands.command(
         name="power",
         description="Schaltet eine lokale Govee-Leuchte an oder aus.",
     )
