@@ -20,7 +20,13 @@
 
   const path=location.pathname.replace(/\/$/,"")||"/";
   const ownsCommandShortcut=body.dataset.homepiPage==="ops";
-  const exact=p=>p.path==="/" ? path==="/" : path===p.path;
+  const isApple=/Mac|iPhone|iPad|iPod/i.test(navigator.platform||navigator.userAgent||"");
+  const exact=p=>{
+    if(p.path==="/")return path==="/";
+    if(p.path==="/workspace")return path==="/workspace"||path.startsWith("/workspace/");
+    if(p.path==="/media")return path==="/media"||path==="/now-playing";
+    return path===p.path;
+  };
   const navPages=pages.filter(p=>["/","/ops","/control","/database-admin","/workspace","/media","/meshtastic"].includes(p.path));
 
   const skip=document.createElement("a");
@@ -46,8 +52,8 @@
       ${navPages.map(p=>`<a href="${p.path}" ${exact(p)?'aria-current="page"':""}>${p.label}</a>`).join("")}
     </nav>
     <div class="hp-globalbar__actions">
-      <span class="hp-connection" id="hp-connection" data-state="checking">HomePi prüfen</span>
-      <button class="hp-command-button" id="hp-command-open" type="button" aria-haspopup="dialog" aria-controls="hp-command">Switcher <kbd>${ownsCommandShortcut?"Click":"⌘K"}</kbd></button>
+      <a class="hp-connection" id="hp-connection" data-state="checking" href="/status" title="Statusseite öffnen">HomePi prüfen</a>
+      <button class="hp-command-button" id="hp-command-open" type="button" aria-haspopup="dialog" aria-controls="hp-command">Switcher <kbd>${ownsCommandShortcut?"Click":isApple?"⌘K":"Ctrl K"}</kbd></button>
     </div>
   `;
   body.insertBefore(bar,body.children[1]||null);
