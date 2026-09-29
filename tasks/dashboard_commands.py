@@ -136,6 +136,139 @@ class DashboardCommands(commands.Cog):
             return f"YouTube mod {user_id} -> {'enabled' if enabled else 'disabled'}"
         raise ValueError("Unsupported YouTube dashboard action")
 
+    async def _smart_home_action(self, action: str, payload: dict) -> str:
+        smart_home = self.bot.get_cog("SmartHome")
+        if smart_home is None:
+            raise RuntimeError("SmartHome cog is not loaded")
+
+        service = smart_home.service
+
+        if action in {"smart-home-snapshot", "smart-home-scan"}:
+            discovery = None
+            if action == "smart-home-scan" or bool(payload.get("refresh")):
+                discovery = await service.refresh_devices()
+
+            devices = [
+                {
+                    "selector": device.selector,
+                    "display_name": device.display_name,
+                    "model": device.model,
+                    "transport": device.transport,
+                    "capabilities": list(device.capabilities),
+                    "detail": device.detail,
+                }
+                for device in service.controllable_devices()
+            ]
+            sensors = [
+                {
+                    "model": str(getattr(device, "model", None) or "Govee"),
+                    "name": str(getattr(device, "name", "") or ""),
+                    "address": str(getattr(device, "masked_address", "") or ""),
+                    "temperature_c": getattr(device, "temperature_c", None),
+                    "humidity_percent": getattr(device, "humidity_percent", None),
+                    "battery_percent": getattr(device, "battery_percent", None),
+                    "rssi": getattr(device, "rssi", None),
+                }
+                for device in service.sensor_devices()
+            ]
+            response = {
+                "kind": "snapshot",
+                "devices": devices,
+                "sensors": sensors,
+            }
+            if discovery is not None:
+                response["discovery"] = {
+                    "lan_count": len(discovery.lan),
+                    "ble_count": len(discovery.ble),
+                    "lan_error": discovery.lan_error,
+                    "ble_error": discovery.ble_error,
+                }
+            return json.dumps(response, ensure_ascii=False)
+
+        if action == "smart-home-climate-refresh":
+            sensors = await smart_home._scan_and_store_climate(timeout=7.0)
+            return json.dumps(
+                {
+                    "kind": "climate",
+                    "sensors": [
+                        {
+                            "model": str(getattr(device, "model", None) or "Govee"),
+                            "address": str(getattr(device, "masked_address", "") or ""),
+                            "temperature_c": getattr(device, "temperature_c", None),
+                            "humidity_percent": getattr(device, "humidity_percent", None),
+                            "battery_percent": getattr(device, "battery_percent", None),
+                            "rssi": getattr(device, "rssi", None),
+                        }
+                        for device in sensors
+                    ],
+                },
+                ensure_ascii=False,
+            )
+
+        selector = str(payload.get("selector") or "").strip()
+        if action == "smart-home-preset":
+            preset = str(payload.get("preset") or "").strip().lower()
+            if preset not in {"on", "off", "night", "gaming"}:
+                raise ValueError("Unsupported smart-home preset")
+            if selector == "all":
+                batch = await service.apply_preset_all(preset)
+                return json.dumps(
+                    {
+                        "kind": "control",
+                        "action": "preset",
+                        "preset": preset,
+                        "selector": "all",
+                        "applied": batch.applied,
+                        "failed": batch.failed,
+                        "errors": list(batch.errors),
+                    },
+                    ensure_ascii=False,
+                )
+            result = await service.apply_preset(selector, preset)
+            return json.dumps(
+                {
+                    "kind": "control",
+                    "action": "preset",
+                    "preset": preset,
+                    "selector": selector,
+                    "display_name": result.display_name,
+                    "transport": result.transport,
+                },
+                ensure_ascii=False,
+            )
+
+        if not selector:
+            raise ValueError("Smart-home device selector is required")
+
+        if action == "smart-home-power":
+            state = bool(payload.get("on"))
+            result = await service.power_device(selector, state)
+            detail = {"on": state}
+        elif action == "smart-home-brightness":
+            value = max(1, min(100, int(payload.get("value", 50))))
+            result = await service.brightness_device(selector, value)
+            detail = {"brightness": value}
+        elif action == "smart-home-color":
+            r = max(0, min(255, int(payload.get("r", 255))))
+            g = max(0, min(255, int(payload.get("g", 255))))
+            b = max(0, min(255, int(payload.get("b", 255))))
+            result = await service.color_device(selector, r, g, b)
+            detail = {"rgb": [r, g, b]}
+        else:
+            raise ValueError("Unsupported smart-home dashboard action")
+
+        return json.dumps(
+            {
+                "kind": "control",
+                "action": action.removeprefix("smart-home-"),
+                "selector": selector,
+                "display_name": result.display_name,
+                "transport": result.transport,
+                **detail,
+            },
+            ensure_ascii=False,
+        )
+
     async def loop(self):
         await self.bot.wait_until_ready()
         while not self.bot.is_closed():
@@ -295,6 +428,8 @@ class DashboardCommands(commands.Cog):
                             raise ValueError("Unsupported media action")
                     elif action.startswith("ops-youtube-"):
                         result = await self._youtube_action(action, payload)
+                    elif action.startswith("smart-home-"):
+                        result = await self._smart_home_action(action, payload)
                     else:
                         raise ValueError("Unsupported dashboard bot action")
                     status = "done"
