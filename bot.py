@@ -87,6 +87,7 @@ EXTENSIONS: tuple[str, ...] = (
 CORE_EXTENSIONS = {
     "cogs.community.community_plus",
     "cogs.management.automation_suite",
+    "cogs.management.smart_home",
 }
 
 SMART_HOME_GUILD_ID = 1162733312226361454
