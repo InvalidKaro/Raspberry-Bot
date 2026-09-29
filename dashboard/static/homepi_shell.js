@@ -19,6 +19,7 @@
   if(!body||!body.dataset.homepiPage)return;
 
   const path=location.pathname.replace(/\/$/,"")||"/";
+  const ownsCommandShortcut=body.dataset.homepiPage==="ops";
   const exact=p=>p.path==="/" ? path==="/" : path===p.path;
   const navPages=pages.filter(p=>["/","/ops","/control","/database-admin","/workspace","/media","/meshtastic"].includes(p.path));
 
@@ -46,7 +47,7 @@
     </nav>
     <div class="hp-globalbar__actions">
       <span class="hp-connection" id="hp-connection" data-state="checking">HomePi prüfen</span>
-      <button class="hp-command-button" id="hp-command-open" type="button" aria-haspopup="dialog" aria-controls="hp-command">Switcher <kbd>⌘K</kbd></button>
+      <button class="hp-command-button" id="hp-command-open" type="button" aria-haspopup="dialog" aria-controls="hp-command">Switcher <kbd>${ownsCommandShortcut?"Click":"⌘K"}</kbd></button>
     </div>
   `;
   body.insertBefore(bar,body.children[1]||null);
@@ -142,7 +143,7 @@
   });
 
   document.addEventListener("keydown",event=>{
-    if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="k"){
+    if(!ownsCommandShortcut&&(event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="k"){
       event.preventDefault();
       setOpen(backdrop.dataset.open!=="true");
     }else if(event.key==="Escape"&&backdrop.dataset.open==="true"){
