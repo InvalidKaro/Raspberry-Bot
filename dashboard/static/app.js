@@ -7,6 +7,7 @@
   let lastStatusAt = 0;
   const TELEMETRY_KEY = "homepi.telemetry.v2";
   const TELEMETRY_LIMIT = 60;
+  const FOCUS_KEY = "homepi.focus.v1";
   let telemetry = (() => {
     try {
       const value = JSON.parse(localStorage.getItem(TELEMETRY_KEY) || "[]");
@@ -46,7 +47,9 @@
       cpu:Number(system.cpu_percent),
       temp:Number(system.temperature_c),
       ram:Number(system.memory_percent),
-      disk:Number(system.disk_percent)
+      disk:Number(system.disk_percent),
+      rx:Number(system.network_rx_rate_bps),
+      tx:Number(system.network_tx_rate_bps)
     };
     telemetry.push(sample);
     telemetry=telemetry.filter(x=>now-Number(x.at||0)<=6*60*60*1000).slice(-TELEMETRY_LIMIT);
@@ -80,6 +83,91 @@
     renderMetricTrend("temp",85,"°C");
     renderMetricTrend("ram",100,"%");
     renderMetricTrend("disk",100,"%");
+    renderNetworkTrend();
+  }
+  function renderNetworkTrend(){
+    const rxLine=$("network-rx-sparkline"),txLine=$("network-tx-sparkline"),windowLabel=$("network-window");
+    if(!rxLine||!txLine||!windowLabel)return;
+    const samples=telemetry.filter(sample=>Number.isFinite(Number(sample.rx))&&Number.isFinite(Number(sample.tx)));
+    const rx=samples.map(sample=>Number(sample.rx)),tx=samples.map(sample=>Number(sample.tx));
+    const ceiling=Math.max(1024,...rx,...tx);
+    rxLine.setAttribute("points",sparklinePoints(rx,ceiling).replace(/,/g,","));
+    txLine.setAttribute("points",sparklinePoints(tx,ceiling).replace(/,/g,","));
+    if(samples.length<2){windowLabel.textContent="Collecting…";return;}
+    const minutes=Math.max(1,Math.round((Number(samples.at(-1).at)-Number(samples[0].at))/60000));
+    windowLabel.textContent=`${minutes}m local trend`;
+  }
+  function renderServiceTopology(system){
+    const box=$("service-topology"),summary=$("service-health-count");
+    if(!box||!summary)return;
+    const rows=Array.isArray(system.services)?system.services:[];
+    const labels={
+      "raspberry-bot":"Bot",
+      "raspberry-dashboard":"Dashboard",
+      "pihole-FTL":"Pi-hole",
+      "tailscaled":"Tailscale"
+    };
+    const nodes=rows.map(service=>{
+      const good=service.active==="active",missing=service.load==="not-found";
+      return {
+        name:labels[service.name]||service.name,
+        raw:service.name,
+        state:good?"good":missing?"warn":"bad",
+        detail:good?(service.sub||"running"):missing?"not installed":service.sub||service.active||"offline",
+        memory:service.memory_mb
+      };
+    });
+    const online=nodes.filter(node=>node.state==="good").length;
+    summary.textContent=`${online}/${nodes.length||4} online`;
+    box.innerHTML=`
+      <div class="topology-host">
+        <span class="topology-pulse"></span>
+        <div><strong>${escapeHtml(system.hostname||"HomePi")}</strong><small>${escapeHtml(system.lan_ip||"local host")}</small></div>
+      </div>
+      <div class="topology-services">
+        ${nodes.map(node=>`
+          <button class="topology-service ${node.state}" type="button" data-nav="system">
+            <span></span>
+            <div><strong>${escapeHtml(node.name)}</strong><small>${escapeHtml(node.detail)}${node.memory!=null?` · ${escapeHtml(node.memory)} MB`:""}</small></div>
+          </button>
+        `).join("")||'<div class="activity-empty">No service state reported.</div>'}
+      </div>
+    `;
+    box.querySelectorAll("[data-nav]").forEach(button=>button.addEventListener("click",()=>switchSection(button.dataset.nav)));
+  }
+  function renderIdentity(system){
+    if($("identity-host"))$("identity-host").textContent=system.hostname||"HomePi";
+    if($("identity-lan"))$("identity-lan").textContent=system.lan_ip||"—";
+    if($("identity-platform"))$("identity-platform").textContent=system.os_name||system.architecture||"—";
+    if($("identity-cpu")){
+      const parts=[];
+      if(system.cpu_count)parts.push(`${system.cpu_count} threads`);
+      if(system.cpu_frequency_mhz)parts.push(`${Math.round(Number(system.cpu_frequency_mhz))} MHz`);
+      if(system.architecture)parts.push(system.architecture);
+      $("identity-cpu").textContent=parts.join(" · ")||"—";
+    }
+  }
+  function setupFocusMode(){
+    const button=$("focus-mode");
+    if(!button)return;
+    const apply=enabled=>{
+      document.body.dataset.focus=enabled?"true":"false";
+      button.setAttribute("aria-pressed",String(enabled));
+      button.textContent=enabled?"Exit focus":"Focus";
+    };
+    let enabled=false;
+    try{enabled=localStorage.getItem(FOCUS_KEY)==="true";}catch{}
+    apply(enabled);
+    button.addEventListener("click",()=>{
+      enabled=document.body.dataset.focus!=="true";
+      try{localStorage.setItem(FOCUS_KEY,String(enabled));}catch{}
+      apply(enabled);
+      toast(enabled?"Focus mode enabled.":"Focus mode disabled.");
+    });
+  }
+  function toggleFocusMode(){
+    const button=$("focus-mode");
+    if(button)button.click();
   }
   function setMetricTone(metric,value,warn,bad){
     const node=document.querySelector(`[data-metric="${metric}"]`);
@@ -101,8 +189,10 @@
       "HomePi diagnostic snapshot",
       `Generated: ${new Date().toISOString()}`,
       "",
+      `Host: ${s.hostname||"HomePi"}${s.lan_ip?` · ${s.lan_ip}`:""}`,
+      `Platform: ${s.os_name||"—"} · ${s.architecture||"—"} · kernel ${s.kernel||"—"}`,
       `Bot: ${s.bot_active?"online":"offline"}`,
-      `CPU: ${Number(s.cpu_percent||0).toFixed(1)}%`,
+      `CPU: ${Number(s.cpu_percent||0).toFixed(1)}%${s.cpu_count?` · ${s.cpu_count} threads`:""}`,
       `Temperature: ${Number.isFinite(Number(s.temperature_c))?Number(s.temperature_c).toFixed(1)+"°C":"n/a"}`,
       `RAM: ${Number(s.memory_percent||0).toFixed(1)}% · ${s.memory_used_mb??"—"} / ${s.memory_total_mb??"—"} MB`,
       `Disk: ${Number(s.disk_percent||0).toFixed(1)}% · ${s.disk_used_gb??"—"} / ${s.disk_total_gb??"—"} GB`,
@@ -160,6 +250,11 @@
   function renderStatus(data){latestStatus=data;const s=data.system||{},g=data.git||{},online=Boolean(s.bot_active);$("bot-status").textContent=online?"Online":"Offline";$("bot-service-name").textContent=botService;$("bot-pill").className=`status-pill ${online?"online":"offline"}`;$("bot-pill").querySelector("span:last-child").textContent=online?"Bot online":"Bot offline";
     const p=s.pihole||{};$("pihole-status").textContent=!p.installed?"Not detected":p.active?"Online":"Offline";const pState=p.blocking===true?"Blocking enabled":p.blocking===false?"Blocking disabled":"Blocking state unknown";$("pihole-detail").textContent=p.api_available?`${pState} · ${(Number(p.queries_total)||0).toLocaleString()} queries · ${(Number(p.percent_blocked)||0).toFixed(1)}% blocked`:pState;
     const t=s.tailscale||{};$("tailscale-status").textContent=t.installed?(t.online?"Connected":"Offline"):"Not installed";$("tailscale-detail").textContent=t.ip?`${t.hostname||"homepi"} · ${t.ip}`:"Tailscale";
+    if($("net-live-rx"))$("net-live-rx").textContent=`${formatBytes(s.network_rx_rate_bps||0)}/s`;
+    if($("net-live-tx"))$("net-live-tx").textContent=`${formatBytes(s.network_tx_rate_bps||0)}/s`;
+    if($("net-total-rx"))$("net-total-rx").textContent=`${s.network_rx_mb??"—"} MB total`;
+    if($("net-total-tx"))$("net-total-tx").textContent=`${s.network_tx_mb??"—"} MB total`;
+    renderServiceTopology(s);renderIdentity(s);
     const cpu=Number(s.cpu_percent)||0,avg30=Number(s.cpu_average_30s),avg5=Number(s.cpu_average_5m);$("cpu").textContent=`${cpu.toFixed(1)}%`;$("cpu-detail").textContent=`30s ${Number.isFinite(avg30)?avg30.toFixed(1):"—"}% · 5m ${Number.isFinite(avg5)?avg5.toFixed(1):"—"}% · sample ${s.sample_interval_seconds??"—"}s`;percentBar("cpu-bar",cpu);const temp=Number(s.temperature_c);$("temp").textContent=Number.isFinite(temp)?`${temp.toFixed(1)}°C`:"N/A";percentBar("temp-bar",Number.isFinite(temp)?temp/85*100:0);const ram=Number(s.memory_percent)||0;$("ram").textContent=`${ram.toFixed(1)}%`;$("ram-detail").textContent=`${s.memory_used_mb??"—"} / ${s.memory_total_mb??"—"} MB · ${s.memory_available_mb??"—"} MB available`;percentBar("ram-bar",ram);const disk=Number(s.disk_percent)||0;$("disk").textContent=`${disk.toFixed(1)}%`;$("disk-detail").textContent=`${s.disk_used_gb??"—"} / ${s.disk_total_gb??"—"} GB`;percentBar("disk-bar",disk);$("uptime").textContent=uptime(s.uptime_seconds);$("load").textContent=Array.isArray(s.load_average)?s.load_average.join(" / "):"—";$("net-rx").textContent=`${s.network_rx_mb??"—"} MB · ${formatBytes(s.network_rx_rate_bps||0)}/s`;$("net-tx").textContent=`${s.network_tx_mb??"—"} MB · ${formatBytes(s.network_tx_rate_bps||0)}/s`;
     if($("system-cpu-current"))$("system-cpu-current").textContent=`${cpu.toFixed(1)}%`;if($("system-cpu-averages"))$("system-cpu-averages").textContent=`30s ${Number.isFinite(avg30)?avg30.toFixed(1):"—"}% · 5m ${Number.isFinite(avg5)?avg5.toFixed(1):"—"}%`;if($("system-bot-cpu"))$("system-bot-cpu").textContent=s.bot_cpu_percent==null?"—":`${Number(s.bot_cpu_percent).toFixed(1)}%`;if($("system-bot-ram"))$("system-bot-ram").textContent=s.bot_memory_mb==null?"RAM —":`RAM ${Number(s.bot_memory_mb).toFixed(1)} MB`;if($("system-dashboard-cpu"))$("system-dashboard-cpu").textContent=s.dashboard_cpu_percent==null?"—":`${Number(s.dashboard_cpu_percent).toFixed(1)}%`;if($("system-dashboard-ram"))$("system-dashboard-ram").textContent=s.dashboard_memory_mb==null?"RAM —":`RAM ${Number(s.dashboard_memory_mb).toFixed(1)} MB`;if($("system-sample-interval"))$("system-sample-interval").textContent=`${s.sample_interval_seconds??"—"}s`;if($("system-sample-age"))$("system-sample-age").textContent=`Last sample ${s.sample_age_seconds??"—"}s ago`;if($("system-ram-available"))$("system-ram-available").textContent=`${s.memory_available_mb??"—"} MB`;if($("system-swap"))$("system-swap").textContent=`Swap ${s.swap_percent??"—"}% · ${s.swap_used_mb??"—"} / ${s.swap_total_mb??"—"} MB`;
     $("overview-branch").textContent=g.ok?g.branch:"Git unavailable";$("overview-change-count").textContent=g.ok?`${g.changes?.length||0} changes`:"—";$("overview-commit").textContent=g.ok?(g.last_commit||"No commit information."):(g.message||"Git unavailable.");$("overview-git-summary").textContent=g.ok?(g.dirty?`${g.changes.length} local change(s)`:"Working tree clean")+(Number.isInteger(g.ahead)?` · ↑${g.ahead} ↓${g.behind}`:""):"Repository status unavailable";
@@ -285,6 +380,7 @@
       {label:"Now Playing",meta:"Subsite",keywords:"media fullscreen playback",href:"/now-playing"},
       {label:"Refresh dashboard",meta:"Action",keywords:"reload status sync",run:()=>{refreshStatus(true);loadOverviewData();loadOverviewAudit();}},
       {label:"Copy diagnostic snapshot",meta:"Action",keywords:"copy debug support system info",run:()=>copyDiagnostics()},
+      {label:"Toggle focus mode",meta:"View",keywords:"focus monitoring minimal distraction",run:()=>toggleFocusMode()},
       {label:"Clear local trend history",meta:"Action",keywords:"reset telemetry sparkline history",run:()=>clearTelemetryHistory()},
       {label:"Create database backup",meta:"Action",keywords:"backup sqlite snapshot",run:()=>createBackup()}
     ];
@@ -349,6 +445,6 @@
 
   function switchSection(id,{updateUrl=true}={}){const section=$(id);if(!section||!section.classList.contains("section"))return;if(currentFile)saveTabState();document.querySelectorAll(".section").forEach(s=>s.classList.toggle("active",s.id===id));document.querySelectorAll(".nav-item[data-section]").forEach(b=>b.classList.toggle("active",b.dataset.section===id));const titles={overview:"System overview",botconfig:"Bot configuration",botdata:"Bot data",database:"Database browser",code:"Code & files",git:"Git & deploy",system:"System control",backups:"Backups",logs:"Logs & audit"};$("page-title").textContent=titles[id]||"HomePi Control";document.title=`${titles[id]||"HomePi Control"} · HomePi`;if(updateUrl){const next=id==="overview"?location.pathname:`${location.pathname}#${id}`;history.pushState({section:id},"",next);}if(id==="logs"){loadLogs();loadAudit();}if(id==="git"){refreshDiff();refreshGitExtra();}if(id==="code"&&!allFiles.length)loadFiles();if(id==="botconfig"&&$("guild-select").options.length<=1)loadGuilds();if(id==="botdata")loadBotData();if(id==="database")loadDatabaseTables();if(id==="backups")loadBackups();if(id==="system")refreshStatus(false);}
 
-  async function init(){try{await bootstrap();}catch(e){toast(e.message,false);return;}setupCommandCenter();renderTelemetryTrends();updateSyncAge();const initialSection=location.hash.slice(1)||"overview";if($(initialSection)?.classList.contains("section"))switchSection(initialSection,{updateUrl:false});document.querySelectorAll(".nav-item[data-section]").forEach(b=>b.addEventListener("click",()=>switchSection(b.dataset.section)));document.querySelectorAll("[data-nav]").forEach(b=>b.addEventListener("click",()=>switchSection(b.dataset.nav)));window.addEventListener("popstate",()=>{const id=location.hash.slice(1)||"overview";if($(id)?.classList.contains("section"))switchSection(id,{updateUrl:false});});window.addEventListener("hashchange",()=>{const id=location.hash.slice(1);if(id&&$(id)?.classList.contains("section"))switchSection(id,{updateUrl:false});});document.querySelectorAll("[data-bot-action]").forEach(b=>b.addEventListener("click",()=>botAction(b.dataset.botAction,b)));document.querySelectorAll("[data-git-action]").forEach(b=>b.addEventListener("click",()=>gitAction(b.dataset.gitAction,b)));$("refresh-button").addEventListener("click",()=>{refreshStatus(true);loadOverviewData();loadOverviewAudit();});$("copy-diagnostics").addEventListener("click",copyDiagnostics);$("reload-files").addEventListener("click",loadFiles);$("new-file").addEventListener("click",()=>createPath("file"));$("new-folder").addEventListener("click",()=>createPath("dir"));$("file-filter").addEventListener("input",renderFiles);$("code-search-button").addEventListener("click",searchCode);$("code-search").addEventListener("keydown",e=>{if(e.key==="Enter")searchCode();});$("code-editor").addEventListener("input",updateEditorPosition);$("code-editor").addEventListener("click",updateEditorPosition);$("validate-code").addEventListener("click",validateCode);$("save-code").addEventListener("click",saveCode);$("rename-path").addEventListener("click",renameCurrent);$("delete-path").addEventListener("click",deleteCurrent);$("refresh-diff").addEventListener("click",refreshDiff);$("stage-selected").addEventListener("click",()=>gitPathAction("stage"));$("unstage-selected").addEventListener("click",()=>gitPathAction("unstage"));$("discard-selected").addEventListener("click",()=>gitPathAction("discard"));$("commit-button").addEventListener("click",commitStaged);$("switch-branch").addEventListener("click",()=>branchAction("switch",$("branch-select").value));$("new-branch").addEventListener("click",()=>{const n=prompt("New branch name");if(n)branchAction("create",n);});$("guild-select").addEventListener("change",loadGuildConfig);$("save-config").addEventListener("click",saveGuildConfig);$("reload-config").addEventListener("click",loadGuildConfig);$("embed-color-picker").addEventListener("input",()=>{$("embed-color").value=$("embed-color-picker").value.toUpperCase();});$("embed-color").addEventListener("input",()=>{const v=$("embed-color").value.trim();if(/^#[0-9a-fA-F]{6}$/.test(v))$("embed-color-picker").value=v;});$("embed-default").addEventListener("click",()=>{$("embed-color").value="";$("embed-color-picker").value="#5865F2";});$("db-refresh-tables").addEventListener("click",loadDatabaseTables);$("db-search-button").addEventListener("click",()=>dbTable&&openDatabaseTable(dbTable,0));$("db-search").addEventListener("keydown",e=>{if(e.key==="Enter"&&dbTable)openDatabaseTable(dbTable,0);});$("db-prev").addEventListener("click",()=>dbTable&&openDatabaseTable(dbTable,Math.max(0,dbOffset-dbLimit)));$("db-next").addEventListener("click",()=>dbTable&&openDatabaseTable(dbTable,dbOffset+dbLimit));$("db-schema-button").addEventListener("click",loadDbSchema);$("deploy-button").addEventListener("click",deploy);$("rollback-button").addEventListener("click",rollback);$("requirements-button").addEventListener("click",installRequirements);$("logs-refresh").addEventListener("click",loadLogs);$("log-service").addEventListener("change",loadLogs);$("audit-refresh").addEventListener("click",loadAudit);$("create-backup").addEventListener("click",createBackup);$("reboot-pi").addEventListener("click",()=>powerAction("reboot"));$("shutdown-pi").addEventListener("click",()=>powerAction("poweroff"));$("logout-button").addEventListener("click",async()=>{await request("/logout",{method:"POST"});location.href="/login";});window.addEventListener("beforeunload",e=>{if([...openTabs.values()].some(x=>x.dirty)||currentDirty()){e.preventDefault();e.returnValue="";}});await Promise.all([refreshStatus(false),loadOverviewData(),loadOverviewAudit()]);setInterval(()=>{if(!document.hidden)refreshStatus(false);},30000);setInterval(updateSyncAge,5000);setInterval(()=>{if(!document.hidden)loadOverviewAudit();},120000);}
+  async function init(){try{await bootstrap();}catch(e){toast(e.message,false);return;}setupCommandCenter();setupFocusMode();renderTelemetryTrends();updateSyncAge();const initialSection=location.hash.slice(1)||"overview";if($(initialSection)?.classList.contains("section"))switchSection(initialSection,{updateUrl:false});document.querySelectorAll(".nav-item[data-section]").forEach(b=>b.addEventListener("click",()=>switchSection(b.dataset.section)));document.querySelectorAll("[data-nav]").forEach(b=>b.addEventListener("click",()=>switchSection(b.dataset.nav)));window.addEventListener("popstate",()=>{const id=location.hash.slice(1)||"overview";if($(id)?.classList.contains("section"))switchSection(id,{updateUrl:false});});window.addEventListener("hashchange",()=>{const id=location.hash.slice(1);if(id&&$(id)?.classList.contains("section"))switchSection(id,{updateUrl:false});});document.querySelectorAll("[data-bot-action]").forEach(b=>b.addEventListener("click",()=>botAction(b.dataset.botAction,b)));document.querySelectorAll("[data-git-action]").forEach(b=>b.addEventListener("click",()=>gitAction(b.dataset.gitAction,b)));$("refresh-button").addEventListener("click",()=>{refreshStatus(true);loadOverviewData();loadOverviewAudit();});$("copy-diagnostics").addEventListener("click",copyDiagnostics);$("reload-files").addEventListener("click",loadFiles);$("new-file").addEventListener("click",()=>createPath("file"));$("new-folder").addEventListener("click",()=>createPath("dir"));$("file-filter").addEventListener("input",renderFiles);$("code-search-button").addEventListener("click",searchCode);$("code-search").addEventListener("keydown",e=>{if(e.key==="Enter")searchCode();});$("code-editor").addEventListener("input",updateEditorPosition);$("code-editor").addEventListener("click",updateEditorPosition);$("validate-code").addEventListener("click",validateCode);$("save-code").addEventListener("click",saveCode);$("rename-path").addEventListener("click",renameCurrent);$("delete-path").addEventListener("click",deleteCurrent);$("refresh-diff").addEventListener("click",refreshDiff);$("stage-selected").addEventListener("click",()=>gitPathAction("stage"));$("unstage-selected").addEventListener("click",()=>gitPathAction("unstage"));$("discard-selected").addEventListener("click",()=>gitPathAction("discard"));$("commit-button").addEventListener("click",commitStaged);$("switch-branch").addEventListener("click",()=>branchAction("switch",$("branch-select").value));$("new-branch").addEventListener("click",()=>{const n=prompt("New branch name");if(n)branchAction("create",n);});$("guild-select").addEventListener("change",loadGuildConfig);$("save-config").addEventListener("click",saveGuildConfig);$("reload-config").addEventListener("click",loadGuildConfig);$("embed-color-picker").addEventListener("input",()=>{$("embed-color").value=$("embed-color-picker").value.toUpperCase();});$("embed-color").addEventListener("input",()=>{const v=$("embed-color").value.trim();if(/^#[0-9a-fA-F]{6}$/.test(v))$("embed-color-picker").value=v;});$("embed-default").addEventListener("click",()=>{$("embed-color").value="";$("embed-color-picker").value="#5865F2";});$("db-refresh-tables").addEventListener("click",loadDatabaseTables);$("db-search-button").addEventListener("click",()=>dbTable&&openDatabaseTable(dbTable,0));$("db-search").addEventListener("keydown",e=>{if(e.key==="Enter"&&dbTable)openDatabaseTable(dbTable,0);});$("db-prev").addEventListener("click",()=>dbTable&&openDatabaseTable(dbTable,Math.max(0,dbOffset-dbLimit)));$("db-next").addEventListener("click",()=>dbTable&&openDatabaseTable(dbTable,dbOffset+dbLimit));$("db-schema-button").addEventListener("click",loadDbSchema);$("deploy-button").addEventListener("click",deploy);$("rollback-button").addEventListener("click",rollback);$("requirements-button").addEventListener("click",installRequirements);$("logs-refresh").addEventListener("click",loadLogs);$("log-service").addEventListener("change",loadLogs);$("audit-refresh").addEventListener("click",loadAudit);$("create-backup").addEventListener("click",createBackup);$("reboot-pi").addEventListener("click",()=>powerAction("reboot"));$("shutdown-pi").addEventListener("click",()=>powerAction("poweroff"));$("logout-button").addEventListener("click",async()=>{await request("/logout",{method:"POST"});location.href="/login";});window.addEventListener("beforeunload",e=>{if([...openTabs.values()].some(x=>x.dirty)||currentDirty()){e.preventDefault();e.returnValue="";}});await Promise.all([refreshStatus(false),loadOverviewData(),loadOverviewAudit()]);setInterval(()=>{if(!document.hidden)refreshStatus(false);},30000);setInterval(updateSyncAge,5000);setInterval(()=>{if(!document.hidden)loadOverviewAudit();},120000);}
   init();
 })();
