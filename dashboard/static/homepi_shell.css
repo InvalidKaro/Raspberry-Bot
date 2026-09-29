@@ -661,3 +661,27 @@ body[data-homepi-page] .topbar,
 body[data-homepi-page] .top{
   backdrop-filter:none!important;
 }
+
+
+/* Mobile interaction guarantees */
+html:has(body[data-homepi-page]){
+  scroll-padding-top:calc(var(--hp-globalbar-height) + 12px);
+}
+@media(max-width:720px){
+  body[data-homepi-page] input,
+  body[data-homepi-page] select,
+  body[data-homepi-page] textarea{
+    font-size:16px!important;
+  }
+  .hp-globalbar__nav a{
+    min-height:44px;
+    padding-inline:12px;
+  }
+  .hp-command-button{
+    min-height:44px!important;
+    height:44px;
+  }
+  .hp-command__item{
+    min-height:56px;
+  }
+}
