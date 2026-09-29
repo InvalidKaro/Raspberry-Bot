@@ -50,6 +50,20 @@
           <a class="platform-status" id="platform-tail" data-state="checking" href="#system"><span class="platform-status-dot"></span><span><small>REMOTE ACCESS</small><strong id="platform-tail-state">Checking…</strong></span><b>Tailscale →</b></a>
           <a class="platform-status" id="platform-git" data-state="checking" href="#git"><span class="platform-status-dot"></span><span><small>REPOSITORY</small><strong id="platform-git-state">Checking…</strong></span><b>Git →</b></a>
         </div>
+        <section class="health-brief" aria-labelledby="health-brief-title">
+          <div class="health-brief-summary">
+            <p class="card-label">OPERATOR BRIEF</p>
+            <h2 id="health-brief-title" data-state="checking">Checking platform health</h2>
+            <p id="health-brief-summary" class="muted">Evaluating services, thermals, storage and repository state.</p>
+            <div class="health-brief-actions">
+              <a href="/control">Open Control Center</a>
+              <a href="/ops#reliability">Reliability</a>
+            </div>
+          </div>
+          <div id="health-brief-list" class="health-brief-list" aria-live="polite">
+            <div class="health-empty"><span></span><div><strong>Loading system status</strong><small>Waiting for the first status response.</small></div></div>
+          </div>
+        </section>
         <div class="metric-grid"><article class="metric"><span>CPU</span><strong id="cpu">—</strong><small id="cpu-detail">Waiting for sampler…</small><div class="bar"><i id="cpu-bar"></i></div></article><article class="metric"><span>Temperature</span><strong id="temp">—</strong><div class="bar"><i id="temp-bar"></i></div></article><article class="metric"><span>RAM</span><strong id="ram">—</strong><small id="ram-detail">—</small><div class="bar"><i id="ram-bar"></i></div></article><article class="metric"><span>Storage</span><strong id="disk">—</strong><small id="disk-detail">—</small><div class="bar"><i id="disk-bar"></i></div></article></div>
         <div class="quick-actions"><button data-bot-action="restart" class="primary">Restart bot</button><button data-nav="logs">View errors</button><button data-nav="code">Edit code</button><button data-git-action="pull">Git pull</button><button data-nav="git">Deploy</button><button data-nav="database">Database</button><button data-nav="system">System</button></div>
         <div class="detail-grid">
