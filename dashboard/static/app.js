@@ -378,6 +378,7 @@
       {label:"Media Hub",meta:"Subsite",keywords:"voice radio ambient music",href:"/media"},
       {label:"Meshtastic",meta:"Subsite",keywords:"lora rf nodes mesh",href:"/meshtastic"},
       {label:"Maintenance Toolbox",meta:"Subsite",keywords:"diagnostics ping dns backup updates systemd service tools",href:"/tools"},
+      {label:"Smart Home",meta:"Subsite",keywords:"govee lights climate bluetooth lan scenes alerts automation",href:"/smart-home"},
       {label:"Now Playing",meta:"Subsite",keywords:"media fullscreen playback",href:"/now-playing"},
       {label:"Refresh dashboard",meta:"Action",keywords:"reload status sync",run:()=>{refreshStatus(true);loadOverviewData();loadOverviewAudit();}},
       {label:"Copy diagnostic snapshot",meta:"Action",keywords:"copy debug support system info",run:()=>copyDiagnostics()},
