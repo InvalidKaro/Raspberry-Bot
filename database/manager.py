@@ -88,6 +88,35 @@ class Database:
         CREATE TABLE IF NOT EXISTS button_roles (guild_id INTEGER NOT NULL,message_id INTEGER NOT NULL,channel_id INTEGER NOT NULL,role_id INTEGER NOT NULL,label TEXT NOT NULL,emoji TEXT,created_by INTEGER NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(message_id,role_id));
         CREATE TABLE IF NOT EXISTS onboarding_rules (guild_id INTEGER PRIMARY KEY,channel_id INTEGER,role_id INTEGER,message_id INTEGER,rules_text TEXT,updated_by INTEGER,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE IF NOT EXISTS dashboard_commands (id INTEGER PRIMARY KEY AUTOINCREMENT,action TEXT NOT NULL,payload_json TEXT,status TEXT NOT NULL DEFAULT 'pending',result TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,processed_at TEXT);
+        CREATE TABLE IF NOT EXISTS smart_home_alert_config (
+            guild_id INTEGER PRIMARY KEY,
+            channel_id INTEGER,
+            enabled INTEGER NOT NULL DEFAULT 0,
+            temp_min REAL,
+            temp_max REAL,
+            humidity_min REAL,
+            humidity_max REAL,
+            cooldown_minutes INTEGER NOT NULL DEFAULT 60,
+            last_fired_at TEXT,
+            last_reason TEXT,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS smart_home_schedules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            device_selector TEXT NOT NULL DEFAULT 'all',
+            preset TEXT NOT NULL,
+            run_time TEXT NOT NULL,
+            weekdays TEXT NOT NULL DEFAULT '0,1,2,3,4,5,6',
+            notify_channel_id INTEGER,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            last_run_key TEXT,
+            last_result TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_smart_home_schedules_due ON smart_home_schedules(guild_id,enabled,run_time);
         CREATE TABLE IF NOT EXISTS system_snapshots_v4 (id INTEGER PRIMARY KEY AUTOINCREMENT,guild_id INTEGER NOT NULL,recorded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,cpu_percent REAL,ram_percent REAL,temperature REAL,disk_percent REAL,pihole_ok INTEGER,tailscale_ok INTEGER,extra_json TEXT);
         CREATE INDEX IF NOT EXISTS idx_system_snapshots_v4_time ON system_snapshots_v4(guild_id,recorded_at);
         CREATE TABLE IF NOT EXISTS backup_history (id INTEGER PRIMARY KEY AUTOINCREMENT,file_name TEXT NOT NULL,kind TEXT NOT NULL,size_bytes INTEGER NOT NULL,created_by INTEGER,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
