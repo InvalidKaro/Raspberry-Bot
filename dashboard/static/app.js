@@ -4,12 +4,89 @@
   let csrf = "", botService = "raspberry-bot", latestStatus = null, allFiles = [], currentFile = "", loadedContent = "";
   const openTabs = new Map();
   let toastTimer = null;
+  let lastStatusAt = 0;
+  const TELEMETRY_KEY = "homepi.telemetry.v2";
+  const TELEMETRY_LIMIT = 60;
+  let telemetry = (() => {
+    try {
+      const value = JSON.parse(localStorage.getItem(TELEMETRY_KEY) || "[]");
+      return Array.isArray(value) ? value.slice(-TELEMETRY_LIMIT) : [];
+    } catch {
+      return [];
+    }
+  })();
 
   function escapeHtml(value){return String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
   function toast(message,ok=true){const n=$("toast");n.textContent=String(message||"Done.");n.className=ok?"show good":"show bad";clearTimeout(toastTimer);toastTimer=setTimeout(()=>n.className="",3400);}
   function percentBar(id,value){const n=Number(value);$(id).style.width=`${Math.max(0,Math.min(100,Number.isFinite(n)?n:0))}%`;}
   function uptime(seconds){let s=Math.max(0,Number(seconds)||0),d=Math.floor(s/86400);s%=86400;const h=Math.floor(s/3600);s%=3600;return `${d}d ${h}h ${Math.floor(s/60)}m`;}
   function formatBytes(bytes){const n=Number(bytes)||0;if(n<1024)return `${n} B`;if(n<1024*1024)return `${(n/1024).toFixed(1)} KiB`;return `${(n/1024/1024).toFixed(1)} MiB`;}
+  function relativeAge(timestamp){
+    const seconds=Math.max(0,Math.round((Date.now()-Number(timestamp||0))/1000));
+    if(seconds<5)return "just now";
+    if(seconds<60)return `${seconds}s ago`;
+    const minutes=Math.floor(seconds/60);
+    if(minutes<60)return `${minutes}m ago`;
+    return `${Math.floor(minutes/60)}h ago`;
+  }
+  function updateSyncAge(){
+    const node=$("sync-age");
+    if(!node)return;
+    node.textContent=lastStatusAt?`Synced ${relativeAge(lastStatusAt)}`:"Syncing…";
+    node.dataset.stale=lastStatusAt&&Date.now()-lastStatusAt>90000?"true":"false";
+  }
+  function persistTelemetry(){
+    try{localStorage.setItem(TELEMETRY_KEY,JSON.stringify(telemetry.slice(-TELEMETRY_LIMIT)));}catch{}
+  }
+  function pushTelemetry(system){
+    const now=Date.now(),last=telemetry.at(-1);
+    if(last&&now-last.at<20000){renderTelemetryTrends();return;}
+    const sample={
+      at:now,
+      cpu:Number(system.cpu_percent),
+      temp:Number(system.temperature_c),
+      ram:Number(system.memory_percent),
+      disk:Number(system.disk_percent)
+    };
+    telemetry.push(sample);
+    telemetry=telemetry.filter(x=>now-Number(x.at||0)<=6*60*60*1000).slice(-TELEMETRY_LIMIT);
+    persistTelemetry();
+    renderTelemetryTrends();
+  }
+  function sparklinePoints(values,max){
+    if(values.length<2)return "";
+    const width=100,height=30,den=Math.max(1,values.length-1);
+    return values.map((value,index)=>{
+      const x=index/den*width;
+      const normalized=Math.max(0,Math.min(max,Number(value)||0))/max;
+      const y=height-(normalized*26+2);
+      return `${x.toFixed(2)},${y.toFixed(2)}`;
+    }).join(" ");
+  }
+  function renderMetricTrend(key,max,unit){
+    const line=$(`${key}-sparkline`),label=$(`${key}-trend`);
+    if(!line||!label)return;
+    const samples=telemetry.filter(x=>Number.isFinite(Number(x[key])));
+    const values=samples.map(x=>Number(x[key]));
+    line.setAttribute("points",sparklinePoints(values,max));
+    if(values.length<2){label.textContent="Collecting trend";return;}
+    const first=values[0],last=values.at(-1),delta=last-first;
+    const minutes=Math.max(1,Math.round((Number(samples.at(-1).at)-Number(samples[0].at))/60000));
+    const sign=delta>0.05?"+":delta<-0.05?"−":"";
+    label.textContent=`${sign}${Math.abs(delta).toFixed(1)}${unit} · ${minutes}m`;
+  }
+  function renderTelemetryTrends(){
+    renderMetricTrend("cpu",100,"%");
+    renderMetricTrend("temp",85,"°C");
+    renderMetricTrend("ram",100,"%");
+    renderMetricTrend("disk",100,"%");
+  }
+  function setMetricTone(metric,value,warn,bad){
+    const node=document.querySelector(`[data-metric="${metric}"]`);
+    if(!node)return;
+    const number=Number(value);
+    node.dataset.tone=!Number.isFinite(number)?"neutral":number>=bad?"bad":number>=warn?"warn":"good";
+  }
   async function request(path,options={}){const headers=new Headers(options.headers||{});if((options.method||"GET").toUpperCase()!=="GET")headers.set("X-CSRF-Token",csrf);if(options.body&&!headers.has("Content-Type"))headers.set("Content-Type","application/json");const response=await fetch(path,{...options,headers});let data={};const type=response.headers.get("content-type")||"";if(type.includes("json")){try{data=await response.json();}catch{data={ok:false,message:`HTTP ${response.status}`};}}if(response.status===401){location.href="/login";throw new Error("Authentication expired.");}return {response,data};}
   async function bootstrap(){const {response,data}=await request("/api/bootstrap");if(!response.ok||!data.ok)throw new Error(data.message||"Bootstrap failed.");csrf=data.csrf;botService=data.bot_service||botService;}
 
@@ -58,6 +135,11 @@
     setPlatformState("platform-pihole",!p.installed?"warn":p.active?"good":"bad",!p.installed?"Not detected":p.active?(p.blocking===false?"Online, blocking off":"Online"):"Offline");
     setPlatformState("platform-tail",!t.installed?"warn":t.online?"good":"bad",!t.installed?"Not installed":t.online?(t.ip||"Connected"):"Offline");
     setPlatformState("platform-git",!g.ok?"bad":g.dirty?"warn":"good",!g.ok?"Unavailable":g.dirty?`${g.changes?.length||0} local change(s)`:"Clean");
+    setMetricTone("cpu",cpu,75,90);
+    setMetricTone("temp",temp,65,75);
+    setMetricTone("ram",ram,80,90);
+    setMetricTone("disk",disk,82,92);
+    lastStatusAt=Date.now();updateSyncAge();pushTelemetry(s);
     renderHealthBrief(s,g);renderSystemDetails(s);renderGitState(g);
   }
   function renderSystemDetails(s){const services=$("service-list");if(services)services.innerHTML=(s.services||[]).map(x=>`<div class="stack-row"><div><span class="state-dot ${x.active==="active"?"good":x.load==="not-found"?"warn":"bad"}"></span><strong>${escapeHtml(x.name)}</strong><div class="meta">${escapeHtml(x.active)} / ${escapeHtml(x.sub)}${x.memory_mb!=null?` · ${x.memory_mb} MB`:""}</div></div><span class="branch">PID ${x.pid||"—"}</span></div>`).join("")||'<p class="muted">No service data.</p>';
@@ -68,6 +150,26 @@
   async function botAction(action,button){if(action==="stop"&&!confirm("Stop the Discord bot service?"))return;button.disabled=true;try{const {response,data}=await request(`/api/bot/${action}`,{method:"POST"});toast(data.message,response.ok&&data.ok);setTimeout(()=>refreshStatus(false),900);}finally{button.disabled=false;}}
 
   async function loadOverviewData(){try{const {response,data}=await request("/api/data");if(!response.ok||!data.ok)return;const c=data.counts||{};$("ov-tickets").textContent=c.tickets_open??0;$("ov-commands").textContent=c.commands_24h??0;$("ov-cases").textContent=c.moderation_cases??0;}catch{}}
+  async function loadOverviewAudit(){
+    const box=$("overview-audit-list"),count=$("overview-audit-count");
+    if(!box||!count)return;
+    try{
+      const {response,data}=await request("/api/audit");
+      if(!response.ok||!data.ok)throw new Error("Audit unavailable");
+      const events=Array.isArray(data.events)?data.events:[];
+      count.textContent=`${events.length} recorded`;
+      box.innerHTML=events.slice(0,6).map(event=>`
+        <div class="overview-audit-row">
+          <span class="state-dot ${event.ok?"good":"bad"}"></span>
+          <div><strong>${escapeHtml(event.action||"Dashboard action")}</strong><small>${escapeHtml(event.detail||"No detail")}</small></div>
+          <time>${escapeHtml(event.at||"")}</time>
+        </div>
+      `).join("")||'<div class="activity-empty">No dashboard actions recorded yet.</div>';
+    }catch{
+      count.textContent="Unavailable";
+      box.innerHTML='<div class="activity-empty">Recent operations could not be loaded.</div>';
+    }
+  }
 
   async function loadFiles(){try{const {response,data}=await request("/api/editor/files");if(!response.ok||!data.ok)throw new Error(data.message||"File list failed.");allFiles=data.files||[];renderFiles();}catch(e){$("file-list").innerHTML=`<p class="muted pad">${escapeHtml(e.message)}</p>`;}}
   function renderFiles(){const q=$("file-filter").value.trim().toLowerCase(),box=$("file-list");box.innerHTML="";for(const item of allFiles){if(q&&!item.path.toLowerCase().includes(q))continue;const b=document.createElement("button");b.type="button";b.className=`file-button ${item.kind==="dir"?"dir":""} ${item.path===currentFile?"active":""}`;b.textContent=item.path;b.title=item.path;if(item.kind==="file")b.addEventListener("click",()=>openFile(item.path));box.append(b);}if(!box.children.length)box.innerHTML='<p class="muted pad">No matching paths.</p>';}
@@ -126,8 +228,93 @@
 
   async function powerAction(action){const word=action==="reboot"?"REBOOT":"SHUTDOWN",typed=prompt(`This affects the entire Raspberry Pi. Type ${word} exactly to continue.`);if(typed!==word)return;const {response,data}=await request(`/api/system/${action}`,{method:"POST",body:JSON.stringify({confirm:typed})});toast(data.message,response.ok&&data.ok);}
 
+  function setupCommandCenter(){
+    const backdrop=$("command-palette"),search=$("command-search"),results=$("command-results"),trigger=$("command-open");
+    if(!backdrop||!search||!results||!trigger)return;
+    const isApple=/Mac|iPhone|iPad|iPod/i.test(navigator.platform||navigator.userAgent||"");
+    const key=trigger.querySelector("kbd");if(key)key.textContent=isApple?"⌘K":"Ctrl K";
+    const commands=[
+      {label:"System overview",meta:"Dashboard",keywords:"home overview health",run:()=>switchSection("overview")},
+      {label:"Bot configuration",meta:"Dashboard",keywords:"discord config guild",run:()=>switchSection("botconfig")},
+      {label:"Bot data",meta:"Dashboard",keywords:"tickets moderation commands",run:()=>switchSection("botdata")},
+      {label:"Database browser",meta:"Dashboard",keywords:"sqlite tables read",run:()=>switchSection("database")},
+      {label:"Code & files",meta:"Dashboard",keywords:"editor repository files",run:()=>switchSection("code")},
+      {label:"Git & deploy",meta:"Dashboard",keywords:"commit branch deploy diff",run:()=>switchSection("git")},
+      {label:"System control",meta:"Dashboard",keywords:"services processes tailscale power",run:()=>switchSection("system")},
+      {label:"Backups",meta:"Dashboard",keywords:"sqlite backup",run:()=>switchSection("backups")},
+      {label:"Logs & audit",meta:"Dashboard",keywords:"journal errors audit",run:()=>switchSection("logs")},
+      {label:"Operations",meta:"Subsite",keywords:"analytics reliability discord hardware",href:"/ops"},
+      {label:"Control Center",meta:"Subsite",keywords:"health maintenance cogs history",href:"/control"},
+      {label:"Database Admin",meta:"Subsite",keywords:"sqlite edit write admin",href:"/database-admin"},
+      {label:"Workspace",meta:"Subsite",keywords:"composer commands plugins config",href:"/workspace"},
+      {label:"Workspace Studio",meta:"Subsite",keywords:"embed search catalog",href:"/workspace/studio"},
+      {label:"Media Hub",meta:"Subsite",keywords:"voice radio ambient music",href:"/media"},
+      {label:"Meshtastic",meta:"Subsite",keywords:"lora rf nodes mesh",href:"/meshtastic"},
+      {label:"Now Playing",meta:"Subsite",keywords:"media fullscreen playback",href:"/now-playing"},
+      {label:"Refresh dashboard",meta:"Action",keywords:"reload status sync",run:()=>{refreshStatus(true);loadOverviewData();loadOverviewAudit();}},
+      {label:"Create database backup",meta:"Action",keywords:"backup sqlite snapshot",run:()=>createBackup()}
+    ];
+    let visible=[...commands],active=0,lastFocus=null;
+    const matches=(command,query)=>{
+      if(!query)return true;
+      const haystack=`${command.label} ${command.meta} ${command.keywords||""}`.toLowerCase();
+      return query.toLowerCase().trim().split(/\s+/).every(word=>haystack.includes(word));
+    };
+    const render=()=>{
+      const query=search.value.trim();
+      visible=commands.filter(command=>matches(command,query));
+      active=Math.min(active,Math.max(0,visible.length-1));
+      if(!visible.length){results.innerHTML='<div class="command-empty">No matching page or action.</div>';return;}
+      results.innerHTML=visible.map((command,index)=>{
+        const attrs=`class="command-result" data-command-index="${index}" data-active="${index===active}" role="option" aria-selected="${index===active}"`;
+        const body=`<span><strong>${escapeHtml(command.label)}</strong><small>${escapeHtml(command.meta)}</small></span><b>${command.href?"Open":"Run"}</b>`;
+        return command.href?`<a ${attrs} href="${command.href}">${body}</a>`:`<button ${attrs} type="button">${body}</button>`;
+      }).join("");
+      results.querySelectorAll("[data-command-index]").forEach(node=>{
+        node.addEventListener("mouseenter",()=>{active=Number(node.dataset.commandIndex);render();});
+        if(node.tagName==="BUTTON")node.addEventListener("click",()=>execute(Number(node.dataset.commandIndex)));
+      });
+    };
+    const execute=index=>{
+      const command=visible[index];if(!command)return;
+      if(command.href){location.href=command.href;return;}
+      close();command.run?.();
+    };
+    const open=()=>{
+      lastFocus=document.activeElement;
+      backdrop.dataset.open="true";search.value="";active=0;render();
+      requestAnimationFrame(()=>search.focus());
+    };
+    const close=()=>{
+      backdrop.dataset.open="false";
+      lastFocus?.focus?.();
+    };
+    trigger.addEventListener("click",open);
+    backdrop.addEventListener("mousedown",event=>{if(event.target===backdrop)close();});
+    search.addEventListener("input",()=>{active=0;render();});
+    backdrop.addEventListener("keydown",event=>{
+      if(event.key==="ArrowDown"){event.preventDefault();active=Math.min(active+1,visible.length-1);render();results.querySelector('[data-active="true"]')?.scrollIntoView({block:"nearest"});}
+      else if(event.key==="ArrowUp"){event.preventDefault();active=Math.max(active-1,0);render();results.querySelector('[data-active="true"]')?.scrollIntoView({block:"nearest"});}
+      else if(event.key==="Enter"&&document.activeElement===search){event.preventDefault();execute(active);}
+      else if(event.key==="Escape"){event.preventDefault();close();}
+      else if(event.key==="Tab"){
+        const focusable=[search,...results.querySelectorAll("a,button")];
+        if(!focusable.length)return;
+        const current=focusable.indexOf(document.activeElement);
+        if(event.shiftKey&&current<=0){event.preventDefault();focusable.at(-1)?.focus();}
+        else if(!event.shiftKey&&current===focusable.length-1){event.preventDefault();focusable[0]?.focus();}
+      }
+    });
+    document.addEventListener("keydown",event=>{
+      if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){
+        event.preventDefault();
+        backdrop.dataset.open==="true"?close():open();
+      }
+    });
+  }
+
   function switchSection(id,{updateUrl=true}={}){const section=$(id);if(!section||!section.classList.contains("section"))return;if(currentFile)saveTabState();document.querySelectorAll(".section").forEach(s=>s.classList.toggle("active",s.id===id));document.querySelectorAll(".nav-item[data-section]").forEach(b=>b.classList.toggle("active",b.dataset.section===id));const titles={overview:"System overview",botconfig:"Bot configuration",botdata:"Bot data",database:"Database browser",code:"Code & files",git:"Git & deploy",system:"System control",backups:"Backups",logs:"Logs & audit"};$("page-title").textContent=titles[id]||"HomePi Control";document.title=`${titles[id]||"HomePi Control"} · HomePi`;if(updateUrl){const next=id==="overview"?location.pathname:`${location.pathname}#${id}`;history.pushState({section:id},"",next);}if(id==="logs"){loadLogs();loadAudit();}if(id==="git"){refreshDiff();refreshGitExtra();}if(id==="code"&&!allFiles.length)loadFiles();if(id==="botconfig"&&$("guild-select").options.length<=1)loadGuilds();if(id==="botdata")loadBotData();if(id==="database")loadDatabaseTables();if(id==="backups")loadBackups();if(id==="system")refreshStatus(false);}
 
-  async function init(){try{await bootstrap();}catch(e){toast(e.message,false);return;}const initialSection=location.hash.slice(1)||"overview";if($(initialSection)?.classList.contains("section"))switchSection(initialSection,{updateUrl:false});document.querySelectorAll(".nav-item[data-section]").forEach(b=>b.addEventListener("click",()=>switchSection(b.dataset.section)));document.querySelectorAll("[data-nav]").forEach(b=>b.addEventListener("click",()=>switchSection(b.dataset.nav)));window.addEventListener("popstate",()=>{const id=location.hash.slice(1)||"overview";if($(id)?.classList.contains("section"))switchSection(id,{updateUrl:false});});window.addEventListener("hashchange",()=>{const id=location.hash.slice(1);if(id&&$(id)?.classList.contains("section"))switchSection(id,{updateUrl:false});});document.querySelectorAll("[data-bot-action]").forEach(b=>b.addEventListener("click",()=>botAction(b.dataset.botAction,b)));document.querySelectorAll("[data-git-action]").forEach(b=>b.addEventListener("click",()=>gitAction(b.dataset.gitAction,b)));$("refresh-button").addEventListener("click",()=>{refreshStatus(true);loadOverviewData();});$("reload-files").addEventListener("click",loadFiles);$("new-file").addEventListener("click",()=>createPath("file"));$("new-folder").addEventListener("click",()=>createPath("dir"));$("file-filter").addEventListener("input",renderFiles);$("code-search-button").addEventListener("click",searchCode);$("code-search").addEventListener("keydown",e=>{if(e.key==="Enter")searchCode();});$("code-editor").addEventListener("input",updateEditorPosition);$("code-editor").addEventListener("click",updateEditorPosition);$("validate-code").addEventListener("click",validateCode);$("save-code").addEventListener("click",saveCode);$("rename-path").addEventListener("click",renameCurrent);$("delete-path").addEventListener("click",deleteCurrent);$("refresh-diff").addEventListener("click",refreshDiff);$("stage-selected").addEventListener("click",()=>gitPathAction("stage"));$("unstage-selected").addEventListener("click",()=>gitPathAction("unstage"));$("discard-selected").addEventListener("click",()=>gitPathAction("discard"));$("commit-button").addEventListener("click",commitStaged);$("switch-branch").addEventListener("click",()=>branchAction("switch",$("branch-select").value));$("new-branch").addEventListener("click",()=>{const n=prompt("New branch name");if(n)branchAction("create",n);});$("guild-select").addEventListener("change",loadGuildConfig);$("save-config").addEventListener("click",saveGuildConfig);$("reload-config").addEventListener("click",loadGuildConfig);$("embed-color-picker").addEventListener("input",()=>{$("embed-color").value=$("embed-color-picker").value.toUpperCase();});$("embed-color").addEventListener("input",()=>{const v=$("embed-color").value.trim();if(/^#[0-9a-fA-F]{6}$/.test(v))$("embed-color-picker").value=v;});$("embed-default").addEventListener("click",()=>{$("embed-color").value="";$("embed-color-picker").value="#5865F2";});$("db-refresh-tables").addEventListener("click",loadDatabaseTables);$("db-search-button").addEventListener("click",()=>dbTable&&openDatabaseTable(dbTable,0));$("db-search").addEventListener("keydown",e=>{if(e.key==="Enter"&&dbTable)openDatabaseTable(dbTable,0);});$("db-prev").addEventListener("click",()=>dbTable&&openDatabaseTable(dbTable,Math.max(0,dbOffset-dbLimit)));$("db-next").addEventListener("click",()=>dbTable&&openDatabaseTable(dbTable,dbOffset+dbLimit));$("db-schema-button").addEventListener("click",loadDbSchema);$("deploy-button").addEventListener("click",deploy);$("rollback-button").addEventListener("click",rollback);$("requirements-button").addEventListener("click",installRequirements);$("logs-refresh").addEventListener("click",loadLogs);$("log-service").addEventListener("change",loadLogs);$("audit-refresh").addEventListener("click",loadAudit);$("create-backup").addEventListener("click",createBackup);$("reboot-pi").addEventListener("click",()=>powerAction("reboot"));$("shutdown-pi").addEventListener("click",()=>powerAction("poweroff"));$("logout-button").addEventListener("click",async()=>{await request("/logout",{method:"POST"});location.href="/login";});window.addEventListener("beforeunload",e=>{if([...openTabs.values()].some(x=>x.dirty)||currentDirty()){e.preventDefault();e.returnValue="";}});await Promise.all([refreshStatus(false),loadOverviewData()]);setInterval(()=>refreshStatus(false),30000);}
+  async function init(){try{await bootstrap();}catch(e){toast(e.message,false);return;}setupCommandCenter();renderTelemetryTrends();updateSyncAge();const initialSection=location.hash.slice(1)||"overview";if($(initialSection)?.classList.contains("section"))switchSection(initialSection,{updateUrl:false});document.querySelectorAll(".nav-item[data-section]").forEach(b=>b.addEventListener("click",()=>switchSection(b.dataset.section)));document.querySelectorAll("[data-nav]").forEach(b=>b.addEventListener("click",()=>switchSection(b.dataset.nav)));window.addEventListener("popstate",()=>{const id=location.hash.slice(1)||"overview";if($(id)?.classList.contains("section"))switchSection(id,{updateUrl:false});});window.addEventListener("hashchange",()=>{const id=location.hash.slice(1);if(id&&$(id)?.classList.contains("section"))switchSection(id,{updateUrl:false});});document.querySelectorAll("[data-bot-action]").forEach(b=>b.addEventListener("click",()=>botAction(b.dataset.botAction,b)));document.querySelectorAll("[data-git-action]").forEach(b=>b.addEventListener("click",()=>gitAction(b.dataset.gitAction,b)));$("refresh-button").addEventListener("click",()=>{refreshStatus(true);loadOverviewData();loadOverviewAudit();});$("reload-files").addEventListener("click",loadFiles);$("new-file").addEventListener("click",()=>createPath("file"));$("new-folder").addEventListener("click",()=>createPath("dir"));$("file-filter").addEventListener("input",renderFiles);$("code-search-button").addEventListener("click",searchCode);$("code-search").addEventListener("keydown",e=>{if(e.key==="Enter")searchCode();});$("code-editor").addEventListener("input",updateEditorPosition);$("code-editor").addEventListener("click",updateEditorPosition);$("validate-code").addEventListener("click",validateCode);$("save-code").addEventListener("click",saveCode);$("rename-path").addEventListener("click",renameCurrent);$("delete-path").addEventListener("click",deleteCurrent);$("refresh-diff").addEventListener("click",refreshDiff);$("stage-selected").addEventListener("click",()=>gitPathAction("stage"));$("unstage-selected").addEventListener("click",()=>gitPathAction("unstage"));$("discard-selected").addEventListener("click",()=>gitPathAction("discard"));$("commit-button").addEventListener("click",commitStaged);$("switch-branch").addEventListener("click",()=>branchAction("switch",$("branch-select").value));$("new-branch").addEventListener("click",()=>{const n=prompt("New branch name");if(n)branchAction("create",n);});$("guild-select").addEventListener("change",loadGuildConfig);$("save-config").addEventListener("click",saveGuildConfig);$("reload-config").addEventListener("click",loadGuildConfig);$("embed-color-picker").addEventListener("input",()=>{$("embed-color").value=$("embed-color-picker").value.toUpperCase();});$("embed-color").addEventListener("input",()=>{const v=$("embed-color").value.trim();if(/^#[0-9a-fA-F]{6}$/.test(v))$("embed-color-picker").value=v;});$("embed-default").addEventListener("click",()=>{$("embed-color").value="";$("embed-color-picker").value="#5865F2";});$("db-refresh-tables").addEventListener("click",loadDatabaseTables);$("db-search-button").addEventListener("click",()=>dbTable&&openDatabaseTable(dbTable,0));$("db-search").addEventListener("keydown",e=>{if(e.key==="Enter"&&dbTable)openDatabaseTable(dbTable,0);});$("db-prev").addEventListener("click",()=>dbTable&&openDatabaseTable(dbTable,Math.max(0,dbOffset-dbLimit)));$("db-next").addEventListener("click",()=>dbTable&&openDatabaseTable(dbTable,dbOffset+dbLimit));$("db-schema-button").addEventListener("click",loadDbSchema);$("deploy-button").addEventListener("click",deploy);$("rollback-button").addEventListener("click",rollback);$("requirements-button").addEventListener("click",installRequirements);$("logs-refresh").addEventListener("click",loadLogs);$("log-service").addEventListener("change",loadLogs);$("audit-refresh").addEventListener("click",loadAudit);$("create-backup").addEventListener("click",createBackup);$("reboot-pi").addEventListener("click",()=>powerAction("reboot"));$("shutdown-pi").addEventListener("click",()=>powerAction("poweroff"));$("logout-button").addEventListener("click",async()=>{await request("/logout",{method:"POST"});location.href="/login";});window.addEventListener("beforeunload",e=>{if([...openTabs.values()].some(x=>x.dirty)||currentDirty()){e.preventDefault();e.returnValue="";}});await Promise.all([refreshStatus(false),loadOverviewData(),loadOverviewAudit()]);setInterval(()=>{if(!document.hidden)refreshStatus(false);},30000);setInterval(updateSyncAge,5000);setInterval(()=>{if(!document.hidden)loadOverviewAudit();},120000);}
   init();
 })();
