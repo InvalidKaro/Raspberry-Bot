@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import platform
 import re
 import shutil
+import socket
 import time
 from collections import deque
 from pathlib import Path
@@ -371,6 +373,24 @@ async def get_status(bot_service: str, sampler: DashboardSystemSampler | None = 
     swap = psutil.swap_memory()
     disk = psutil.disk_usage("/")
     net = psutil.net_io_counters()
+    freq = psutil.cpu_freq()
+    try:
+        os_release = platform.freedesktop_os_release()
+    except (AttributeError, OSError):
+        os_release = {}
+    lan_ip = None
+    try:
+        for interface, addresses in psutil.net_if_addrs().items():
+            if interface.startswith(("lo", "tailscale")):
+                continue
+            for address in addresses:
+                if getattr(address.family, "name", "") == "AF_INET" and address.address and not address.address.startswith("127."):
+                    lan_ip = address.address
+                    break
+            if lan_ip:
+                break
+    except Exception:
+        lan_ip = None
     bot_state = next((row for row in services if row["name"] == bot_service), None) or {}
     return {
         **sample,
@@ -389,6 +409,14 @@ async def get_status(bot_service: str, sampler: DashboardSystemSampler | None = 
         "load_average": _load_average(),
         "network_rx_mb": round(net.bytes_recv / 1024**2, 1),
         "network_tx_mb": round(net.bytes_sent / 1024**2, 1),
+        "hostname": socket.gethostname(),
+        "lan_ip": lan_ip,
+        "os_name": os_release.get("PRETTY_NAME") or platform.system(),
+        "kernel": platform.release(),
+        "architecture": platform.machine(),
+        "cpu_count": psutil.cpu_count(logical=True),
+        "cpu_frequency_mhz": round(float(freq.current), 0) if freq and freq.current else None,
+        "disk_free_gb": round(disk.free / 1024**3, 1),
         "bot_active": bot_state.get("active") == "active",
         "pihole": pihole,
         "tailscale": tailscale,
