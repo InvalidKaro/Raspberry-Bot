@@ -2002,3 +2002,341 @@ html:has(.dashboard-page){
     min-height:56px;
   }
 }
+
+
+/* Live control-plane features */
+.dashboard-page .focus-trigger{
+  min-height:40px;
+  padding-inline:11px;
+  background:#0b0f15;
+}
+.dashboard-page .focus-trigger[aria-pressed="true"]{
+  border-color:rgba(105,167,255,.36);
+  background:rgba(105,167,255,.10);
+  color:#dcecff;
+}
+
+.dashboard-page .live-grid{
+  display:grid;
+  grid-template-columns:minmax(0,1.25fr) minmax(330px,.75fr);
+  gap:16px;
+  margin-bottom:16px;
+}
+.dashboard-page .network-live-panel,
+.dashboard-page .topology-panel{
+  min-width:0;
+}
+.dashboard-page .network-values{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:0;
+  overflow:hidden;
+  margin-bottom:14px;
+  border:1px solid var(--hp-border);
+  border-radius:12px;
+  background:#0a0e14;
+}
+.dashboard-page .network-values > div{
+  min-width:0;
+  padding:12px 14px;
+}
+.dashboard-page .network-values > div + div{
+  border-left:1px solid var(--hp-border);
+}
+.dashboard-page .network-values span{
+  display:block;
+  color:var(--hp-muted);
+  font-size:8px;
+  font-weight:760;
+  letter-spacing:.1em;
+}
+.dashboard-page .network-values strong{
+  display:block;
+  margin-top:5px;
+  color:var(--hp-text);
+  font-size:clamp(20px,2vw,27px);
+  font-weight:720;
+  letter-spacing:-.035em;
+  font-variant-numeric:tabular-nums;
+}
+.dashboard-page .network-values small{
+  display:block;
+  margin-top:3px;
+  color:var(--hp-muted);
+  font-size:9px;
+  font-variant-numeric:tabular-nums;
+}
+.dashboard-page .network-chart{
+  position:relative;
+  min-height:132px;
+  padding:10px 10px 4px;
+  overflow:hidden;
+  border:1px solid rgba(37,44,57,.72);
+  border-radius:12px;
+  background:
+    linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px),
+    #090d13;
+  background-size:100% 24px,48px 100%,auto;
+}
+.dashboard-page .network-chart svg{
+  width:100%;
+  height:88px;
+  overflow:visible;
+}
+.dashboard-page .network-chart polyline{
+  fill:none;
+  stroke-width:2;
+  vector-effect:non-scaling-stroke;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+.dashboard-page .network-chart polyline.rx{stroke:var(--hp-accent)}
+.dashboard-page .network-chart polyline.tx{stroke:var(--hp-good)}
+.dashboard-page .network-legend{
+  display:flex;
+  gap:14px;
+  align-items:center;
+  color:var(--hp-muted);
+  font-size:8px;
+}
+.dashboard-page .network-legend span{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+}
+.dashboard-page .network-legend i{
+  width:12px;
+  height:3px;
+  border-radius:999px;
+}
+.dashboard-page .network-legend i.rx{background:var(--hp-accent)}
+.dashboard-page .network-legend i.tx{background:var(--hp-good)}
+
+.dashboard-page .service-topology{
+  position:relative;
+  display:grid;
+  gap:12px;
+}
+.dashboard-page .topology-host{
+  position:relative;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  width:max-content;
+  max-width:100%;
+  padding:10px 12px;
+  border:1px solid rgba(105,167,255,.28);
+  border-radius:11px;
+  background:rgba(105,167,255,.06);
+}
+.dashboard-page .topology-host::after{
+  content:"";
+  position:absolute;
+  left:20px;
+  top:100%;
+  width:1px;
+  height:13px;
+  background:var(--hp-border-strong);
+}
+.dashboard-page .topology-pulse{
+  width:9px;
+  height:9px;
+  border-radius:50%;
+  background:var(--hp-accent);
+  box-shadow:0 0 0 4px rgba(105,167,255,.08);
+}
+.dashboard-page .topology-host strong,
+.dashboard-page .topology-host small{
+  display:block;
+}
+.dashboard-page .topology-host strong{font-size:11px}
+.dashboard-page .topology-host small{
+  margin-top:2px;
+  color:var(--hp-muted);
+  font-size:9px;
+}
+.dashboard-page .topology-services{
+  position:relative;
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:7px;
+  padding-top:5px;
+}
+.dashboard-page .topology-services::before{
+  content:"";
+  position:absolute;
+  top:0;
+  left:20px;
+  right:20px;
+  height:1px;
+  background:var(--hp-border-strong);
+}
+.dashboard-page .topology-service{
+  position:relative;
+  min-width:0;
+  min-height:58px;
+  display:grid;
+  grid-template-columns:auto minmax(0,1fr);
+  align-items:center;
+  gap:9px;
+  padding:9px 10px;
+  border:1px solid var(--hp-border);
+  border-radius:10px;
+  background:#0a0e14;
+  text-align:left;
+  box-shadow:none;
+}
+.dashboard-page .topology-service::before{
+  content:"";
+  position:absolute;
+  top:-6px;
+  left:19px;
+  width:1px;
+  height:6px;
+  background:var(--hp-border-strong);
+}
+.dashboard-page .topology-service > span{
+  width:8px;
+  height:8px;
+  border-radius:50%;
+  background:var(--hp-warning);
+}
+.dashboard-page .topology-service.good > span{background:var(--hp-good)}
+.dashboard-page .topology-service.bad > span{background:var(--hp-danger)}
+.dashboard-page .topology-service strong{
+  display:block;
+  font-size:10px;
+}
+.dashboard-page .topology-service small{
+  display:block;
+  margin-top:2px;
+  color:var(--hp-muted);
+  font-size:8px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.dashboard-page .identity-grid{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:0;
+  margin-top:14px;
+  overflow:hidden;
+  border:1px solid var(--hp-border);
+  border-radius:11px;
+}
+.dashboard-page .identity-grid > div{
+  min-width:0;
+  padding:9px 10px;
+  border-right:1px solid var(--hp-border);
+  border-bottom:1px solid var(--hp-border);
+}
+.dashboard-page .identity-grid > div:nth-child(2n){border-right:0}
+.dashboard-page .identity-grid > div:nth-last-child(-n+2){border-bottom:0}
+.dashboard-page .identity-grid span{
+  display:block;
+  color:var(--hp-muted);
+  font-size:7px;
+  font-weight:760;
+  letter-spacing:.1em;
+}
+.dashboard-page .identity-grid strong{
+  display:block;
+  margin-top:3px;
+  color:var(--hp-soft);
+  font-size:9px;
+  line-height:1.4;
+  overflow-wrap:anywhere;
+}
+
+.dashboard-page[data-focus="true"] #overview .detail-grid,
+.dashboard-page[data-focus="true"] #overview .overview-activity-panel,
+.dashboard-page[data-focus="true"] #overview .suite-panel{
+  display:none;
+}
+.dashboard-page[data-focus="true"] #overview .live-grid{
+  margin-bottom:0;
+}
+.dashboard-page[data-focus="true"] .content{
+  max-width:1280px;
+}
+
+.dashboard-page .mobile-dock{display:none}
+
+@media(max-width:1000px){
+  .dashboard-page .live-grid{
+    grid-template-columns:1fr;
+  }
+}
+@media(max-width:720px){
+  .dashboard-page{
+    padding-bottom:76px;
+  }
+  .dashboard-page .focus-trigger{
+    min-height:44px;
+  }
+  .dashboard-page .network-values{
+    grid-template-columns:1fr 1fr;
+  }
+  .dashboard-page .topology-services{
+    grid-template-columns:1fr 1fr;
+  }
+  .dashboard-page .mobile-dock{
+    position:fixed;
+    left:10px;
+    right:10px;
+    bottom:calc(8px + env(safe-area-inset-bottom));
+    z-index:1200;
+    min-height:58px;
+    display:grid;
+    grid-template-columns:repeat(5,1fr);
+    gap:3px;
+    padding:5px;
+    border:1px solid var(--hp-border-strong);
+    border-radius:15px;
+    background:rgba(10,14,20,.96);
+    box-shadow:0 20px 60px rgba(0,0,0,.38);
+  }
+  .dashboard-page .mobile-dock a{
+    min-width:0;
+    min-height:46px;
+    display:grid;
+    place-items:center;
+    align-content:center;
+    gap:2px;
+    border-radius:10px;
+    color:var(--hp-muted);
+    text-decoration:none;
+  }
+  .dashboard-page .mobile-dock a[aria-current="page"]{
+    background:rgba(105,167,255,.10);
+    color:#dcecff;
+  }
+  .dashboard-page .mobile-dock a span{
+    font-size:14px;
+    line-height:1;
+  }
+  .dashboard-page .mobile-dock a small{
+    font-size:7px;
+    font-weight:700;
+  }
+}
+@media(max-width:470px){
+  .dashboard-page .network-values,
+  .dashboard-page .topology-services,
+  .dashboard-page .identity-grid{
+    grid-template-columns:1fr;
+  }
+  .dashboard-page .network-values > div + div{
+    border-left:0;
+    border-top:1px solid var(--hp-border);
+  }
+  .dashboard-page .identity-grid > div{
+    border-right:0!important;
+    border-bottom:1px solid var(--hp-border)!important;
+  }
+  .dashboard-page .identity-grid > div:last-child{
+    border-bottom:0!important;
+  }
+}
