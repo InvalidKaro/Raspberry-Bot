@@ -30,7 +30,7 @@
         </div>
         <button id="refreshTables" class="icon-button" type="button" aria-label="Tabellen neu laden">↻</button>
       </div>
-      <input id="tableFilter" class="input" type="search" placeholder="Tabelle suchen…" autocomplete="off">
+      <input id="tableFilter" class="input" type="search" aria-label="Tabelle suchen" placeholder="Tabelle suchen…" autocomplete="off">
       <div id="tableList" class="table-list"></div>
       <div class="safety-box">
         <strong>Safe Edit</strong>
@@ -46,7 +46,7 @@
           <p id="tableMeta" class="muted">Wähle links eine Tabelle.</p>
         </div>
         <div class="toolbar-actions">
-          <input id="rowSearch" class="input search" type="search" placeholder="Einträge durchsuchen…" autocomplete="off" disabled>
+          <input id="rowSearch" class="input search" type="search" aria-label="Einträge durchsuchen" placeholder="Einträge durchsuchen…" autocomplete="off" disabled>
           <button id="newRow" class="button primary" type="button" disabled>+ Neuer Eintrag</button>
           <button id="reloadRows" class="button ghost" type="button" disabled>Neu laden</button>
         </div>
@@ -103,7 +103,7 @@
         </div>
       </div>
       <p class="muted">Ein Backup wird direkt davor erstellt. Gib <strong>DELETE</strong> ein, um genau diesen Datensatz zu löschen.</p>
-      <input id="deleteConfirm" class="input" type="text" placeholder="DELETE" autocomplete="off">
+      <input id="deleteConfirm" class="input" type="text" aria-label="DELETE zur Bestätigung eingeben" placeholder="DELETE" autocomplete="off">
       <div class="modal-actions">
         <div class="spacer"></div>
         <button id="cancelDelete" class="button ghost" type="button">Abbrechen</button>
