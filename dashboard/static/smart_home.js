@@ -102,8 +102,9 @@
         return row.parsed_result ?? { message: row.result || "Completed." };
       }
       if (row.status === "failed") {
-        setBridge("bad", "Bot command failed");
-        throw new Error(row.result || "Bot command failed.");
+        const reason = String(row.result || "Bot command failed.");
+        setBridge("bad", reason.length > 54 ? `${reason.slice(0, 51)}…` : reason);
+        throw new Error(reason);
       }
     }
 
@@ -299,8 +300,9 @@
       if (scan) toast("LAN and BLE discovery completed.");
       loadRecent();
     } catch (error) {
-      setBridge("bad", "Bot bridge unavailable");
-      toast(error.message, false);
+      const reason = String(error?.message || "Bot bridge unavailable");
+      setBridge("bad", reason.length > 54 ? `${reason.slice(0, 51)}…` : reason);
+      toast(reason, false);
     } finally {
       setBusy(button, false);
     }
