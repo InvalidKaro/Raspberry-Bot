@@ -14,10 +14,10 @@
 <div class="shell">
   <div class="top"><div class="brand"><h1>🎧 HomePi Media Hub</h1><p>Voice, Ambient, Internet-Radio und Media-Library direkt vom Dashboard.</p></div><a href="/">← Dashboard</a></div>
   <div class="toolbar">
-    <div><label>Server</label><select id="guild"><option value="">Server wählen …</option></select></div>
-    <div><label>Voice-Channel</label><select id="channel"><option value="">Voice-Channel wählen …</option></select></div>
-    <div><label>Lautstärke</label><input id="volume" type="number" min="10" max="120" value="65"></div>
-    <div><label>Sleep-Timer (Min.)</label><input id="minutes" type="number" min="0" max="480" value="0"></div>
+    <div><label>Server</label><select id="guild" aria-label="Discord-Server"><option value="">Server wählen …</option></select></div>
+    <div><label>Voice-Channel</label><select id="channel" aria-label="Voice-Channel"><option value="">Voice-Channel wählen …</option></select></div>
+    <div><label>Lautstärke</label><input id="volume" type="number" aria-label="Lautstärke"> min="10" max="120" value="65"></div>
+    <div><label>Sleep-Timer (Min.)</label><input id="minutes" type="number" aria-label="Sleep-Timer in Minuten"> min="0" max="480" value="0"></div>
   </div>
 
   <div class="grid">
@@ -58,16 +58,16 @@
         <div class="body forms" style="grid-template-columns:1fr">
           <form id="stationForm" class="formbox">
             <h3>Radiosender</h3>
-            <div class="field"><label>Name</label><input name="name" required maxlength="48"></div>
-            <div class="field"><label>HTTPS Stream URL</label><input name="stream_url" required placeholder="https://…"></div>
-            <div class="row"><div class="field"><label>Genre</label><input name="genre" maxlength="60"></div><div class="field"><label>Homepage</label><input name="homepage" placeholder="https://…"></div></div>
+            <div class="field"><label>Name</label><input name="name" aria-label="Radiosender Name" required maxlength="48"></div>
+            <div class="field"><label>HTTPS Stream URL</label><input name="stream_url" aria-label="HTTPS Stream URL" required placeholder="https://…"></div>
+            <div class="row"><div class="field"><label>Genre</label><input name="genre" aria-label="Genre" maxlength="60"></div><div class="field"><label>Homepage</label><input name="homepage" aria-label="Homepage" placeholder="https://…"></div></div>
             <button class="radio" type="submit">Sender speichern</button>
           </form>
           <form id="sourceForm" class="formbox">
             <h3>Echte Ambient-Quelle</h3>
-            <div class="field"><label>Name</label><input name="name" required maxlength="48"></div>
-            <div class="field"><label>HTTPS Audio URL</label><input name="audio_url" required placeholder="https://…mp3 / stream"></div>
-            <div class="field"><label>Kategorie</label><input name="category" value="Nature" maxlength="40"></div>
+            <div class="field"><label>Name</label><input name="name" aria-label="Ambient-Quelle Name" required maxlength="48"></div>
+            <div class="field"><label>HTTPS Audio URL</label><input name="audio_url" aria-label="HTTPS Audio URL" required placeholder="https://…mp3 / stream"></div>
+            <div class="field"><label>Kategorie</label><input name="category" aria-label="Kategorie" value="Nature" maxlength="40"></div>
             <button class="good" type="submit">Quelle speichern</button>
           </form>
         </div>
