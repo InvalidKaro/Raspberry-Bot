@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime, timedelta
 
 import discord
 from discord import app_commands
@@ -199,9 +200,12 @@ class SmartHome(
         await self.climate_history.ensure_schema()
         if not self.climate_collector.is_running():
             self.climate_collector.start()
+        if not self.scene_scheduler.is_running():
+            self.scene_scheduler.start()
 
     async def cog_unload(self) -> None:
         self.climate_collector.cancel()
+        self.scene_scheduler.cancel()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.guild_id != SMART_HOME_GUILD_ID:
@@ -222,6 +226,7 @@ class SmartHome(
                     "Stored %s Govee climate sample(s)",
                     len(sensors),
                 )
+                await self._evaluate_climate_alerts(sensors)
         except GoveeBleUnavailableError:
             logger.debug("Skipped climate collection because Bluetooth is unavailable")
         except Exception:
@@ -229,6 +234,203 @@ class SmartHome(
 
     @climate_collector.before_loop
     async def before_climate_collector(self) -> None:
+        await self.bot.wait_until_ready()
+
+    async def _evaluate_climate_alerts(self, sensors: list[object]) -> None:
+        row = await self.bot.database.fetchone(
+            """SELECT channel_id,enabled,temp_min,temp_max,humidity_min,humidity_max,
+                      cooldown_minutes,last_fired_at,last_reason
+               FROM smart_home_alert_config WHERE guild_id=?""",
+            (SMART_HOME_GUILD_ID,),
+        )
+        if row is None or not int(row["enabled"] or 0) or not row["channel_id"]:
+            return
+
+        sensor = next(
+            (item for item in sensors if getattr(item, "model", None) == "H5075"),
+            sensors[0] if sensors else None,
+        )
+        if sensor is None:
+            return
+
+        temperature = getattr(sensor, "temperature_c", None)
+        humidity = getattr(sensor, "humidity_percent", None)
+        reasons: list[str] = []
+
+        if temperature is not None:
+            if row["temp_min"] is not None and float(temperature) < float(row["temp_min"]):
+                reasons.append(
+                    f"Temperatur zu niedrig: {float(temperature):.1f} °C < {float(row['temp_min']):.1f} °C"
+                )
+            if row["temp_max"] is not None and float(temperature) > float(row["temp_max"]):
+                reasons.append(
+                    f"Temperatur zu hoch: {float(temperature):.1f} °C > {float(row['temp_max']):.1f} °C"
+                )
+        if humidity is not None:
+            if row["humidity_min"] is not None and float(humidity) < float(row["humidity_min"]):
+                reasons.append(
+                    f"Luftfeuchte zu niedrig: {float(humidity):.1f} % < {float(row['humidity_min']):.1f} %"
+                )
+            if row["humidity_max"] is not None and float(humidity) > float(row["humidity_max"]):
+                reasons.append(
+                    f"Luftfeuchte zu hoch: {float(humidity):.1f} % > {float(row['humidity_max']):.1f} %"
+                )
+
+        previous_reason = str(row["last_reason"] or "").strip()
+        channel = self.bot.get_channel(int(row["channel_id"]))
+        if not isinstance(channel, discord.abc.Messageable):
+            return
+
+        if not reasons:
+            if previous_reason:
+                details: list[str] = []
+                if temperature is not None:
+                    details.append(f"Temperatur: **{float(temperature):.1f} °C**")
+                if humidity is not None:
+                    details.append(f"Luftfeuchte: **{float(humidity):.1f} %**")
+                embed = EmbedFactory.success(
+                    title="Raumklima wieder im Normalbereich",
+                    description="\n".join(details) or "Die konfigurierten Grenzwerte werden wieder eingehalten.",
+                )
+                await channel.send(
+                    embed=embed,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+                await self.bot.database.execute(
+                    """UPDATE smart_home_alert_config
+                       SET last_reason=NULL,updated_at=CURRENT_TIMESTAMP
+                       WHERE guild_id=?""",
+                    (SMART_HOME_GUILD_ID,),
+                )
+            return
+
+        now = datetime.now(UTC)
+        last_fired = None
+        if row["last_fired_at"]:
+            try:
+                parsed = datetime.fromisoformat(str(row["last_fired_at"]).replace(" ", "T"))
+                last_fired = parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
+            except ValueError:
+                last_fired = None
+
+        cooldown = max(5, int(row["cooldown_minutes"] or 60))
+        reason_text = "\n".join(reasons)
+        if (
+            last_fired
+            and now - last_fired < timedelta(minutes=cooldown)
+            and reason_text == previous_reason
+        ):
+            return
+
+        embed = EmbedFactory.warning(
+            title="Smart-Home Klimawarnung",
+            description="\n".join(f"• {reason}" for reason in reasons),
+        )
+        if temperature is not None:
+            embed.add_field(
+                name="Temperatur",
+                value=f"**{float(temperature):.1f} °C**",
+                inline=True,
+            )
+        if humidity is not None:
+            embed.add_field(
+                name="Luftfeuchte",
+                value=f"**{float(humidity):.1f} %**",
+                inline=True,
+            )
+        battery = getattr(sensor, "battery_percent", None)
+        if battery is not None:
+            embed.add_field(
+                name="Batterie",
+                value=f"**{float(battery):.0f} %**",
+                inline=True,
+            )
+        embed.set_footer(text=f"HomePi · Cooldown {cooldown} min")
+        await channel.send(
+            embed=embed,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+        await self.bot.database.execute(
+            """UPDATE smart_home_alert_config
+               SET last_fired_at=CURRENT_TIMESTAMP,last_reason=?,updated_at=CURRENT_TIMESTAMP
+               WHERE guild_id=?""",
+            (reason_text, SMART_HOME_GUILD_ID),
+        )
+
+    @tasks.loop(seconds=30)
+    async def scene_scheduler(self) -> None:
+        now = datetime.now().astimezone()
+        run_time = now.strftime("%H:%M")
+        run_key = now.strftime("%Y-%m-%dT%H:%M")
+        rows = await self.bot.database.fetchall(
+            """SELECT id,name,device_selector,preset,weekdays,notify_channel_id,last_run_key
+               FROM smart_home_schedules
+               WHERE guild_id=? AND enabled=1 AND run_time=?""",
+            (SMART_HOME_GUILD_ID, run_time),
+        )
+        for row in rows:
+            weekdays = {
+                int(value)
+                for value in str(row["weekdays"] or "").split(",")
+                if value.strip().isdigit()
+            }
+            if now.weekday() not in weekdays:
+                continue
+            if str(row["last_run_key"] or "") == run_key:
+                continue
+
+            schedule_id = int(row["id"])
+            selector = str(row["device_selector"] or "all")
+            preset = str(row["preset"] or "off")
+            ok = False
+            result_text = ""
+            try:
+                if selector == "all":
+                    batch = await self.service.apply_preset_all(preset)
+                    ok = batch.failed == 0
+                    result_text = f"{batch.applied} applied"
+                    if batch.failed:
+                        result_text += f", {batch.failed} failed"
+                else:
+                    result = await self.service.apply_preset(selector, preset)
+                    ok = True
+                    result_text = f"{result.display_name} via {result.transport}"
+            except Exception as exc:
+                result_text = f"{type(exc).__name__}: {exc}"
+                logger.warning(
+                    "Scheduled smart-home scene failed id=%s",
+                    schedule_id,
+                    exc_info=True,
+                )
+
+            await self.bot.database.execute(
+                """UPDATE smart_home_schedules
+                   SET last_run_key=?,last_result=?,updated_at=CURRENT_TIMESTAMP
+                   WHERE id=?""",
+                (run_key, result_text[:1000], schedule_id),
+            )
+
+            channel_id = row["notify_channel_id"]
+            if channel_id:
+                notify_channel = self.bot.get_channel(int(channel_id))
+                if isinstance(notify_channel, discord.abc.Messageable):
+                    if ok:
+                        embed = EmbedFactory.success(
+                            title=f"Smart-Home Szene: {row['name']}",
+                            description=f"**{preset}** ausgeführt · {result_text}",
+                        )
+                    else:
+                        embed = EmbedFactory.error(
+                            title=f"Smart-Home Szene fehlgeschlagen: {row['name']}",
+                            description=result_text[:4000],
+                        )
+                    await notify_channel.send(
+                        embed=embed,
+                        allowed_mentions=discord.AllowedMentions.none(),
+                    )
+
+    @scene_scheduler.before_loop
+    async def before_scene_scheduler(self) -> None:
         await self.bot.wait_until_ready()
 
     async def _scan_and_store_climate(self, *, timeout: float = 7.0) -> list[object]:
