@@ -202,10 +202,10 @@ if not getattr(_app_legacy, "_workspace_suite_wrapped", False):
     _original_auth_middleware = _app_legacy.auth_middleware
 
     async def _index_with_navigation(request):
-        response = await _original_index(request)
-        if response.content_type == "text/html" and response.text:
-            response.text = response.text.replace("</body>", _HOME_NAV_INJECT + "</body>")
-        return response
+        # The redesigned main dashboard owns its navigation natively.
+        # Keep this wrapper for compatibility with the suite bootstrap, but do
+        # not inject the retired purple navigation menu at runtime.
+        return await _original_index(request)
 
     @web.middleware
     async def _auth_with_public_status(request: web.Request, handler):
