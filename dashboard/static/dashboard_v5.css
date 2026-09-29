@@ -1700,3 +1700,21 @@
     min-height:112px;
   }
 }
+
+
+/* Mobile form guarantees */
+html:has(.dashboard-page){
+  scroll-padding-top:16px;
+}
+@media(max-width:720px){
+  .dashboard-page input,
+  .dashboard-page select,
+  .dashboard-page textarea{
+    font-size:16px;
+  }
+  .dashboard-page button,
+  .dashboard-page .button,
+  .dashboard-page .top-link{
+    min-height:44px;
+  }
+}
