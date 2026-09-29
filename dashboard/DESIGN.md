@@ -138,3 +138,21 @@ HomePi is a suite, not a pile of unrelated dashboards.
 - Do not nest cards simply to create depth.
 - Prefer one clear accent, neutral surfaces, and semantic state colors.
 - Every decorative treatment must justify its operational purpose.
+
+
+## Dashboard feature principles
+The dashboard should reduce time-to-diagnosis rather than merely expose more numbers.
+
+- The overview uses a triage-first sequence: platform state → operator brief → live telemetry → recent operations → deeper workspaces.
+- CPU, RAM, temperature and disk retain a small local trend history in the browser. This adds immediate directionality without adding a new Pi-side polling service or database table.
+- Recent dashboard actions are surfaced on the overview using the existing audit endpoint so operational changes have visible context.
+- The main dashboard exposes a keyboard command center for navigation and safe utility actions. Navigation entries remain native links where applicable.
+- Diagnostic snapshots are copyable as plain text for debugging and support. Never include secrets, environment values, tokens or private file contents.
+- Refresh frequency should match the underlying data. The overview status sampler stays at 30 seconds and recent audit activity at 120 seconds while the page is visible.
+
+## Visual hierarchy
+- Healthy data recedes. Warnings and failures get stronger semantic treatment.
+- Trends support the primary number; they never replace the numeric value.
+- Avoid four isolated cards when one shared telemetry rail communicates the relationship more clearly.
+- Use asymmetry to indicate priority: the operator brief and primary operational workspaces receive more space than secondary links.
+- Decoration should never compete with system state. No ambient radial glows, ornamental rings, or non-semantic status lights.
