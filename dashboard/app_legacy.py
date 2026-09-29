@@ -86,7 +86,17 @@ async def security_headers(request: web.Request, handler):
 
 @web.middleware
 async def auth_middleware(request: web.Request, handler):
-    public = {"/login", "/health", "/static/style.css", "/static/app.js"}
+    public = {
+        "/login",
+        "/health",
+        "/status",
+        "/api/public/status",
+        "/static/style.css",
+        "/static/app.js",
+        "/static/login.css",
+        "/static/status.css",
+        "/static/status.js",
+    }
     if request.path in public:
         return await handler(request)
     if not _authenticated(request):
