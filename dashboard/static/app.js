@@ -56,9 +56,9 @@
     persistTelemetry();
     renderTelemetryTrends();
   }
-  function sparklinePoints(values,max){
+  function sparklinePoints(values,max,width=100,height=30){
     if(values.length<2)return "";
-    const width=100,height=30,den=Math.max(1,values.length-1);
+    const den=Math.max(1,values.length-1);
     return values.map((value,index)=>{
       const x=index/den*width;
       const normalized=Math.max(0,Math.min(max,Number(value)||0))/max;
@@ -91,8 +91,8 @@
     const samples=telemetry.filter(sample=>Number.isFinite(Number(sample.rx))&&Number.isFinite(Number(sample.tx)));
     const rx=samples.map(sample=>Number(sample.rx)),tx=samples.map(sample=>Number(sample.tx));
     const ceiling=Math.max(1024,...rx,...tx);
-    rxLine.setAttribute("points",sparklinePoints(rx,ceiling).replace(/,/g,","));
-    txLine.setAttribute("points",sparklinePoints(tx,ceiling).replace(/,/g,","));
+    rxLine.setAttribute("points",sparklinePoints(rx,ceiling,240,72));
+    txLine.setAttribute("points",sparklinePoints(tx,ceiling,240,72));
     if(samples.length<2){windowLabel.textContent="Collecting…";return;}
     const minutes=Math.max(1,Math.round((Number(samples.at(-1).at)-Number(samples[0].at))/60000));
     windowLabel.textContent=`${minutes}m local trend`;
