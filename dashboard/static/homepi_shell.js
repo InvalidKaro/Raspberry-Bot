@@ -13,7 +13,8 @@
     {path:"/meshtastic",label:"Meshtastic",description:"LoRa-Nodes, RF und Nachrichten"},
     {path:"/now-playing",label:"Now Playing",description:"Fullscreen Media-Status"},
     {path:"/status",label:"Status",description:"Reduzierter Service-Status"},
-    {path:"/tools",label:"Tools",description:"Diagnostics, network, backups and maintenance"}
+    {path:"/tools",label:"Tools",description:"Diagnostics, network, backups and maintenance"},
+    {path:"/smart-home",label:"Smart Home",description:"Govee control, climate alerts and scheduled scenes"}
   ];
 
   const body=document.body;
@@ -28,7 +29,7 @@
     if(p.path==="/media")return path==="/media"||path==="/now-playing";
     return path===p.path;
   };
-  const navPages=pages.filter(p=>["/","/ops","/control","/database-admin","/workspace","/media","/meshtastic","/tools"].includes(p.path));
+  const navPages=pages.filter(p=>["/","/ops","/control","/workspace","/media","/smart-home","/meshtastic","/tools"].includes(p.path));
 
   const skip=document.createElement("a");
   skip.className="hp-skip";
@@ -66,7 +67,7 @@
     {path:"/",label:"Home",icon:"⌂"},
     {path:"/ops",label:"Ops",icon:"◫"},
     {path:"/control",label:"Control",icon:"◉"},
-    {path:"/workspace",label:"Workspace",icon:"⌘"},
+    {path:"/smart-home",label:"Home",icon:"⌁"},
     {path:"/media",label:"Media",icon:"▶"}
   ];
   mobileDock.innerHTML=dockPages.map(page=>`<a href="${page.path}" ${exact(page)?'aria-current="page"':""}><span aria-hidden="true">${page.icon}</span><small>${page.label}</small></a>`).join("");
