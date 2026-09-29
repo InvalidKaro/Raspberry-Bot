@@ -300,12 +300,12 @@
       active=Math.min(active,Math.max(0,visible.length-1));
       if(!visible.length){results.innerHTML='<div class="command-empty">No matching page or action.</div>';return;}
       results.innerHTML=visible.map((command,index)=>{
-        const attrs=`class="command-result" data-command-index="${index}" data-active="${index===active}" role="option" aria-selected="${index===active}"`;
+        const attrs=`class="command-result" data-command-index="${index}" data-active="${index===active}"`;
         const body=`<span><strong>${escapeHtml(command.label)}</strong><small>${escapeHtml(command.meta)}</small></span><b>${command.href?"Open":"Run"}</b>`;
         return command.href?`<a ${attrs} href="${command.href}">${body}</a>`:`<button ${attrs} type="button">${body}</button>`;
       }).join("");
       results.querySelectorAll("[data-command-index]").forEach(node=>{
-        node.addEventListener("mouseenter",()=>{active=Number(node.dataset.commandIndex);render();});
+        node.addEventListener("mouseenter",()=>{active=Number(node.dataset.commandIndex);results.querySelectorAll("[data-command-index]").forEach(item=>item.dataset.active=String(Number(item.dataset.commandIndex)===active));});
         if(node.tagName==="BUTTON")node.addEventListener("click",()=>execute(Number(node.dataset.commandIndex)));
       });
     };
