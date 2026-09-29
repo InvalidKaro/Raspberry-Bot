@@ -431,10 +431,7 @@
   position: relative;
   overflow: hidden;
   border-color: rgba(105, 167, 255, 0.31);
-  background:
-    radial-gradient(circle at 92% 0%, rgba(105, 167, 255, 0.19), transparent 44%),
-    linear-gradient(125deg, rgba(105, 167, 255, 0.045), transparent 40%),
-    var(--hp-surface);
+  background: var(--hp-surface);
 }
 
 .dashboard-page .accent-card::after {
@@ -1312,8 +1309,8 @@
   transition:background-color 150ms ease,border-color 150ms ease,color 150ms ease;
 }
 .dashboard-page .sidebar-suite a:hover{
-  border-color:rgba(139,92,246,.18);
-  background:rgba(139,92,246,.055);
+  border-color:rgba(105,167,255,.18);
+  background:rgba(105,167,255,.055);
   color:var(--hp-text);
 }
 .dashboard-page .sidebar-suite a span{
