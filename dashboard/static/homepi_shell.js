@@ -12,7 +12,8 @@
     {path:"/media",label:"Media",description:"Voice, Radio und Ambient-Library"},
     {path:"/meshtastic",label:"Meshtastic",description:"LoRa-Nodes, RF und Nachrichten"},
     {path:"/now-playing",label:"Now Playing",description:"Fullscreen Media-Status"},
-    {path:"/status",label:"Status",description:"Reduzierter Service-Status"}
+    {path:"/status",label:"Status",description:"Reduzierter Service-Status"},
+    {path:"/tools",label:"Tools",description:"Diagnostics, network, backups and maintenance"}
   ];
 
   const body=document.body;
@@ -27,7 +28,7 @@
     if(p.path==="/media")return path==="/media"||path==="/now-playing";
     return path===p.path;
   };
-  const navPages=pages.filter(p=>["/","/ops","/control","/database-admin","/workspace","/media","/meshtastic"].includes(p.path));
+  const navPages=pages.filter(p=>["/","/ops","/control","/database-admin","/workspace","/media","/meshtastic","/tools"].includes(p.path));
 
   const skip=document.createElement("a");
   skip.className="hp-skip";
