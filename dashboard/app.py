@@ -4,6 +4,7 @@ import asyncio
 import json
 import re
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 
 from aiohttp import web
@@ -12,7 +13,9 @@ from . import app_legacy
 from .config import DashboardConfig
 from .meshtastic_routes import register_meshtastic_routes
 from .services.database_admin_service import DatabaseAdminService
-from .services.system_service import bot_action
+from .services.maintenance_center import MaintenanceCenter
+from .services.system_service import bot_action, get_status
+from .services.commands import run_command
 
 TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 
@@ -28,6 +31,14 @@ async def control_page(_: web.Request) -> web.Response:
 async def database_admin_page(_: web.Request) -> web.Response:
     return web.Response(
         text=(TEMPLATE_DIR / "database_admin.html").read_text(encoding="utf-8"),
+        content_type="text/html",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+async def tools_page(_: web.Request) -> web.Response:
+    return web.Response(
+        text=(TEMPLATE_DIR / "tools.html").read_text(encoding="utf-8"),
         content_type="text/html",
         headers={"Cache-Control": "no-store"},
     )
@@ -382,12 +393,198 @@ async def api_database_admin_delete(request: web.Request) -> web.Response:
         return web.json_response(result, status=400)
 
 
+
+async def api_tools_diagnostics(request: web.Request) -> web.Response:
+    config: DashboardConfig = request.app["config"]
+    system_task = get_status(config.bot_service, request.app["system_sampler"])
+    checks_task = request.app["maintenance"].diagnostic_checks()
+    system, diagnostics = await asyncio.gather(system_task, checks_task)
+    return web.json_response({"ok": bool(diagnostics.get("ok")), "system": system, "diagnostics": diagnostics})
+
+
+async def api_tools_network(request: web.Request) -> web.Response:
+    try:
+        data = await request.json()
+        result = await request.app["maintenance"].network_test(
+            str(data.get("kind", "")),
+            str(data.get("target", "")),
+        )
+    except (ValueError, OSError) as exc:
+        return web.json_response({"ok": False, "message": str(exc)}, status=400)
+    audit = request.app.get("audit")
+    if audit is not None:
+        audit.record(
+            f"tools.network.{result.get('kind', 'unknown')}",
+            ok=bool(result.get("ok")),
+            detail=str(result.get("target", "")),
+        )
+    return web.json_response(result, status=200 if result.get("ok") else 400)
+
+
+async def api_tools_updates(request: web.Request) -> web.Response:
+    result = await request.app["maintenance"].cached_updates()
+    return web.json_response(result, status=200 if result.get("available") else 503)
+
+
+async def api_tools_schedule(request: web.Request) -> web.Response:
+    maintenance: MaintenanceCenter = request.app["maintenance"]
+    if request.method == "GET":
+        return web.json_response({"ok": True, "schedule": maintenance.status()})
+    try:
+        data = await request.json()
+        schedule = maintenance.configure(data)
+    except (ValueError, TypeError) as exc:
+        return web.json_response({"ok": False, "message": str(exc)}, status=400)
+    audit = request.app.get("audit")
+    if audit is not None:
+        audit.record(
+            "tools.backup.schedule",
+            ok=True,
+            detail=f"enabled={schedule.get('enabled')} frequency={schedule.get('frequency')} time={schedule.get('time')}",
+        )
+    return web.json_response({"ok": True, "schedule": schedule})
+
+
+async def api_tools_backup_now(request: web.Request) -> web.Response:
+    result = await request.app["maintenance"].run_backup(automatic=False)
+    audit = request.app.get("audit")
+    if audit is not None:
+        audit.record("tools.backup.run", ok=bool(result.get("ok")), detail=str(result.get("message", "")))
+    return web.json_response(result, status=200 if result.get("ok") else 500)
+
+
+async def api_tools_service_action(request: web.Request) -> web.Response:
+    service_key = request.match_info["service"]
+    action = request.match_info["action"]
+    config: DashboardConfig = request.app["config"]
+    services = {
+        "bot": config.bot_service,
+        "pihole": "pihole-FTL",
+        "tailscale": "tailscaled",
+        "dashboard": "raspberry-dashboard",
+    }
+    if service_key not in services or action not in {"start", "stop", "restart"}:
+        return web.json_response({"ok": False, "message": "Unsupported service action."}, status=400)
+    if service_key == "dashboard":
+        if action != "restart":
+            return web.json_response({"ok": False, "message": "Dashboard only supports restart from this page."}, status=400)
+        audit = request.app.get("audit")
+        if audit is not None:
+            audit.record("tools.service.dashboard.restart", ok=True, detail="Dashboard restart requested")
+        asyncio.create_task(_restart_dashboard_later(), name="tools-dashboard-self-restart")
+        return web.json_response({"ok": True, "message": "Dashboard restart scheduled.", "dashboard_restarting": True})
+
+    result = await run_command(["sudo", "-n", "systemctl", action, services[service_key]], timeout=20)
+    payload = {
+        "ok": result.ok,
+        "message": result.stdout or result.stderr or f"{services[service_key]} {action} completed.",
+        "service": service_key,
+        "action": action,
+    }
+    audit = request.app.get("audit")
+    if audit is not None:
+        audit.record(f"tools.service.{service_key}.{action}", ok=result.ok, detail=payload["message"])
+    return web.json_response(payload, status=200 if result.ok else 500)
+
+
+async def api_tools_support_bundle(request: web.Request) -> web.StreamResponse:
+    config: DashboardConfig = request.app["config"]
+    system_task = get_status(config.bot_service, request.app["system_sampler"])
+    checks_task = request.app["maintenance"].diagnostic_checks()
+    updates_task = request.app["maintenance"].cached_updates()
+    git_task = request.app["git"].status()
+    system, diagnostics, updates, git = await asyncio.gather(
+        system_task, checks_task, updates_task, git_task
+    )
+
+    safe_system_keys = {
+        "hostname", "lan_ip", "os_name", "kernel", "architecture", "cpu_count",
+        "cpu_frequency_mhz", "cpu_percent", "cpu_average_30s", "cpu_average_5m",
+        "temperature_c", "memory_percent", "memory_used_mb", "memory_total_mb",
+        "memory_available_mb", "swap_percent", "disk_percent", "disk_used_gb",
+        "disk_total_gb", "disk_free_gb", "uptime_seconds", "load_average",
+        "network_rx_rate_bps", "network_tx_rate_bps", "bot_active",
+    }
+    safe_system = {key: system.get(key) for key in sorted(safe_system_keys)}
+    safe_system["services"] = [
+        {
+            "name": row.get("name"),
+            "active": row.get("active"),
+            "sub": row.get("sub"),
+            "memory_mb": row.get("memory_mb"),
+        }
+        for row in system.get("services", [])
+    ]
+    safe_system["pihole"] = {
+        key: (system.get("pihole") or {}).get(key)
+        for key in ("installed", "active", "blocking", "api_available")
+    }
+    safe_system["tailscale"] = {
+        key: (system.get("tailscale") or {}).get(key)
+        for key in ("installed", "online")
+    }
+
+    bundle = {
+        "generated_at": datetime.now().astimezone().isoformat(),
+        "dashboard_version": "3.3.2",
+        "system": safe_system,
+        "diagnostics": diagnostics,
+        "git": {
+            "ok": git.get("ok"),
+            "branch": git.get("branch"),
+            "dirty": git.get("dirty"),
+            "ahead": git.get("ahead"),
+            "behind": git.get("behind"),
+            "change_count": len(git.get("changes") or []),
+            "last_commit": git.get("last_commit"),
+        },
+        "cached_updates": {
+            "ok": updates.get("ok"),
+            "available": updates.get("available"),
+            "count": updates.get("count", 0),
+            "packages": [row.get("package") for row in updates.get("updates", [])[:100]],
+        },
+        "backup_schedule": request.app["maintenance"].status(),
+    }
+    body = json.dumps(bundle, indent=2, ensure_ascii=False).encode("utf-8")
+    filename = datetime.now().strftime("homepi-support-%Y%m%d-%H%M%S.json")
+    return web.Response(
+        body=body,
+        content_type="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+
 def create_app(config: DashboardConfig | None = None) -> web.Application:
     app = app_legacy.create_app(config)
     register_meshtastic_routes(app)
     app["database_admin"] = DatabaseAdminService(app["config"].database_path)
+    state_dir = Path.home() / ".local" / "state" / "homepi-dashboard"
+    app["maintenance"] = MaintenanceCenter(app["backups"], app["backups"].database_path, state_dir)
+
+    async def _start_maintenance(application: web.Application) -> None:
+        await application["maintenance"].start()
+
+    async def _stop_maintenance(application: web.Application) -> None:
+        await application["maintenance"].stop()
+
+    app.on_startup.append(_start_maintenance)
+    app.on_cleanup.append(_stop_maintenance)
     app.router.add_get("/control", control_page)
     app.router.add_get("/database-admin", database_admin_page)
+    app.router.add_get("/tools", tools_page)
+    app.router.add_get("/api/tools/diagnostics", api_tools_diagnostics)
+    app.router.add_post("/api/tools/network", api_tools_network)
+    app.router.add_get("/api/tools/updates", api_tools_updates)
+    app.router.add_get("/api/tools/schedule", api_tools_schedule)
+    app.router.add_post("/api/tools/schedule", api_tools_schedule)
+    app.router.add_post("/api/tools/backup-now", api_tools_backup_now)
+    app.router.add_post("/api/tools/service/{service}/{action}", api_tools_service_action)
+    app.router.add_get("/api/tools/support-bundle", api_tools_support_bundle)
     app.router.add_get("/api/control-center", api_control_center)
     app.router.add_get("/api/control/history", api_control_history)
     app.router.add_get("/api/control/personnel", api_control_personnel)
