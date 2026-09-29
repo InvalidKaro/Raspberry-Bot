@@ -12,6 +12,7 @@ from aiohttp import web
 from . import app_legacy
 from .config import DashboardConfig
 from .meshtastic_routes import register_meshtastic_routes
+from .smart_home_routes import register_smart_home_routes
 from .services.database_admin_service import DatabaseAdminService
 from .services.maintenance_center import MaintenanceCenter
 from .services.system_service import bot_action, get_status
@@ -562,6 +563,7 @@ async def api_tools_support_bundle(request: web.Request) -> web.StreamResponse:
 def create_app(config: DashboardConfig | None = None) -> web.Application:
     app = app_legacy.create_app(config)
     register_meshtastic_routes(app)
+    register_smart_home_routes(app)
     app["database_admin"] = DatabaseAdminService(app["config"].database_path)
     state_dir = Path.home() / ".local" / "state" / "homepi-dashboard"
     app["maintenance"] = MaintenanceCenter(app["backups"], app["backups"].database_path, state_dir)
