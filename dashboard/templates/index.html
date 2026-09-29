@@ -1,17 +1,17 @@
 <!doctype html>
-<html lang="en">
+<html lang="de">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="color-scheme" content="dark">
-  <title>HomePi Control</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <meta name="color-scheme" content="dark">\n  <meta name="theme-color" content="#07090d">
+  <title>HomePi Operations</title>
+  <link rel="stylesheet" href="/static/style.css">\n  <link rel="stylesheet" href="/static/dashboard_v5.css">
 </head>
-<body>
+<body class="dashboard-page">\n  <a class="skip-link" href="#main-content">Zum Inhalt springen</a>
   <div class="app-shell">
     <aside class="sidebar">
       <div class="brand"><div class="brand-mark small">HP</div><div><p class="eyebrow">HOMEPI</p><strong>Control</strong></div></div>
-      <nav>
+      <nav aria-label="Dashboard-Bereiche">
         <button class="nav-item active" type="button" data-section="overview">Overview</button>
         <button class="nav-item" type="button" data-section="botconfig">Bot config</button>
         <button class="nav-item" type="button" data-section="botdata">Bot data</button>
@@ -25,9 +25,9 @@
       <button id="logout-button" class="nav-item danger-soft" type="button">Log out</button>
     </aside>
 
-    <main class="content">
+    <main class="content" id="main-content" tabindex="-1">
       <header class="topbar">
-        <div><p class="eyebrow">RASPBERRY PI</p><h1 id="page-title">System overview</h1></div>
+        <div><p class="eyebrow">HOMEPI • OPERATIONS</p><h1 id="page-title">System overview</h1></div>
         <div class="top-actions"><span class="status-pill" id="bot-pill"><span class="dot"></span><span>Loading</span></span><button type="button" id="refresh-button">Refresh</button></div>
       </header>
 
@@ -87,7 +87,7 @@
         <div class="section-intro"><div><p class="card-label">SQLITE</p><h2>Database browser</h2><p class="muted">Read-only viewer. No raw SQL and no row editing from this page.</p></div></div>
         <div class="database-layout">
           <aside class="panel db-sidebar">
-            <div class="panel-head"><div><p class="card-label">DATABASE</p><h2>Tables</h2></div><button id="db-refresh-tables" type="button">↻</button></div>
+            <div class="panel-head"><div><p class="card-label">DATABASE</p><h2>Tables</h2></div><button id="db-refresh-tables" type="button" aria-label="Datenbanktabellen aktualisieren" title="Datenbanktabellen aktualisieren">↻</button></div>
             <div class="db-meta"><div><span>Path</span><code id="db-path">—</code></div><div><span>Size</span><strong id="db-size">—</strong></div><div><span>Journal</span><strong id="db-journal">—</strong></div></div>
             <div id="db-table-list" class="db-table-list"><p class="muted">Open this page to load tables.</p></div>
           </aside>
