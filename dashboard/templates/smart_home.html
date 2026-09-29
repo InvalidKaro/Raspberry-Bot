@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#07090d">
+  <title>Smart Home · HomePi</title>
+  <link rel="stylesheet" href="/static/homepi_shell.css">
+  <link rel="stylesheet" href="/static/smart_home.css">
+  <script src="/static/homepi_shell.js" defer></script>
+  <script src="/static/smart_home.js" defer></script>
+</head>
+<body data-homepi-page="smart-home">
+  <main class="sh-shell" id="hp-main">
+    <header class="sh-hero">
+      <div>
+        <p class="sh-kicker">HOMEPI • SMART HOME</p>
+        <h1>Bot-powered home control</h1>
+        <p>Govee LAN/BLE control runs inside Raspberry-Bot, while this dashboard acts as the authenticated control surface.</p>
+      </div>
+      <div class="sh-hero-actions">
+        <span class="sh-state" id="bridge-state" data-state="checking"><i></i><span>Bot bridge checking</span></span>
+        <button class="sh-primary" id="scan-devices" type="button">Scan devices</button>
+      </div>
+    </header>
+
+    <section class="sh-status-rail" aria-label="Smart Home summary">
+      <article><span>CONTROLLABLE</span><strong id="summary-devices">—</strong><small>LAN + supported BLE</small></article>
+      <article><span>CLIMATE</span><strong id="summary-climate">—</strong><small id="summary-climate-detail">H5075 sensor</small></article>
+      <article><span>AUTOMATIONS</span><strong id="summary-schedules">—</strong><small>Scheduled scenes</small></article>
+      <article><span>DISCORD ALERTS</span><strong id="summary-alerts">—</strong><small id="summary-alert-detail">Climate thresholds</small></article>
+    </section>
+
+    <section class="sh-scene-strip">
+      <div>
+        <p class="sh-label">WHOLE HOME</p>
+        <h2>Scenes</h2>
+      </div>
+      <div class="scene-actions">
+        <button type="button" data-scene="on"><span class="scene-icon">☀</span><span><strong>All on</strong><small>Power every controllable light</small></span></button>
+        <button type="button" data-scene="night"><span class="scene-icon">◐</span><span><strong>Night</strong><small>Warm · 12%</small></span></button>
+        <button type="button" data-scene="gaming"><span class="scene-icon">◆</span><span><strong>Gaming</strong><small>Purple · 45%</small></span></button>
+        <button class="scene-danger" type="button" data-scene="off"><span class="scene-icon">○</span><span><strong>All off</strong><small>Power down lights</small></span></button>
+      </div>
+    </section>
+
+    <div class="sh-grid">
+      <section class="sh-panel devices-panel">
+        <div class="sh-panel-head">
+          <div><p class="sh-label">BOT DEVICE REGISTRY</p><h2>Devices</h2></div>
+          <div class="sh-head-actions">
+            <span class="sh-badge" id="discovery-detail">Cached state</span>
+            <button id="refresh-snapshot" type="button">Refresh state</button>
+          </div>
+        </div>
+        <div id="device-grid" class="device-grid">
+          <div class="sh-empty">Waiting for Raspberry-Bot device state…</div>
+        </div>
+      </section>
+
+      <section class="sh-panel climate-panel">
+        <div class="sh-panel-head">
+          <div><p class="sh-label">H5075 • LOCAL HISTORY</p><h2>Room climate</h2></div>
+          <div class="sh-head-actions">
+            <select id="climate-period" aria-label="Climate history period">
+              <option value="6">6 hours</option>
+              <option value="24" selected>24 hours</option>
+              <option value="168">7 days</option>
+              <option value="720">30 days</option>
+            </select>
+            <button id="climate-refresh" type="button">Live refresh</button>
+          </div>
+        </div>
+        <div class="climate-now">
+          <div><span>TEMPERATURE</span><strong id="climate-temp">—</strong><small id="climate-temp-range">No history</small></div>
+          <div><span>HUMIDITY</span><strong id="climate-humidity">—</strong><small id="climate-humidity-range">No history</small></div>
+          <div><span>BATTERY</span><strong id="climate-battery">—</strong><small id="climate-sensor-name">Sensor</small></div>
+        </div>
+        <div class="climate-chart">
+          <svg viewBox="0 0 800 230" preserveAspectRatio="none" role="img" aria-label="Temperature and humidity history">
+            <g class="chart-grid">
+              <line x1="0" y1="46" x2="800" y2="46"></line>
+              <line x1="0" y1="92" x2="800" y2="92"></line>
+              <line x1="0" y1="138" x2="800" y2="138"></line>
+              <line x1="0" y1="184" x2="800" y2="184"></line>
+            </g>
+            <polyline id="temperature-line" class="temperature-line"></polyline>
+            <polyline id="humidity-line" class="humidity-line"></polyline>
+          </svg>
+          <div class="chart-legend">
+            <span><i class="temp"></i>Temperature</span>
+            <span><i class="humidity"></i>Humidity</span>
+            <span id="climate-samples">0 samples</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="sh-panel alerts-panel">
+        <div class="sh-panel-head">
+          <div><p class="sh-label">BOT → DISCORD</p><h2>Climate alerts</h2></div>
+          <label class="sh-switch"><input id="alert-enabled" type="checkbox"><span></span></label>
+        </div>
+        <p class="sh-muted">The bot evaluates the H5075 every five minutes and posts a warning to Discord when a threshold is exceeded. A recovery message is sent once values return to normal.</p>
+        <div class="alert-fields">
+          <label><span>Discord channel</span><select id="alert-channel"><option value="">Select channel…</option></select></label>
+          <label><span>Cooldown</span><div class="unit-input"><input id="alert-cooldown" type="number" min="5" max="1440" value="60"><b>min</b></div></label>
+          <label><span>Minimum temperature</span><div class="unit-input"><input id="alert-temp-min" type="number" step="0.5" value="17"><b>°C</b></div></label>
+          <label><span>Maximum temperature</span><div class="unit-input"><input id="alert-temp-max" type="number" step="0.5" value="27"><b>°C</b></div></label>
+          <label><span>Minimum humidity</span><div class="unit-input"><input id="alert-humidity-min" type="number" step="1" value="35"><b>%</b></div></label>
+          <label><span>Maximum humidity</span><div class="unit-input"><input id="alert-humidity-max" type="number" step="1" value="65"><b>%</b></div></label>
+        </div>
+        <div class="sh-footer-row">
+          <span id="alert-last-state" class="sh-muted">No alert state loaded.</span>
+          <button class="sh-primary" id="save-alerts" type="button">Save Discord alerts</button>
+        </div>
+      </section>
+
+      <section class="sh-panel schedule-panel">
+        <div class="sh-panel-head">
+          <div><p class="sh-label">BOT AUTOMATION</p><h2>Scheduled scenes</h2></div>
+          <button id="new-schedule" type="button">New schedule</button>
+        </div>
+
+        <form id="schedule-form" class="schedule-form">
+          <input id="schedule-id" type="hidden">
+          <label class="wide"><span>Name</span><input id="schedule-name" type="text" maxlength="80" value="Night routine" required></label>
+          <label><span>Target</span><select id="schedule-target"><option value="all">All devices</option></select></label>
+          <label><span>Scene</span><select id="schedule-preset"><option value="off">Off</option><option value="on">On</option><option value="night">Night</option><option value="gaming">Gaming</option></select></label>
+          <label><span>Time</span><input id="schedule-time" type="time" value="23:30" required></label>
+          <label><span>Discord notification</span><select id="schedule-channel"><option value="">None</option></select></label>
+          <label class="schedule-enabled"><span>Enabled</span><input id="schedule-enabled" type="checkbox" checked></label>
+          <fieldset class="weekday-field wide">
+            <legend>Weekdays</legend>
+            <div>
+              <label><input type="checkbox" name="weekday" value="0" checked><span>Mon</span></label>
+              <label><input type="checkbox" name="weekday" value="1" checked><span>Tue</span></label>
+              <label><input type="checkbox" name="weekday" value="2" checked><span>Wed</span></label>
+              <label><input type="checkbox" name="weekday" value="3" checked><span>Thu</span></label>
+              <label><input type="checkbox" name="weekday" value="4" checked><span>Fri</span></label>
+              <label><input type="checkbox" name="weekday" value="5" checked><span>Sat</span></label>
+              <label><input type="checkbox" name="weekday" value="6" checked><span>Sun</span></label>
+            </div>
+          </fieldset>
+          <div class="wide form-actions">
+            <button id="cancel-schedule" type="button">Reset</button>
+            <button class="sh-primary" type="submit">Save schedule</button>
+          </div>
+        </form>
+
+        <div id="schedule-list" class="schedule-list">
+          <div class="sh-empty">Loading schedules…</div>
+        </div>
+      </section>
+
+      <section class="sh-panel activity-panel">
+        <div class="sh-panel-head">
+          <div><p class="sh-label">BOT COMMAND QUEUE</p><h2>Recent actions</h2></div>
+          <button id="refresh-activity" type="button">Refresh</button>
+        </div>
+        <div id="smart-activity" class="smart-activity">
+          <div class="sh-empty">Loading smart-home bot actions…</div>
+        </div>
+      </section>
+    </div>
+
+    <div class="sh-toast" id="sh-toast" role="status" aria-live="polite"></div>
+  </main>
+</body>
+</html>
