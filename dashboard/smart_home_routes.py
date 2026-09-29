@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -425,7 +426,50 @@ async def api_smart_home_recent_commands(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "commands": await asyncio.to_thread(read)})
 
 
+def _ensure_schema(config: Any) -> None:
+    con = _connect(config)
+    try:
+        con.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS smart_home_alert_config (
+                guild_id INTEGER PRIMARY KEY,
+                channel_id INTEGER,
+                enabled INTEGER NOT NULL DEFAULT 0,
+                temp_min REAL,
+                temp_max REAL,
+                humidity_min REAL,
+                humidity_max REAL,
+                cooldown_minutes INTEGER NOT NULL DEFAULT 60,
+                last_fired_at TEXT,
+                last_reason TEXT,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS smart_home_schedules (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                device_selector TEXT NOT NULL DEFAULT 'all',
+                preset TEXT NOT NULL,
+                run_time TEXT NOT NULL,
+                weekdays TEXT NOT NULL DEFAULT '0,1,2,3,4,5,6',
+                notify_channel_id INTEGER,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                last_run_key TEXT,
+                last_result TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_smart_home_schedules_due
+            ON smart_home_schedules(guild_id,enabled,run_time);
+            """
+        )
+        con.commit()
+    finally:
+        con.close()
+
+
 def register_smart_home_routes(app: web.Application) -> None:
+    _ensure_schema(app["config"])
     app.router.add_get("/smart-home", smart_home_page)
     app.router.add_post("/api/smart-home/command", api_smart_home_command)
     app.router.add_get("/api/smart-home/command/{id}", api_smart_home_command_status)
