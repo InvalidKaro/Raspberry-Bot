@@ -58,6 +58,19 @@
   `;
   body.insertBefore(bar,body.children[1]||null);
 
+  const mobileDock=document.createElement("nav");
+  mobileDock.className="hp-mobile-dock";
+  mobileDock.setAttribute("aria-label","HomePi mobile navigation");
+  const dockPages=[
+    {path:"/",label:"Home",icon:"⌂"},
+    {path:"/ops",label:"Ops",icon:"◫"},
+    {path:"/control",label:"Control",icon:"◉"},
+    {path:"/workspace",label:"Workspace",icon:"⌘"},
+    {path:"/media",label:"Media",icon:"▶"}
+  ];
+  mobileDock.innerHTML=dockPages.map(page=>`<a href="${page.path}" ${exact(page)?'aria-current="page"':""}><span aria-hidden="true">${page.icon}</span><small>${page.label}</small></a>`).join("");
+  body.append(mobileDock);
+
   const backdrop=document.createElement("div");
   backdrop.className="hp-command-backdrop";
   backdrop.id="hp-command";
