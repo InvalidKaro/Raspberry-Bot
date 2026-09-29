@@ -3,24 +3,22 @@
   --cc-panel:rgba(14,20,29,.82);
   --cc-panel-strong:rgba(17,24,35,.94);
   --cc-line:rgba(130,154,188,.16);
-  --cc-line-strong:rgba(125,105,255,.34);
-  --cc-accent:#8d7bff;
-  --cc-cyan:#57d6ff;
+  --cc-line-strong:rgba(105,167,255,.34);
+  --cc-accent:#69a7ff;
+  --cc-cyan:#69a7ff;
   --cc-text:#f5f7fb;
   --cc-muted:#92a0b5;
   --cc-glow:0 24px 70px rgba(0,0,0,.38);
 }
 
 body{
-  background:
-    radial-gradient(circle at 8% -8%,rgba(116,91,255,.17),transparent 31rem),
-    radial-gradient(circle at 94% 10%,rgba(37,190,255,.10),transparent 29rem),
-    linear-gradient(180deg,#080b11 0%,#07090d 100%);
+  background:linear-gradient(180deg,#090c12 0%,#07090d 320px);
   background-attachment:fixed;
 }
 
 body::before{
   content:"";
+  display:none;
   position:fixed;
   inset:0;
   z-index:-1;
@@ -125,8 +123,8 @@ body::before{
 }
 
 .branch,.status-pill{
-  border-color:rgba(141,123,255,.25);
-  background:rgba(141,123,255,.08);
+  border-color:rgba(105,167,255,.25);
+  background:rgba(105,167,255,.08);
   color:#cec7ff;
 }
 
@@ -146,12 +144,12 @@ body::before{
 
 .button-row .button:hover,.button-row button:hover,.topbar .button-row a:hover{
   transform:translateY(-1px);
-  border-color:rgba(141,123,255,.48);
+  border-color:rgba(105,167,255,.48);
   background:rgba(35,31,61,.92);
 }
 
 .button-row .primary,.topbar .primary{
-  border-color:rgba(141,123,255,.72);
+  border-color:rgba(105,167,255,.72);
   background:linear-gradient(135deg,#7867ee,#6654d8);
   box-shadow:0 8px 24px rgba(104,83,220,.2);
 }
