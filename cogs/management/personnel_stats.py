@@ -11,6 +11,7 @@ from discord.ext import commands
 from helpers.embeds import EmbedFactory
 from services.personnel_export import render_personnel_chart, render_personnel_png
 from services.personnel_v2 import PersonnelService
+from services.personnel_multi import parse_multi_entries
 
 
 class Personnel(
@@ -253,6 +254,55 @@ class Personnel(
                 title="Perso-Daten eingetragen",
                 description=f"**{row['display_name']}** · E **{einweisungen}** · BWG **{bwg}** · `{d}`",
             ),
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="multi", description="Mehrere Mitarbeiter mit individuellen BWG/EW-Werten eintragen.")
+    @app_commands.default_permissions(manage_messages=True)
+    async def multi(self, interaction: discord.Interaction, eintraege: str):
+        """Example: Max Mustermann BWG 15 EW 2 (one person per line)."""
+        try:
+            entries = parse_multi_entries(eintraege)
+        except ValueError as exc:
+            await interaction.response.send_message(f"Ungültige Eingabe: {exc}", ephemeral=True)
+            return
+        resolved = []
+        missing = []
+        for name, bwg, ew in entries:
+            row = await self.service.get_by_name(interaction.guild_id or 0, name)
+            if row is None:
+                missing.append(name)
+            else:
+                resolved.append((row, bwg, ew))
+        if missing:
+            await interaction.response.send_message(
+                "Nichts gespeichert. Unbekannte Mitarbeiter: " + ", ".join(missing),
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer(ephemeral=True)
+        saved = []
+        try:
+            for row, bwg, ew in resolved:
+                rid = await self.service.record(
+                    interaction.guild_id or 0, int(row["id"]), interaction.user.id,
+                    inductions=ew, bwg=bwg,
+                )
+                saved.append((row, bwg, ew, rid))
+        except Exception:
+            self.bot.logger.exception("Perso multi logging failed") if hasattr(self.bot, "logger") else None
+            await interaction.followup.send(
+                f"Speichern unterbrochen: {len(saved)} von {len(resolved)} Einträgen gespeichert. "
+                "Bitte Einträge prüfen, bevor du es erneut versuchst.",
+                ephemeral=True,
+            )
+            return
+        lines = [f"• {row['display_name']}: BWG {bwg} · EW {ew} (#{rid})" for row, bwg, ew, rid in saved]
+        await interaction.followup.send(
+            f"**{len(saved)} Perso-Einträge gespeichert**\\n"
+            + "\\n".join(lines)
+            + f"\\n**Gesamt:** BWG {sum(item[1] for item in saved)} · EW {sum(item[2] for item in saved)}"
+            + "\\nRookie-Zuordnung erfolgt automatisch über die Mitgliedschaft.",
             ephemeral=True,
         )
 

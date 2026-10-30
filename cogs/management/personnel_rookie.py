@@ -90,20 +90,56 @@ class RookieManagement(commands.GroupCog, group_name="rookie", group_description
             ephemeral=True,
         )
 
+    @app_commands.command(name="compare", description="Rookie-Aktivität mit der gesamten Personalabteilung vergleichen")
+    @app_commands.choices(period=[
+        app_commands.Choice(name="Woche", value="week"),
+        app_commands.Choice(name="Monat", value="month"),
+        app_commands.Choice(name="Gesamt", value="all"),
+    ])
+    @app_commands.default_permissions(manage_messages=True)
+    async def compare(self, interaction: discord.Interaction, period: app_commands.Choice[str] | None = None):
+        selected = period.value if period else "week"
+        rookie_rows, all_rows = await asyncio.gather(
+            self.rookie.statistics(period=selected, rookie_only=True),
+            self.rookie.statistics(period=selected),
+        )
+        def totals(rows):
+            return sum(int(r["bwg"]) for r in rows), sum(int(r["inductions"]) for r in rows)
+        rb, ri = totals(rookie_rows)
+        ab, ai = totals(all_rows)
+        def percent(part, total):
+            return f"{part / total * 100:.1f} %" if total else "–"
+        await interaction.response.send_message(
+            f"**Perso / Rookie Vergleich · {period.name if period else 'Woche'}**\\n"
+            f"**Rookie:** {rb} BWG · {ri} Einweisungen\\n"
+            f"**Perso gesamt (inkl. Rookie):** {ab} BWG · {ai} Einweisungen\\n"
+            f"**Rookie-Anteil:** {percent(rb, ab)} BWG · {percent(ri, ai)} Einweisungen",
+            ephemeral=True,
+        )
+
     @app_commands.command(name="db", description="Live-DB: Personaleinträge mit Filter und Seiten")
     @app_commands.default_permissions(manage_messages=True)
+    @app_commands.choices(period=[
+        app_commands.Choice(name="Woche", value="week"),
+        app_commands.Choice(name="Monat", value="month"),
+        app_commands.Choice(name="Gesamt", value="all"),
+    ])
     async def db(
         self, interaction: discord.Interaction,
         page: app_commands.Range[int, 1, 1000] = 1,
         rookie_only: bool = False,
+        period: app_commands.Choice[str] | None = None,
     ):
-        rows = await self.rookie.records(offset=(page - 1) * 15, limit=15, rookie_only=rookie_only)
+        rows = await self.rookie.records(
+            offset=(page - 1) * 15, limit=15, rookie_only=rookie_only,
+            period=period.value if period else "week",
+        )
         lines = [
             f"#{r['id']} · {r['record_date']} · {r['display_name']} · BWG {r['bwg']} · E {r['inductions']}"
             for r in rows
         ]
         await interaction.response.send_message(
-            f"Perso Live-DB · Seite {page}\n" + ("\n".join(lines)[:1800] or "Keine Einträge."),
+            f"Perso Live-DB · Seite {page} · {period.name if period else 'Woche'} · {'Nur Rookie' if rookie_only else 'Gesamt'}\n" + ("\n".join(lines)[:1800] or "Keine Einträge."),
             ephemeral=True,
         )
 
