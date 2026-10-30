@@ -92,18 +92,27 @@ class RookieManagement(commands.GroupCog, group_name="rookie", group_description
 
     @app_commands.command(name="db", description="Live-DB: Personaleinträge mit Filter und Seiten")
     @app_commands.default_permissions(manage_messages=True)
+    @app_commands.choices(period=[
+        app_commands.Choice(name="Woche", value="week"),
+        app_commands.Choice(name="Monat", value="month"),
+        app_commands.Choice(name="Gesamt", value="all"),
+    ])
     async def db(
         self, interaction: discord.Interaction,
         page: app_commands.Range[int, 1, 1000] = 1,
         rookie_only: bool = False,
+        period: app_commands.Choice[str] | None = None,
     ):
-        rows = await self.rookie.records(offset=(page - 1) * 15, limit=15, rookie_only=rookie_only)
+        rows = await self.rookie.records(
+            offset=(page - 1) * 15, limit=15, rookie_only=rookie_only,
+            period=period.value if period else "week",
+        )
         lines = [
             f"#{r['id']} · {r['record_date']} · {r['display_name']} · BWG {r['bwg']} · E {r['inductions']}"
             for r in rows
         ]
         await interaction.response.send_message(
-            f"Perso Live-DB · Seite {page}\n" + ("\n".join(lines)[:1800] or "Keine Einträge."),
+            f"Perso Live-DB · Seite {page} · {period.name if period else 'Woche'} · {'Nur Rookie' if rookie_only else 'Gesamt'}\n" + ("\n".join(lines)[:1800] or "Keine Einträge."),
             ephemeral=True,
         )
 
