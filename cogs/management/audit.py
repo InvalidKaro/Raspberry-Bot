@@ -173,7 +173,7 @@ class Phase4Extensions(commands.Cog):
     async def dev_doctor(self, interaction: discord.Interaction) -> None:
         if not await self._owner(interaction):
             return
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=False)
         checks: list[tuple[str, bool, str]] = []
         try:
             row = await self.bot.database.fetchone("PRAGMA integrity_check")
@@ -182,7 +182,7 @@ class Phase4Extensions(commands.Cog):
         except Exception as exc:
             checks.append(("SQLite", False, str(exc)))
         dbpath = Path(self.bot.database.path)
-        checks.append(("DB writable", dbpath.parent.exists() and os.access(dbpath.parent, os.W_OK), str(dbpath)))
+        checks.append(("DB writable", dbpath.parent.exists() and os.access(dbpath.parent, os.W_OK), "writable" if dbpath.parent.exists() and os.access(dbpath.parent, os.W_OK) else "not writable"))
         for name, cmd in (
             ("Pi-hole", ["systemctl", "is-active", "pihole-FTL"]),
             ("Tailscale", ["systemctl", "is-active", "tailscaled"]),
@@ -196,7 +196,7 @@ class Phase4Extensions(commands.Cog):
             except Exception as exc:
                 checks.append((name, False, str(exc)))
         e = EmbedFactory.info(title="Self Diagnostics", description="\n".join(("✅" if ok else "❌") + f" **{name}** — `{detail[:100]}`" for name, ok, detail in checks))
-        await interaction.followup.send(embed=e, ephemeral=True)
+        await interaction.edit_original_response(embed=e)
 
     async def dev_healthcheck(self, interaction: discord.Interaction) -> None:
         if not await self._owner(interaction):
