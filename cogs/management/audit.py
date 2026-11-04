@@ -217,7 +217,12 @@ class Phase4Extensions(commands.Cog):
             checks.append((name, ok, detail))
             await (progress.done if ok else progress.warn)(index, detail)
 
-        await progress.finish()
+        summary = "\n".join(
+            ("✅" if ok else "❌") + f" **{name}** — `{detail[:100]}`"
+            for name, ok, detail in checks
+        )
+        result = EmbedFactory.info(title="Self Diagnostics", description=summary)
+        await interaction.edit_original_response(embed=result, view=None)
 
     async def dev_healthcheck(self, interaction: discord.Interaction) -> None:
         if not await self._owner(interaction):
