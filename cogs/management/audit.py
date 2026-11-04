@@ -10,6 +10,7 @@ from discord.ext import commands
 
 from helpers.embeds import EmbedFactory
 from services.backups import BackupService
+from services.command_ux import CommandProgress
 
 
 class Audit(commands.GroupCog, group_name="audit", group_description="Raspberry-Bot audit trail"):
@@ -173,30 +174,50 @@ class Phase4Extensions(commands.Cog):
     async def dev_doctor(self, interaction: discord.Interaction) -> None:
         if not await self._owner(interaction):
             return
-        await interaction.response.defer(ephemeral=True)
+
+        progress = CommandProgress(
+            interaction,
+            "Self Diagnostics",
+            ["SQLite", "DB writable", "Pi-hole", "Tailscale", "Dashboard"],
+            ephemeral=False,
+        )
+        await progress.start()
         checks: list[tuple[str, bool, str]] = []
+
         try:
             row = await self.bot.database.fetchone("PRAGMA integrity_check")
             detail = str(row[0] if row else "unknown")
             checks.append(("SQLite", detail == "ok", detail))
         except Exception as exc:
-            checks.append(("SQLite", False, str(exc)))
+            checks.append(("SQLite", False, type(exc).__name__))
+        await (progress.done if checks[-1][1] else progress.warn)(0, checks[-1][2])
+
         dbpath = Path(self.bot.database.path)
-        checks.append(("DB writable", dbpath.parent.exists() and os.access(dbpath.parent, os.W_OK), str(dbpath)))
-        for name, cmd in (
+        writable = dbpath.parent.exists() and os.access(dbpath.parent, os.W_OK)
+        checks.append(("DB writable", writable, "writable" if writable else "not writable"))
+        await (progress.done if writable else progress.warn)(1, checks[-1][2])
+
+        for index, (name, cmd) in enumerate((
             ("Pi-hole", ["systemctl", "is-active", "pihole-FTL"]),
             ("Tailscale", ["systemctl", "is-active", "tailscaled"]),
             ("Dashboard", ["systemctl", "is-active", "raspberry-dashboard"]),
-        ):
+        ), start=2):
+            await progress.running(index)
             try:
-                proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                )
                 out, _ = await asyncio.wait_for(proc.communicate(), timeout=4)
-                detail = out.decode().strip()
-                checks.append((name, proc.returncode == 0, detail))
+                detail = out.decode(errors="replace").strip()[:100] or "no output"
+                ok = proc.returncode == 0
             except Exception as exc:
-                checks.append((name, False, str(exc)))
-        e = EmbedFactory.info(title="Self Diagnostics", description="\n".join(("✅" if ok else "❌") + f" **{name}** — `{detail[:100]}`" for name, ok, detail in checks))
-        await interaction.followup.send(embed=e, ephemeral=True)
+                ok, detail = False, type(exc).__name__
+            checks.append((name, ok, detail))
+            await (progress.done if ok else progress.warn)(index, detail)
+
+        await progress.finish()
 
     async def dev_healthcheck(self, interaction: discord.Interaction) -> None:
         if not await self._owner(interaction):
